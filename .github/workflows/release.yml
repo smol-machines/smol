@@ -9,8 +9,8 @@ name: SDK Release
 #     (`smolvm = { path = "../../.." }`), so CI must check the engine out next to
 #     this repo. Set repo var SMOLVM_ENGINE_REPO; the engine repo is public, so
 #     the default GITHUB_TOKEN clones it (no PAT needed).
-#  2. Publishing auth — npm uses NPM_TOKEN; PyPI uses a Trusted Publisher (OIDC,
-#     no PYPI_TOKEN) configured for this repo + release.yml on pypi.org. (macOS
+#  2. Publishing auth — both registries use OIDC Trusted Publishers (no tokens),
+#     configured for this repo + release.yml on npmjs.com and pypi.org. (macOS
 #     notarization — APPLE_* secrets — is still a TODO in node-build; ad-hoc
 #     signing works for the entitlement but a Gatekeeper-clean download needs it.)
 #  3. libkrun per platform — both bundle-native.sh scripts now take SMOLVM_LIB_DIR
@@ -248,6 +248,8 @@ jobs:
           registry-url: "https://registry.npmjs.org"
           cache: npm
           cache-dependency-path: sdk/node/package-lock.json
+      # OIDC trusted publishing needs npm ≥ 11.5.1; node 20 ships npm 10.x.
+      - run: npm install -g npm@latest
       - run: npm ci
       - run: npm run build:ts
       - uses: actions/download-artifact@v4
@@ -290,12 +292,10 @@ jobs:
           npm pack --dry-run 2>&1 | grep -E "binding.js|\.node|native/" >/dev/null
           echo "package complete: binding.js + 3 addons + native libs + rootfs present"
       - name: Publish to npm
-        # NOTE: re-add `--provenance` once this repo is PUBLIC. npm rejects
-        # provenance publishes from a private repo (422 "Unsupported … source
-        # repository visibility: private"), so it's omitted while private.
-        run: npm publish --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        # OIDC trusted publishing: no NPM_TOKEN. npm ≥11.5.1 exchanges the GitHub
+        # OIDC token (id-token: write) for a short-lived registry credential, and
+        # attaches provenance (the repo is public, so provenance is accepted).
+        run: npm publish --access public --provenance
 
   # ─── Python: abi3 wheels (one per platform, Py3.9+) ────────────────────────
   python-wheels:
