@@ -10,11 +10,10 @@ name: Release smol
 # agent speak the same wire protocol.
 #
 # ─── PREREQUISITES ────────────────────────────────────────────────────────────
-#  * repo var  SMOLVM_ENGINE_REPO     — the (private) engine repo, e.g. owner/smolvm
-#  * secret    SMOLVM_CHECKOUT_TOKEN  — token that can clone the engine AND read
-#                                       its release assets (same repo)
-#  A matching smolvm release (same tag) must already exist with the per-platform
-#  smolvm-<ver>-<platform>.tar.gz assets.
+#  * repo var  SMOLVM_ENGINE_REPO     — the engine repo, e.g. owner/smolvm
+#  The engine repo is PUBLIC, so the default GITHUB_TOKEN clones it and reads its
+#  release assets — no PAT needed. A matching smolvm release (same tag) must
+#  already exist with the per-platform smolvm-<ver>-<platform>.tar.gz assets.
 
 on:
   push:
@@ -76,7 +75,6 @@ jobs:
         with:
           repository: ${{ vars.SMOLVM_ENGINE_REPO }}
           ref: ${{ env.ENGINE_VERSION }}
-          token: ${{ secrets.SMOLVM_CHECKOUT_TOKEN }}
           path: __engine__
       - name: Repoint smol path deps at the engine checkout
         shell: bash
@@ -106,13 +104,12 @@ jobs:
         with:
           tool: cargo-zigbuild
 
-      # Download the engine release assets in a SEPARATE step that holds the
-      # private-repo token, so it is NOT exposed to the `cargo build` environment
-      # (and thus not to any build.rs / proc-macro in the dependency tree).
+      # Download the engine release assets. The engine repo is public, so the
+      # default GITHUB_TOKEN authenticates `gh release download`.
       - name: Download engine runtime assets
         shell: bash
         env:
-          GH_TOKEN: ${{ secrets.SMOLVM_CHECKOUT_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           ENGINE_REPO: ${{ vars.SMOLVM_ENGINE_REPO }}
         run: |
           mkdir -p engine-asset

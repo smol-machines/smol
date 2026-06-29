@@ -7,7 +7,8 @@ name: SDK Release
 # ─── PREREQUISITES to wire before a real publish ───────────────────────────────
 #  1. Engine source — the SDK crates depend on the smolvm engine by relative path
 #     (`smolvm = { path = "../../.." }`), so CI must check the engine out next to
-#     this repo. Set repo var SMOLVM_ENGINE_REPO + secret SMOLVM_CHECKOUT_TOKEN.
+#     this repo. Set repo var SMOLVM_ENGINE_REPO; the engine repo is public, so
+#     the default GITHUB_TOKEN clones it (no PAT needed).
 #  2. Secrets — NPM_TOKEN, PYPI_TOKEN. (macOS notarization — APPLE_* secrets — is
 #     still a TODO in node-build; ad-hoc signing works for the entitlement but a
 #     Gatekeeper-clean download needs notarization.)
@@ -73,7 +74,6 @@ jobs:
         with:
           repository: ${{ vars.SMOLVM_ENGINE_REPO }}
           ref: ${{ env.ENGINE_VERSION }}
-          token: ${{ secrets.SMOLVM_CHECKOUT_TOKEN }}
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
@@ -101,7 +101,6 @@ jobs:
         with:
           repository: ${{ vars.SMOLVM_ENGINE_REPO }}
           ref: ${{ env.ENGINE_VERSION }}
-          token: ${{ secrets.SMOLVM_CHECKOUT_TOKEN }}
       - name: Download agent binary
         uses: actions/download-artifact@v4
         with:
@@ -148,7 +147,6 @@ jobs:
         with:
           repository: ${{ vars.SMOLVM_ENGINE_REPO }}
           ref: ${{ env.ENGINE_VERSION }}
-          token: ${{ secrets.SMOLVM_CHECKOUT_TOKEN }}
           path: __engine__
           lfs: true
       - name: Repoint SDK path deps at the engine checkout
@@ -323,7 +321,6 @@ jobs:
         with:
           repository: ${{ vars.SMOLVM_ENGINE_REPO }}
           ref: ${{ env.ENGINE_VERSION }}
-          token: ${{ secrets.SMOLVM_CHECKOUT_TOKEN }}
           path: __engine__
           lfs: true
       - name: Repoint SDK path deps at the engine checkout

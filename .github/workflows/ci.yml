@@ -9,27 +9,16 @@ on:
 env:
   CARGO_TERM_COLOR: always
 
-# IMPORTANT — cross-repo coupling (this is a PUBLIC repo, closed engine core):
-# The `smol` CLI links the engine via a path dependency (`smolvm = { path = ".." }`),
-# so the `test` job below checks out the (private) `smol-machines/smolvm` engine
-# next to this repo and builds from there. Consequences for a public repo:
-#   * The engine checkout needs `SMOLVM_CHECKOUT_TOKEN` — a FINE-GRAINED,
-#     READ-ONLY, contents-scoped, short-expiry PAT for the engine repo only.
-#   * GitHub withholds repo secrets from FORK pull requests, so this job would
-#     fail for external contributors. It is therefore GATED to run only on push
-#     and on PRs from branches IN THIS REPO (not forks). External PRs still get
-#     full engine-free signal from the separate `SDK CI` workflow (TS typecheck +
-#     Python tests) and the `audit` job below.
-# Long-term, switching the engine to a published/versioned dependency would let
-# this build standalone.
+# Cross-repo coupling: the `smol` CLI links the engine via a path dependency
+# (`smolvm = { path = ".." }`), so the `test` job below checks out the
+# `smol-machines/smolvm` engine next to this repo and builds from there. The
+# engine is a PUBLIC repo, so the default `GITHUB_TOKEN` can clone it — no PAT
+# required, and fork PRs build the same as same-repo PRs.
 
 jobs:
   test:
     name: Clippy & Test
     runs-on: ubuntu-latest
-    # Engine-dependent: skip on fork PRs (no access to the private engine / its
-    # token). Runs on push to main and on same-repo PRs.
-    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
     steps:
       - name: Checkout smolvm monorepo (parent)
         uses: actions/checkout@v4
@@ -37,7 +26,6 @@ jobs:
           repository: smol-machines/smolvm
           path: monorepo
           lfs: false
-          token: ${{ secrets.SMOLVM_CHECKOUT_TOKEN }}
 
       - name: Checkout this repo into the monorepo
         uses: actions/checkout@v4
