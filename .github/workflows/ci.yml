@@ -1,0 +1,135 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  CARGO_TERM_COLOR: always
+
+# IMPORTANT — cross-repo coupling (this is a PUBLIC repo, closed engine core):
+# The `smol` CLI links the engine via a path dependency (`smolvm = { path = ".." }`),
+# so the `test` job below checks out the (private) `smol-machines/smolvm` engine
+# next to this repo and builds from there. Consequences for a public repo:
+#   * The engine checkout needs `SMOLVM_CHECKOUT_TOKEN` — a FINE-GRAINED,
+#     READ-ONLY, contents-scoped, short-expiry PAT for the engine repo only.
+#   * GitHub withholds repo secrets from FORK pull requests, so this job would
+#     fail for external contributors. It is therefore GATED to run only on push
+#     and on PRs from branches IN THIS REPO (not forks). External PRs still get
+#     full engine-free signal from the separate `SDK CI` workflow (TS typecheck +
+#     Python tests) and the `audit` job below.
+# Long-term, switching the engine to a published/versioned dependency would let
+# this build standalone.
+
+jobs:
+  test:
+    name: Clippy & Test
+    runs-on: ubuntu-latest
+    # Engine-dependent: skip on fork PRs (no access to the private engine / its
+    # token). Runs on push to main and on same-repo PRs.
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
+    steps:
+      - name: Checkout smolvm monorepo (parent)
+        uses: actions/checkout@v4
+        with:
+          repository: smol-machines/smolvm
+          path: monorepo
+          lfs: false
+          token: ${{ secrets.SMOLVM_CHECKOUT_TOKEN }}
+
+      - name: Checkout this repo into the monorepo
+        uses: actions/checkout@v4
+        with:
+          path: monorepo/smol
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            monorepo/target/
+          key: smol-cargo-${{ hashFiles('monorepo/smol/Cargo.lock') }}
+          restore-keys: smol-cargo-
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential libssl-dev pkg-config
+
+      # libkrun is not available on Ubuntu; build a linking stub so the crate
+      # compiles and unit tests run. (Full VM behavior needs macOS/KVM + real
+      # libkrun and is exercised locally, not in CI.) Mirrors the smolvm
+      # monorepo's own Linux CI stub.
+      - name: Create libkrun stub for linking
+        run: |
+          cat > /tmp/libkrun_stub.c << 'EOF'
+          int krun_create_ctx() { return -1; }
+          int krun_free_ctx(int ctx) { return 0; }
+          int krun_set_vm_config(int ctx, int cpus, int mem) { return -1; }
+          int krun_set_root(int ctx, const char* path) { return -1; }
+          int krun_set_workdir(int ctx, const char* path) { return -1; }
+          int krun_set_exec(int ctx, const char* path, char** argv, char** env) { return -1; }
+          int krun_start_enter(int ctx) { return -1; }
+          int krun_set_log_level(int level) { return 0; }
+          int krun_add_disk2(int ctx, const char* id, const char* path, int flags, int ro) { return -1; }
+          int krun_set_port_map(int ctx, char** map) { return -1; }
+          int krun_add_vsock_port(int ctx, int port, const char* path) { return -1; }
+          int krun_add_vsock_port2(int ctx, int port, const char* path, int flags) { return -1; }
+          int krun_disable_implicit_vsock(int ctx) { return -1; }
+          int krun_add_vsock(int ctx, int tsi_features) { return -1; }
+          int krun_set_passt_fd(int ctx, int fd) { return -1; }
+          int krun_add_virtiofs(int ctx, const char* tag, const char* path) { return -1; }
+          int krun_add_virtiofs2(int ctx, const char* tag, const char* path, int flags) { return -1; }
+          int krun_set_console_output(int ctx, const char* path) { return -1; }
+          int krun_add_virtio_console_default(int ctx) { return -1; }
+          EOF
+          gcc -shared -fPIC -o /tmp/libkrun.so /tmp/libkrun_stub.c
+          sudo cp /tmp/libkrun.so /usr/local/lib/
+          sudo ln -sf /usr/local/lib/libkrun.so /usr/local/lib/libkrun.1.dylib
+          sudo ldconfig
+
+      - name: Clippy (warnings are errors)
+        working-directory: monorepo/smol
+        run: cargo clippy --bin smol --all-targets -- -D warnings
+        env:
+          LIBRARY_PATH: /usr/local/lib
+          # smolvm 0.9.0's build.rs hard-requires a bundled libkrun: with no
+          # LIBKRUN_* override it looks for lib/linux-<arch>/libkrun.so and errors.
+          # Point it at the linking stub above so it links that and returns early.
+          LIBKRUN_BUNDLE: /usr/local/lib
+
+      - name: Test
+        working-directory: monorepo/smol
+        run: cargo test --bin smol
+        env:
+          LIBRARY_PATH: /usr/local/lib
+          LIBKRUN_BUNDLE: /usr/local/lib
+          LD_LIBRARY_PATH: /usr/local/lib
+
+  audit:
+    name: Cargo Audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: taiki-e/install-action@cargo-audit
+      # Audit this crate's own lockfile. (--no-fetch keeps it offline-stable.)
+      - run: cargo audit
+
+  versions:
+    name: Version consistency
+    runs-on: ubuntu-latest
+    # Pure manifest check — no engine or secrets, so it runs on every push/PR
+    # (including forks) and gives external contributors signal too.
+    steps:
+      - uses: actions/checkout@v4
+      - name: Assert CLI + SDK manifests share one version
+        run: bash scripts/check-versions.sh

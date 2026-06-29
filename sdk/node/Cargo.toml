@@ -1,0 +1,26 @@
+# Native core of the `smol` npm package — embeds the smolvm engine via NAPI.
+# This is its own workspace; it path-depends on the sibling `smolvm` repo
+# (checked out beside `smol/`), mirroring how smol-cli depends on `..`.
+[workspace]
+
+[package]
+name = "smol-node"
+version = "1.3.2"
+edition = "2021"
+description = "Native NAPI core for the smol SDK — embed microVMs directly in Node.js"
+license = "Apache-2.0"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+# The smolvm engine lives in the parent repo, three levels up.
+smolvm = { path = "../../../" }
+smolvm-protocol = { path = "../../../crates/smolvm-protocol" }
+napi = { version = "2", features = ["async", "napi6", "tokio_rt"] }
+napi-derive = "2"
+tokio = { version = "1", features = ["rt", "sync"] }
+
+[build-dependencies]
+napi-build = "2"
+pkg-config = "0.3"

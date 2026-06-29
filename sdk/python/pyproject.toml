@@ -1,0 +1,56 @@
+[build-system]
+requires = ["maturin>=1.5,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "smolmachines"
+version = "1.3.2"
+description = "Embed isolated microVM sandboxes directly in your Python code — local (embedded) or smolfleet cloud."
+readme = "README.md"
+license = { text = "Apache-2.0" }
+requires-python = ">=3.9"
+authors = [{ name = "smol-machines" }]
+keywords = ["sandbox", "microvm", "isolation", "smolvm", "smolfleet"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Operating System :: MacOS",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Rust",
+    "Topic :: Software Development :: Libraries",
+    "Topic :: System :: Emulators",
+]
+# The cloud transport uses only the stdlib (urllib); zero runtime deps.
+dependencies = []
+
+[project.urls]
+Homepage = "https://github.com/smol-machines/smol"
+Repository = "https://github.com/smol-machines/smol"
+Issues = "https://github.com/smol-machines/smol/issues"
+
+[project.optional-dependencies]
+dev = ["maturin>=1.5,<2.0", "pytest>=7"]
+
+[tool.maturin]
+# Mixed Rust/Python layout: pure-Python package lives in python/smol, the native
+# extension compiles to smol._native.
+python-source = "python"
+module-name = "smol._native"
+features = ["pyo3/extension-module"]
+# Ship the native engine libs (staged into python/smol by scripts/bundle-native.sh)
+# inside the wheel, next to _native, so the @loader_path/$ORIGIN rpath finds them.
+include = [
+    "python/smol/libkrun*.dylib",
+    "python/smol/libkrunfw*.dylib",
+    "python/smol/libkrun*.so*",
+    "python/smol/libkrunfw*.so*",
+    "python/smol/smol-vmm",
+    "python/smol/agent-rootfs.tar",
+]

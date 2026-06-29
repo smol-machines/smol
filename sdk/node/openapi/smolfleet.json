@@ -1,0 +1,2618 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "smolfleet API",
+    "description": "Control plane for smolvm — deploy and run machines across a cluster.",
+    "license": {
+      "name": "Apache-2.0"
+    },
+    "version": "0.1.0"
+  },
+  "servers": [
+    {
+      "url": "https://api.smolmachines.com",
+      "description": "Hosted smolfleet"
+    }
+  ],
+  "paths": {
+    "/health": {
+      "get": {
+        "tags": [
+          "health"
+        ],
+        "operationId": "health_check",
+        "responses": {
+          "200": {
+            "description": "Cluster health",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClusterHealth"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/metrics": {
+      "get": {
+        "tags": [
+          "health"
+        ],
+        "operationId": "metrics",
+        "responses": {
+          "200": {
+            "description": "Prometheus metrics (text)"
+          }
+        }
+      }
+    },
+    "/v1/apikeys": {
+      "get": {
+        "tags": [
+          "apikeys"
+        ],
+        "operationId": "apikey_list",
+        "responses": {
+          "200": {
+            "description": "List API keys",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ApiKeyInfo"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "apikeys"
+        ],
+        "operationId": "apikey_create",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateApiKeyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "API key created (plaintext shown once)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiKeyCreated"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/apikeys/{id}": {
+      "delete": {
+        "tags": [
+          "apikeys"
+        ],
+        "operationId": "apikey_delete",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "API key id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "API key revoked"
+          }
+        }
+      }
+    },
+    "/v1/apps": {
+      "get": {
+        "tags": [
+          "apps"
+        ],
+        "operationId": "app_list",
+        "responses": {
+          "200": {
+            "description": "List apps",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/AppInfo"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "apps"
+        ],
+        "operationId": "app_deploy",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeployRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "App deployed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppInfo"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/apps/{name}": {
+      "get": {
+        "tags": [
+          "apps"
+        ],
+        "operationId": "app_get",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "description": "App name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "App",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppInfo"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "apps"
+        ],
+        "operationId": "app_destroy",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "description": "App name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Destroyed"
+          }
+        }
+      }
+    },
+    "/v1/apps/{name}/logs": {
+      "get": {
+        "tags": [
+          "apps"
+        ],
+        "operationId": "app_logs",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "description": "App name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Streamed log lines (text/event-stream)"
+          }
+        }
+      }
+    },
+    "/v1/apps/{name}/promote": {
+      "post": {
+        "tags": [
+          "apps"
+        ],
+        "operationId": "app_promote",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "description": "App name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Canary promoted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppInfo"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/apps/{name}/redeploy": {
+      "post": {
+        "tags": [
+          "apps"
+        ],
+        "operationId": "app_redeploy",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "description": "App name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Redeployed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppInfo"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/apps/{name}/scale": {
+      "post": {
+        "tags": [
+          "apps"
+        ],
+        "operationId": "app_scale",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "description": "App name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ScaleRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Scaled",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppInfo"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/machines": {
+      "get": {
+        "tags": [
+          "machines"
+        ],
+        "operationId": "machine_list",
+        "responses": {
+          "200": {
+            "description": "List machines",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/MachineInfo"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "machines"
+        ],
+        "operationId": "machine_create",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateMachineRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Machine created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MachineInfo"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Name already exists"
+          },
+          "422": {
+            "description": "Quota exceeded"
+          }
+        }
+      }
+    },
+    "/v1/machines/{id}": {
+      "get": {
+        "tags": [
+          "machines"
+        ],
+        "operationId": "machine_get",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Machine id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Machine",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MachineInfo"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "machines"
+        ],
+        "operationId": "machine_delete",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Machine id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted"
+          }
+        }
+      }
+    },
+    "/v1/machines/{id}/code": {
+      "post": {
+        "tags": [
+          "machines"
+        ],
+        "operationId": "machine_code",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Machine id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MachineCodeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Code result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MachineExecResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/machines/{id}/events": {
+      "get": {
+        "tags": [
+          "machines"
+        ],
+        "operationId": "machine_events",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Machine id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Machine events",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/EventInfo"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/machines/{id}/exec": {
+      "post": {
+        "tags": [
+          "machines"
+        ],
+        "operationId": "machine_exec",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Machine id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MachineCommandRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Command result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MachineExecResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/machines/{id}/files": {
+      "get": {
+        "tags": [
+          "machines"
+        ],
+        "operationId": "machine_file_download",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Machine id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "File bytes",
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "integer",
+                    "format": "int32",
+                    "minimum": 0
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "machines"
+        ],
+        "operationId": "machine_file_upload",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Machine id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/octet-stream": {
+              "schema": {
+                "type": "array",
+                "items": {
+                  "type": "integer",
+                  "format": "int32",
+                  "minimum": 0
+                }
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "File uploaded"
+          }
+        }
+      }
+    },
+    "/v1/machines/{id}/sessions": {
+      "get": {
+        "tags": [
+          "machines"
+        ],
+        "operationId": "machine_session_list",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Machine id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List sessions",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/MachineSessionInfo"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "machines"
+        ],
+        "operationId": "machine_session_create",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Machine id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateMachineSessionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Session created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MachineSessionInfo"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/machines/{id}/sessions/{session_id}": {
+      "delete": {
+        "tags": [
+          "machines"
+        ],
+        "operationId": "machine_session_delete",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Machine id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "session_id",
+            "in": "path",
+            "description": "Session id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Session deleted"
+          }
+        }
+      }
+    },
+    "/v1/machines/{id}/sessions/{session_id}/exec": {
+      "post": {
+        "tags": [
+          "machines"
+        ],
+        "operationId": "machine_session_exec",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Machine id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "session_id",
+            "in": "path",
+            "description": "Session id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MachineCommandRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Command result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MachineExecResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/machines/{id}/start": {
+      "post": {
+        "tags": [
+          "machines"
+        ],
+        "operationId": "machine_start",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Machine id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Started",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MachineInfo"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/machines/{id}/stop": {
+      "post": {
+        "tags": [
+          "machines"
+        ],
+        "operationId": "machine_stop",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Machine id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Stopped",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MachineInfo"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/nodes": {
+      "get": {
+        "tags": [
+          "nodes"
+        ],
+        "operationId": "node_list",
+        "responses": {
+          "200": {
+            "description": "List nodes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/NodeInfo"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/nodes/register": {
+      "post": {
+        "tags": [
+          "nodes"
+        ],
+        "operationId": "node_register",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NodeInfo"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Node registered",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NodeInfo"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/nodes/{id}/credential": {
+      "delete": {
+        "tags": [
+          "nodes"
+        ],
+        "operationId": "node_credential_revoke",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Node id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Credential revoked"
+          }
+        }
+      }
+    },
+    "/v1/nodes/{id}/drain": {
+      "post": {
+        "tags": [
+          "nodes"
+        ],
+        "operationId": "node_drain",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Node id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Node draining"
+          }
+        }
+      }
+    },
+    "/v1/nodes/{id}/heartbeat": {
+      "post": {
+        "tags": [
+          "nodes"
+        ],
+        "operationId": "node_heartbeat",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Node id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Heartbeat accepted"
+          }
+        }
+      }
+    },
+    "/v1/operations": {
+      "get": {
+        "tags": [
+          "operations"
+        ],
+        "operationId": "operation_list",
+        "responses": {
+          "200": {
+            "description": "List operations"
+          }
+        }
+      }
+    },
+    "/v1/operations/{id}": {
+      "get": {
+        "tags": [
+          "operations"
+        ],
+        "operationId": "operation_get",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Operation id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Operation"
+          }
+        }
+      }
+    },
+    "/v1/pools": {
+      "get": {
+        "tags": [
+          "pools"
+        ],
+        "operationId": "pool_list",
+        "responses": {
+          "200": {
+            "description": "List pools",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/PoolInfo"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "pools"
+        ],
+        "operationId": "pool_create",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PoolConfig"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Pool created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PoolInfo"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/pools/{id}/claim": {
+      "post": {
+        "tags": [
+          "pools"
+        ],
+        "operationId": "pool_claim",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Pool id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Claimed machine",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MachineInfo"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/tokens": {
+      "get": {
+        "tags": [
+          "tokens"
+        ],
+        "operationId": "token_list",
+        "responses": {
+          "200": {
+            "description": "List join tokens"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "tokens"
+        ],
+        "operationId": "token_create",
+        "responses": {
+          "200": {
+            "description": "Join token created"
+          }
+        }
+      }
+    },
+    "/v1/tokens/{prefix}": {
+      "delete": {
+        "tags": [
+          "tokens"
+        ],
+        "operationId": "token_delete",
+        "parameters": [
+          {
+            "name": "prefix",
+            "in": "path",
+            "description": "Token prefix",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Token deleted"
+          }
+        }
+      }
+    },
+    "/v1/usage": {
+      "get": {
+        "tags": [
+          "usage"
+        ],
+        "operationId": "usage_query",
+        "responses": {
+          "200": {
+            "description": "Usage report",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UsageResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/volumes": {
+      "get": {
+        "tags": [
+          "volumes"
+        ],
+        "operationId": "volume_list",
+        "responses": {
+          "200": {
+            "description": "List volumes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/VolumeInfo"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "volumes"
+        ],
+        "operationId": "volume_create",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateVolumeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Volume created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VolumeInfo"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/volumes/{id}": {
+      "get": {
+        "tags": [
+          "volumes"
+        ],
+        "operationId": "volume_get",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Volume id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Volume",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VolumeInfo"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "volumes"
+        ],
+        "operationId": "volume_delete",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Volume id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Volume deleted"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "ApiKeyCreated": {
+        "type": "object",
+        "required": [
+          "id",
+          "key"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "key": {
+            "type": "string"
+          }
+        }
+      },
+      "ApiKeyInfo": {
+        "type": "object",
+        "required": [
+          "id",
+          "scopes",
+          "createdAt"
+        ],
+        "properties": {
+          "createdAt": {
+            "type": "string"
+          },
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "expiresAt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "id": {
+            "type": "string"
+          },
+          "lastUsedAt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "scopes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "AppInfo": {
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "image",
+          "replicas",
+          "status",
+          "port",
+          "instances",
+          "createdAt",
+          "updatedAt"
+        ],
+        "properties": {
+          "createdAt": {
+            "type": "string"
+          },
+          "domain": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "id": {
+            "type": "string"
+          },
+          "image": {
+            "type": "string"
+          },
+          "instances": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/InstanceInfo"
+            }
+          },
+          "name": {
+            "type": "string"
+          },
+          "port": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "replicas": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "status": {
+            "type": "string"
+          },
+          "updatedAt": {
+            "type": "string"
+          }
+        }
+      },
+      "ClusterHealth": {
+        "type": "object",
+        "required": [
+          "clusterId",
+          "version",
+          "nodesTotal",
+          "nodesReady",
+          "appsTotal",
+          "poolsTotal",
+          "uptimeSecs"
+        ],
+        "properties": {
+          "appsTotal": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "clusterId": {
+            "type": "string"
+          },
+          "nodesReady": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "nodesTotal": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "poolsTotal": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "uptimeSecs": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "version": {
+            "type": "string"
+          }
+        }
+      },
+      "CommandSpec": {
+        "oneOf": [
+          {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          {
+            "type": "string"
+          }
+        ]
+      },
+      "CreateApiKeyRequest": {
+        "type": "object",
+        "properties": {
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "expiresInDays": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
+          },
+          "scopes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "tenantId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Tenant to scope this key to (admin only). Keys created with a tenant_id\ncan only access resources belonging to that tenant."
+          }
+        }
+      },
+      "CreateMachineRequest": {
+        "type": "object",
+        "required": [
+          "source"
+        ],
+        "properties": {
+          "autoStopSeconds": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
+          },
+          "env": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          },
+          "ephemeral": {
+            "type": "boolean"
+          },
+          "mounts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MachineMountSpec"
+            }
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "network": {
+            "$ref": "#/components/schemas/MachineNetwork"
+          },
+          "resources": {
+            "$ref": "#/components/schemas/MachineResources"
+          },
+          "source": {
+            "$ref": "#/components/schemas/MachineSource"
+          },
+          "ttlSeconds": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
+          },
+          "workdir": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "CreateMachineSessionRequest": {
+        "type": "object",
+        "properties": {
+          "cwd": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "env": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          },
+          "id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "CreateVolumeRequest": {
+        "type": "object",
+        "required": [
+          "name",
+          "sizeGb"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "node": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "sizeGb": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          }
+        }
+      },
+      "DeployRequest": {
+        "type": "object",
+        "required": [
+          "name",
+          "image"
+        ],
+        "properties": {
+          "coLocateWith": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "cpus": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "domain": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "env": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/EnvVar"
+            }
+          },
+          "health": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/HealthCheck"
+              }
+            ]
+          },
+          "image": {
+            "type": "string"
+          },
+          "memoryMb": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "name": {
+            "type": "string"
+          },
+          "network": {
+            "type": "boolean"
+          },
+          "port": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "stopGraceSecs": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "strategy": {
+            "$ref": "#/components/schemas/DeployStrategy"
+          },
+          "volume": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/VolumeMount"
+              }
+            ]
+          }
+        }
+      },
+      "DeployStrategy": {
+        "oneOf": [
+          {
+            "type": "object",
+            "description": "Replace instances in batches. Each batch: start new → health check → destroy old.",
+            "required": [
+              "type"
+            ],
+            "properties": {
+              "batchSize": {
+                "type": "integer",
+                "format": "int32",
+                "description": "Instances to replace per batch (default: 1).",
+                "minimum": 0
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "rolling"
+                ]
+              },
+              "useHealthCheck": {
+                "type": "boolean",
+                "description": "Wait for health check to pass before destroying old instances."
+              },
+              "waitSeconds": {
+                "type": "integer",
+                "format": "int64",
+                "description": "Seconds to wait between batches if not using health checks (default: 5).",
+                "minimum": 0
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "Deploy N canary instances first. If healthy, replace the rest.\nIf canaries fail, roll back without touching existing instances.",
+            "required": [
+              "type"
+            ],
+            "properties": {
+              "autoPromote": {
+                "type": "boolean",
+                "description": "Auto-promote after health check passes. If false, requires manual promotion."
+              },
+              "canaryCount": {
+                "type": "integer",
+                "format": "int32",
+                "description": "Number of canary instances to deploy (default: 1).",
+                "minimum": 0
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "canary"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "Deploy a complete new set alongside the old. Switch traffic atomically,\nthen destroy old instances.",
+            "required": [
+              "type"
+            ],
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "blueGreen"
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "EnvVar": {
+        "type": "object",
+        "required": [
+          "key",
+          "value"
+        ],
+        "properties": {
+          "key": {
+            "type": "string"
+          },
+          "value": {
+            "type": "string"
+          }
+        }
+      },
+      "EventInfo": {
+        "type": "object",
+        "required": [
+          "id",
+          "level",
+          "message",
+          "createdAt"
+        ],
+        "properties": {
+          "createdAt": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "level": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          }
+        }
+      },
+      "HealthCheck": {
+        "type": "object",
+        "required": [
+          "type"
+        ],
+        "properties": {
+          "intervalSecs": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "path": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "port": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "minimum": 0
+          },
+          "retries": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "timeoutSecs": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "type": {
+            "$ref": "#/components/schemas/HealthCheckType"
+          }
+        }
+      },
+      "HealthCheckType": {
+        "type": "string",
+        "enum": [
+          "http",
+          "tcp",
+          "exec"
+        ]
+      },
+      "InstanceInfo": {
+        "type": "object",
+        "required": [
+          "id",
+          "nodeId",
+          "status",
+          "generation"
+        ],
+        "properties": {
+          "generation": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "hostPort": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "minimum": 0
+          },
+          "id": {
+            "type": "string"
+          },
+          "nodeId": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          }
+        }
+      },
+      "MachineCodeRequest": {
+        "type": "object",
+        "required": [
+          "language",
+          "code"
+        ],
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "cwd": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "env": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          },
+          "language": {
+            "type": "string"
+          },
+          "timeoutSeconds": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
+          }
+        }
+      },
+      "MachineCommandRequest": {
+        "type": "object",
+        "required": [
+          "command"
+        ],
+        "properties": {
+          "command": {
+            "$ref": "#/components/schemas/CommandSpec"
+          },
+          "cwd": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "env": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          },
+          "stdin": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "stream": {
+            "type": "boolean"
+          },
+          "timeoutSeconds": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
+          }
+        }
+      },
+      "MachineExecResponse": {
+        "type": "object",
+        "required": [
+          "stdout",
+          "stderr",
+          "exitCode",
+          "durationMs",
+          "machineId"
+        ],
+        "properties": {
+          "durationMs": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "exitCode": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "machineId": {
+            "type": "string"
+          },
+          "stderr": {
+            "type": "string"
+          },
+          "stderrTruncated": {
+            "type": "boolean"
+          },
+          "stdout": {
+            "type": "string"
+          },
+          "stdoutTruncated": {
+            "type": "boolean"
+          }
+        }
+      },
+      "MachineInfo": {
+        "type": "object",
+        "required": [
+          "id",
+          "source",
+          "state",
+          "resources",
+          "network",
+          "env",
+          "ephemeral",
+          "createdAt",
+          "updatedAt"
+        ],
+        "properties": {
+          "autoStopSeconds": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
+          },
+          "createdAt": {
+            "type": "string"
+          },
+          "env": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          },
+          "ephemeral": {
+            "type": "boolean"
+          },
+          "id": {
+            "type": "string"
+          },
+          "lastActivityAt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "network": {
+            "$ref": "#/components/schemas/MachineNetwork"
+          },
+          "resources": {
+            "$ref": "#/components/schemas/MachineResources"
+          },
+          "source": {
+            "$ref": "#/components/schemas/MachineSource"
+          },
+          "state": {
+            "type": "string"
+          },
+          "ttlSeconds": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
+          },
+          "updatedAt": {
+            "type": "string"
+          },
+          "workdir": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "MachineMountSpec": {
+        "type": "object",
+        "required": [
+          "volume",
+          "mountPath"
+        ],
+        "properties": {
+          "mountPath": {
+            "type": "string",
+            "description": "Mount path inside the VM."
+          },
+          "readonly": {
+            "type": "boolean",
+            "description": "Mount as read-only."
+          },
+          "volume": {
+            "type": "string",
+            "description": "Volume name to mount."
+          }
+        }
+      },
+      "MachineNetwork": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": [
+              "mode"
+            ],
+            "properties": {
+              "mode": {
+                "type": "string",
+                "enum": [
+                  "blocked"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "mode"
+            ],
+            "properties": {
+              "mode": {
+                "type": "string",
+                "enum": [
+                  "open"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "cidrs",
+              "mode"
+            ],
+            "properties": {
+              "cidrs": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "mode": {
+                "type": "string",
+                "enum": [
+                  "allowCidrs"
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "MachineResources": {
+        "type": "object",
+        "properties": {
+          "cpus": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "diskGb": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
+          },
+          "memoryMb": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          }
+        }
+      },
+      "MachineSessionInfo": {
+        "type": "object",
+        "required": [
+          "id",
+          "machineId",
+          "status",
+          "env",
+          "createdAt"
+        ],
+        "properties": {
+          "createdAt": {
+            "type": "string"
+          },
+          "cwd": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "env": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          },
+          "id": {
+            "type": "string"
+          },
+          "lastExecAt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "machineId": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          }
+        }
+      },
+      "MachineSource": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": [
+              "reference",
+              "type"
+            ],
+            "properties": {
+              "reference": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "image"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "reference",
+              "type"
+            ],
+            "properties": {
+              "reference": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "smolmachine"
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "NodeInfo": {
+        "type": "object",
+        "required": [
+          "id",
+          "address",
+          "smolvmAddress",
+          "status",
+          "totalCpus",
+          "availableCpus",
+          "totalMemoryMb",
+          "availableMemoryMb",
+          "totalDiskGb",
+          "availableDiskGb",
+          "labels",
+          "registeredAt"
+        ],
+        "properties": {
+          "address": {
+            "type": "string"
+          },
+          "availableCpus": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "availableDiskGb": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "availableMemoryMb": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "id": {
+            "type": "string"
+          },
+          "labels": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          },
+          "lastHeartbeatAt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "registeredAt": {
+            "type": "string"
+          },
+          "runtime": {
+            "type": "string",
+            "description": "The runtime this node speaks (e.g. `\"smolvm\"`). The control plane resolves\na driver from this name; `smolvm_address` is that runtime's endpoint.\nDefaults to `\"smolvm\"` so a node that doesn't report a runtime (the only\nruntime today) is handled transparently."
+          },
+          "smolvmAddress": {
+            "type": "string",
+            "description": "The runtime endpoint (HTTP address) on this node."
+          },
+          "status": {
+            "type": "string"
+          },
+          "totalCpus": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "totalDiskGb": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "totalMemoryMb": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "usedCpus": {
+            "type": "number",
+            "format": "double",
+            "description": "Real CPU usage as fractional CPUs (e.g., 2.5 = 2.5 CPUs worth of load).\nReported by the node from hypervisor/process stats. Separate from\n`available_cpus` (which is allocation-based bookkeeping)."
+          },
+          "usedDiskGb": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Real disk space consumed by VM overlay/storage files in GB. Reported\nfrom filesystem stat of VM disk images. Separate from\n`available_disk_gb` (which reflects the entire host filesystem).",
+            "minimum": 0
+          },
+          "usedMemoryMb": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Real memory usage in MB. Reported by the node from RSS of VM processes.\nSeparate from `available_memory_mb` (which is allocation-based bookkeeping).",
+            "minimum": 0
+          }
+        }
+      },
+      "PoolConfig": {
+        "type": "object",
+        "required": [
+          "image"
+        ],
+        "properties": {
+          "cpus": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "image": {
+            "type": "string"
+          },
+          "maxIdleSecs": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "memoryMb": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "network": {
+            "type": "boolean"
+          },
+          "targetSize": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "tenantId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Optional owning tenant. Admin-only: when set, the pool is private to that\ntenant; when omitted, the pool is shared and any tenant may claim from it."
+          }
+        }
+      },
+      "PoolInfo": {
+        "type": "object",
+        "required": [
+          "id",
+          "image",
+          "targetSize",
+          "idleCount",
+          "busyCount",
+          "status"
+        ],
+        "properties": {
+          "busyCount": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "id": {
+            "type": "string"
+          },
+          "idleCount": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "image": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "targetSize": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          }
+        }
+      },
+      "ScaleRequest": {
+        "type": "object",
+        "required": [
+          "count"
+        ],
+        "properties": {
+          "count": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          }
+        }
+      },
+      "UsageResponse": {
+        "type": "object",
+        "required": [
+          "tenantId",
+          "from",
+          "to",
+          "totalUptimeSeconds",
+          "cpuHours",
+          "memoryGbHours",
+          "machineCount",
+          "execCount",
+          "execDurationMs"
+        ],
+        "properties": {
+          "cpuHours": {
+            "type": "number",
+            "format": "double"
+          },
+          "execCount": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "execDurationMs": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "from": {
+            "type": "string"
+          },
+          "machineCount": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "memoryGbHours": {
+            "type": "number",
+            "format": "double"
+          },
+          "tenantId": {
+            "type": "string"
+          },
+          "to": {
+            "type": "string"
+          },
+          "totalUptimeSeconds": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          }
+        }
+      },
+      "VolumeInfo": {
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "nodeId",
+          "sizeGb",
+          "status",
+          "createdAt"
+        ],
+        "properties": {
+          "appInstanceId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "createdAt": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "nodeId": {
+            "type": "string"
+          },
+          "sizeGb": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "status": {
+            "type": "string"
+          }
+        }
+      },
+      "VolumeMount": {
+        "type": "object",
+        "required": [
+          "name",
+          "mountPath"
+        ],
+        "properties": {
+          "mountPath": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "sizeGb": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          }
+        }
+      }
+    }
+  },
+  "tags": [
+    {
+      "name": "machines",
+      "description": "First-class machine lifecycle and exec"
+    },
+    {
+      "name": "apps",
+      "description": "Long-running app deployments"
+    },
+    {
+      "name": "nodes",
+      "description": "Cluster node enrollment and status"
+    },
+    {
+      "name": "tokens",
+      "description": "Node join tokens"
+    },
+    {
+      "name": "volumes",
+      "description": "Persistent volumes"
+    },
+    {
+      "name": "pools",
+      "description": "Warm machine pools"
+    },
+    {
+      "name": "usage",
+      "description": "Usage and billing"
+    },
+    {
+      "name": "apikeys",
+      "description": "API key management"
+    },
+    {
+      "name": "operations",
+      "description": "Async operations"
+    },
+    {
+      "name": "health",
+      "description": "Health and metrics"
+    }
+  ]
+}

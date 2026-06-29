@@ -1,0 +1,182 @@
+name: Release smol
+
+# Builds the self-contained `smol` CLI for each platform and, on a version tag,
+# publishes the bundles as a GitHub release. Each bundle ships its own libkrun
+# runtime + guest agent, reused from the matching smolvm release — so `smol`
+# needs no separately-installed smolvm.
+#
+# The smol version TRACKS the engine: a `smol vX.Y.Z` tag builds against, and
+# bundles assets from, smolvm `vX.Y.Z` — guaranteeing the host CLI and guest
+# agent speak the same wire protocol.
+#
+# ─── PREREQUISITES ────────────────────────────────────────────────────────────
+#  * repo var  SMOLVM_ENGINE_REPO     — the (private) engine repo, e.g. owner/smolvm
+#  * secret    SMOLVM_CHECKOUT_TOKEN  — token that can clone the engine AND read
+#                                       its release assets (same repo)
+#  A matching smolvm release (same tag) must already exist with the per-platform
+#  smolvm-<ver>-<platform>.tar.gz assets.
+
+on:
+  push:
+    # CLI + SDK share the engine-tracked version, so a `v1.x` tag releases both
+    # (this builds the CLI dist; release.yml publishes the SDK). Cargo.toml must
+    # match the tag (asserted below) — keep it, package.json, and pyproject aligned.
+    tags: ["v1.*"]
+  workflow_dispatch:
+    inputs:
+      engine_version:
+        description: "smolvm release tag to build against + bundle (e.g. v1.0.1)"
+        required: true
+        default: "v1.0.1"
+      publish:
+        description: "Create a GitHub release. Off → build artifacts only."
+        type: boolean
+        default: false
+
+# Default to least privilege; the publish job opts up to contents: write.
+permissions:
+  contents: read
+
+# Don't let two runs for the same ref race on the same release / assets.
+concurrency:
+  group: release-smol-${{ github.event.inputs.engine_version || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: build · ${{ matrix.platform }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { platform: darwin-arm64, os: macos-14,        target: aarch64-apple-darwin,        use_zig: "0" }
+          - { platform: linux-x86_64, os: ubuntu-latest,    target: x86_64-unknown-linux-gnu,    use_zig: "1" }
+          - { platform: linux-arm64,  os: ubuntu-24.04-arm, target: aarch64-unknown-linux-gnu,   use_zig: "1" }
+    runs-on: ${{ matrix.os }}
+    env:
+      # On a tag push the smol tag == the engine tag (version tracks engine);
+      # on a manual run, take the explicit input.
+      ENGINE_VERSION: ${{ github.event.inputs.engine_version || github.ref_name }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Assert Cargo.toml version matches the release/engine version
+        shell: bash
+        run: |
+          cargo_ver="$(grep -m1 -E '^version[[:space:]]*=' Cargo.toml | sed -E 's/.*"([^"]+)".*/\1/')"
+          if [ "v$cargo_ver" != "$ENGINE_VERSION" ]; then
+            echo "::error::Cargo.toml version (v$cargo_ver) != release/engine version ($ENGINE_VERSION). Bump Cargo.toml to match the tag."
+            exit 1
+          fi
+
+      # Engine source for the path dep (`smolvm = { path = ".." }`). Clone at the
+      # engine tag INTO __engine__, then repoint the path deps at it.
+      - name: Check out engine source at ${{ env.ENGINE_VERSION }}
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ vars.SMOLVM_ENGINE_REPO }}
+          ref: ${{ env.ENGINE_VERSION }}
+          token: ${{ secrets.SMOLVM_CHECKOUT_TOKEN }}
+          path: __engine__
+      - name: Repoint smol path deps at the engine checkout
+        shell: bash
+        run: |
+          perl -i -pe 's{path = "\.\./crates/}{path = "__engine__/crates/}g' Cargo.toml
+          perl -i -pe 's{path = "\.\."}{path = "__engine__"}g' Cargo.toml
+          # Fail loudly if any path dep still points outside the checkout.
+          if grep -nE 'path = "\.\.' Cargo.toml; then
+            echo "::error::a path dep was not repointed at __engine__"; exit 1
+          fi
+          grep -E 'smolvm.*path' Cargo.toml
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      # Linux: link against glibc 2.34 (libkrun's real floor) via zig, so the
+      # binary loads on Ubuntu 22.04+/RHEL9/Debian 12 — not just the build runner.
+      - name: Set up zig
+        if: matrix.use_zig == '1'
+        uses: goto-bus-stop/setup-zig@v2
+        with:
+          version: 0.13.0
+      - name: Install cargo-zigbuild
+        if: matrix.use_zig == '1'
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-zigbuild
+
+      # Download the engine release assets in a SEPARATE step that holds the
+      # private-repo token, so it is NOT exposed to the `cargo build` environment
+      # (and thus not to any build.rs / proc-macro in the dependency tree).
+      - name: Download engine runtime assets
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.SMOLVM_CHECKOUT_TOKEN }}
+          ENGINE_REPO: ${{ vars.SMOLVM_ENGINE_REPO }}
+        run: |
+          mkdir -p engine-asset
+          asset="smolvm-${ENGINE_VERSION#v}-${{ matrix.platform }}.tar.gz"
+          gh release download "$ENGINE_VERSION" --repo "$ENGINE_REPO" --pattern "$asset" --dir engine-asset --clobber
+          [ -f "engine-asset/$asset" ] || { echo "::error::engine asset $asset not found in $ENGINE_VERSION"; exit 1; }
+          echo "ENGINE_TARBALL=$PWD/engine-asset/$asset" >> "$GITHUB_ENV"
+
+      - name: Build self-contained bundle
+        # NOTE: no GH_TOKEN here — the assets are already downloaded (ENGINE_TARBALL).
+        env:
+          SMOLVM_ENGINE_VERSION: ${{ env.ENGINE_VERSION }}
+          TARGET: ${{ matrix.target }}
+          USE_ZIG: ${{ matrix.use_zig }}
+          ZIG_GLIBC: "2.34"
+        run: bash scripts/build-smol-dist.sh ${{ matrix.platform }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: smol-${{ matrix.platform }}
+          path: |
+            dist/smol-*-${{ matrix.platform }}.tar.gz
+            dist/smol-*-${{ matrix.platform }}.tar.gz.sha256
+          if-no-files-found: error
+
+  publish:
+    name: publish release
+    needs: build
+    # Publish ONLY for tag pushes or an explicit dispatch publish:true. (Guarding
+    # on the tag ref, not just event==push, so a future branch trigger can't ship.)
+    if: ${{ startsWith(github.ref, 'refs/tags/') || inputs.publish }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write   # create/upload the release on THIS (smol) repo
+    env:
+      TAG: ${{ github.event.inputs.engine_version || github.ref_name }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          pattern: smol-*
+          merge-multiple: true
+      - name: Verify every platform built (no partial release)
+        shell: bash
+        run: |
+          for p in darwin-arm64 linux-x86_64 linux-arm64; do
+            ls dist/smol-*-"$p".tar.gz >/dev/null 2>&1 || { echo "::error::missing $p tarball — refusing to publish a partial release"; exit 1; }
+          done
+      - name: Verify checksums
+        shell: bash
+        run: |
+          cd dist && cat *.sha256 > checksums.sha256
+          if command -v sha256sum >/dev/null; then sha256sum -c checksums.sha256; else shasum -a 256 -c checksums.sha256; fi
+      - name: Create / update the GitHub release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          notes="Self-contained \`smol\` CLI — bundles its own libkrun runtime + guest agent (smolvm $TAG). Install: \`curl -sSL https://raw.githubusercontent.com/$GITHUB_REPOSITORY/$TAG/scripts/install.sh | bash\`"
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" --clobber dist/smol-*.tar.gz dist/checksums.sha256
+          else
+            # --target pins the tag to THIS run's commit when the tag doesn't exist yet
+            # (the dispatch case); on a tag push the tag already exists and is used as-is.
+            gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
+              --title "smol $TAG" --notes "$notes" dist/smol-*.tar.gz dist/checksums.sha256
+          fi

@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 🔒 Report a security vulnerability
+    url: https://github.com/smol-machines/smol/security/advisories/new
+    about: Report security/sandbox-escape issues privately — never in a public issue.
+  - name: 💬 Questions & discussion
+    url: https://github.com/smol-machines/smol/discussions
+    about: For usage questions and ideas (enable Discussions to use this).

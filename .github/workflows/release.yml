@@ -1,0 +1,455 @@
+name: SDK Release
+
+# Builds cross-platform artifacts for both SDKs and, on a version tag, publishes
+# them. SAFE BY DEFAULT: publish jobs run only on a `v*` tag, or a manual run
+# with `publish: true`, AND require the relevant token secret to be present.
+#
+# ─── PREREQUISITES to wire before a real publish ───────────────────────────────
+#  1. Engine source — the SDK crates depend on the smolvm engine by relative path
+#     (`smolvm = { path = "../../.." }`), so CI must check the engine out next to
+#     this repo. Set repo var SMOLVM_ENGINE_REPO + secret SMOLVM_CHECKOUT_TOKEN.
+#  2. Secrets — NPM_TOKEN, PYPI_TOKEN. (macOS notarization — APPLE_* secrets — is
+#     still a TODO in node-build; ad-hoc signing works for the entitlement but a
+#     Gatekeeper-clean download needs notarization.)
+#  3. libkrun per platform — both bundle-native.sh scripts now take SMOLVM_LIB_DIR
+#     and stage libkrun/libkrunfw next to the addon/extension; build.rs (both SDKs)
+#     emits relocatable @loader_path/$ORIGIN rpaths. The engine checkout's LFS libs
+#     supply them via `engine_lib` in the matrix.
+#
+# ─── VALIDATE on a `workflow_dispatch` publish:false dry-run before tagging ────
+#  * Node boot helper: node-build now builds the engine `smolvm` binary and bundles
+#    it as smol-vmm (libkrun-linked; macOS ad-hoc signed with the hypervisor
+#    entitlement). Confirm it builds on all 3 targets + the bundled addon actually
+#    boots a local VM (the e2e job, manual).
+#  * Linux wheels: maturin --skip-auditwheel + an auditwheel-repair relabel step
+#    (--exclude our bundled libkrun) turns the linux_* tag into manylinux_*.
+#    Confirm the tag + that the wheel imports in a clean container (the excluded
+#    libkrun's own glibc floor isn't captured by auditwheel — verify on a real OS).
+#  * macOS: ad-hoc signing gives the entitlement; notarization (APPLE_* secrets)
+#    is still TODO for a Gatekeeper-clean download.
+
+on:
+  push:
+    # SDK and CLI both bundle the engine and share its version, so one
+    # engine-version `v1.x` tag releases BOTH: this workflow publishes the SDK
+    # (smolmachines) and release-smol.yml builds the CLI dist, each from its own
+    # manifest (package.json/pyproject vs Cargo.toml) — keep all three at the tag.
+    tags: ["v1.*"]
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: "Publish to npm/PyPI (needs tokens). Off → build artifacts only."
+        type: boolean
+        default: false
+      engine_version:
+        description: "smolvm engine tag to build + bundle (e.g. v1.0.4). Tag pushes use the pushed tag."
+        default: "v1.0.4"
+
+permissions:
+  contents: read
+
+# The SDK bundles the engine, so pin the engine checkout to a release tag (not
+# the default branch) — `v1.0.3` SDK genuinely means engine v1.0.3. On a tag
+# push the SDK tag == the engine tag (versions are aligned); on a manual run use
+# the input. Mirrors release-smol.yml.
+env:
+  ENGINE_VERSION: ${{ github.event.inputs.engine_version || github.ref_name }}
+
+jobs:
+  # ─── Guest agent (musl) + rootfs tarball, per arch (built from the engine) ──
+  # The SDKs bundle the rootfs so `npm i` / `pip install` is self-contained; the
+  # engine extracts it on first boot via SMOLVM_AGENT_ROOTFS_TAR.
+  build-agent:
+    name: agent · ${{ matrix.arch }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { arch: x86_64, target: x86_64-unknown-linux-musl, linker_pkg: "", linker_env: "" }
+          - { arch: aarch64, target: aarch64-unknown-linux-musl, linker_pkg: gcc-aarch64-linux-gnu, linker_env: "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER=aarch64-linux-gnu-gcc" }
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ vars.SMOLVM_ENGINE_REPO }}
+          ref: ${{ env.ENGINE_VERSION }}
+          token: ${{ secrets.SMOLVM_CHECKOUT_TOKEN }}
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - name: Install musl + cross tools
+        run: sudo apt-get update && sudo apt-get install -y musl-tools ${{ matrix.linker_pkg }}
+      - name: Build agent (size-optimized, static musl)
+        run: ${{ matrix.linker_env }} cargo build --profile release-small -p smolvm-agent --target ${{ matrix.target }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: agent-${{ matrix.arch }}
+          path: target/${{ matrix.target }}/release-small/smolvm-agent
+
+  build-rootfs:
+    name: rootfs · ${{ matrix.arch }}
+    needs: build-agent
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { arch: aarch64 }
+          - { arch: x86_64 }
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ vars.SMOLVM_ENGINE_REPO }}
+          ref: ${{ env.ENGINE_VERSION }}
+          token: ${{ secrets.SMOLVM_CHECKOUT_TOKEN }}
+      - name: Download agent binary
+        uses: actions/download-artifact@v4
+        with:
+          name: agent-${{ matrix.arch }}
+          path: /tmp/agent/
+      - name: Build rootfs + package tarball
+        run: |
+          chmod +x /tmp/agent/smolvm-agent
+          AGENT_BINARY=/tmp/agent/smolvm-agent ./scripts/build-agent-rootfs.sh --arch ${{ matrix.arch }} --no-build-agent
+          # sudo: rootfs has restricted-mode dirs; tar preserves perms/symlinks.
+          sudo tar -cf agent-rootfs.tar -C target/agent-rootfs .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rootfs-${{ matrix.arch }}
+          path: agent-rootfs.tar
+
+  # ─── Node: per-platform native addons ──────────────────────────────────────
+  node-build:
+    name: node · build ${{ matrix.target }}
+    needs: build-rootfs
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # `engine_lib` = the engine checkout's per-platform libkrun dir, relative
+          # to the SDK crate (sdk/node | sdk/python). x86_64-apple-darwin (Intel) is
+          # dropped: the engine ships no Intel-mac libkrun — re-add with an Intel
+          # lib build if needed.
+          # `engine_lib` (relative to sdk/node) feeds the addon build + bundle step;
+          # `lib_subdir` (relative to the engine root) feeds the helper cargo build.
+          - { os: macos-14, target: aarch64-apple-darwin, engine_lib: ../../__engine__/lib, lib_subdir: lib, rootfs_arch: aarch64 }
+          - { os: ubuntu-latest, target: x86_64-unknown-linux-gnu, engine_lib: ../../__engine__/lib/linux-x86_64, lib_subdir: lib/linux-x86_64, rootfs_arch: x86_64 }
+          - { os: ubuntu-24.04-arm, target: aarch64-unknown-linux-gnu, engine_lib: ../../__engine__/lib/linux-aarch64, lib_subdir: lib/linux-aarch64, rootfs_arch: aarch64 }
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: sdk/node
+    steps:
+      - uses: actions/checkout@v4
+      # Engine source: the SDK crate links the UNPUBLISHED root `smolvm` crate via
+      # `path = "../../.."`, absent in a standalone checkout. Clone it (lfs:true
+      # carries the prebuilt libkrun libs) and repoint the path dep at it.
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ vars.SMOLVM_ENGINE_REPO }}
+          ref: ${{ env.ENGINE_VERSION }}
+          token: ${{ secrets.SMOLVM_CHECKOUT_TOKEN }}
+          path: __engine__
+          lfs: true
+      - name: Repoint SDK path deps at the engine checkout
+        run: perl -i -pe 's{\.\./\.\./\.\.}{../../__engine__}g' Cargo.toml
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: sdk/node/package-lock.json
+      - run: npm ci
+      # Linux: build the addon + helper against glibc 2.34 (libkrun's real floor)
+      # via zig, so they load on glibc 2.34+ — not just the 2.39 build runner. The
+      # raw runner is glibc 2.39, which would silently break local transport on
+      # e.g. Ubuntu 22.04. macOS has no glibc floor (Mach-O), so zig is Linux-only.
+      - name: Set up zig (Linux glibc-floor cross-link)
+        if: runner.os == 'Linux'
+        uses: goto-bus-stop/setup-zig@v2
+        with:
+          version: 0.13.0
+      - name: Install cargo-zigbuild (Linux)
+        if: runner.os == 'Linux'
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-zigbuild
+      - name: Build native addon
+        env:
+          # node build.rs links libkrun via LIBKRUN_BUNDLE (engine_lib is relative
+          # to sdk/node, the build CWD) and emits @loader_path/$ORIGIN rpaths.
+          LIBKRUN_BUNDLE: ${{ matrix.engine_lib }}
+          SMOLVM_LIB_DIR: ${{ matrix.engine_lib }}
+        run: |
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            npm run build:native -- --target ${{ matrix.target }} --zig --zig-abi-suffix=2.34
+          else
+            npm run build:native -- --target ${{ matrix.target }}
+          fi
+      # The LOCAL transport spawns a `smol-vmm` boot helper (the engine's `smolvm`
+      # binary). Build it from the engine checkout, linking the prebuilt libkrun
+      # (absolute lib dir, so build.rs resolves it regardless of CWD). Native-arch
+      # runner → no --target needed; output at __engine__/target/release/smolvm.
+      - name: Build the boot helper (smolvm)
+        working-directory: ${{ github.workspace }}
+        env:
+          LIBKRUN_BUNDLE: ${{ github.workspace }}/__engine__/${{ matrix.lib_subdir }}
+          SMOLVM_LIB_DIR: ${{ github.workspace }}/__engine__/${{ matrix.lib_subdir }}
+        # Both use --target so output is uniformly target/<triple>/release/smolvm.
+        # Linux: zigbuild pins glibc 2.34; macOS: native build.
+        run: |
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            cargo zigbuild --release --target ${{ matrix.target }}.2.34 --bin smolvm --manifest-path __engine__/Cargo.toml
+          else
+            cargo build --release --target ${{ matrix.target }} --bin smolvm --manifest-path __engine__/Cargo.toml
+          fi
+      - name: Download guest rootfs tarball
+        uses: actions/download-artifact@v4
+        with:
+          name: rootfs-${{ matrix.rootfs_arch }}
+          path: ${{ github.workspace }}/rootfs
+      - name: Bundle native libs + boot helper next to the addon
+        env:
+          SMOLVM_LIB_DIR: ${{ matrix.engine_lib }}
+          SMOLVM_HELPER: ${{ github.workspace }}/__engine__/target/${{ matrix.target }}/release/smolvm
+          SMOLVM_ENTITLEMENTS: ${{ github.workspace }}/__engine__/smolvm.entitlements
+          SMOLVM_ROOTFS_TAR: ${{ github.workspace }}/rootfs/agent-rootfs.tar
+        run: |
+          # patchelf: bundle-native.sh strips libkrun's virglrenderer NEEDED (Linux).
+          [ "$RUNNER_OS" = "Linux" ] && python3 -m pip install --quiet patchelf || true
+          bash scripts/bundle-native.sh
+      # TODO(macOS): notarize the bundled smol-vmm helper + dylibs (APPLE_* secrets).
+      - uses: actions/upload-artifact@v4
+        with:
+          name: node-native-${{ matrix.target }}
+          path: |
+            sdk/node/native/**
+            sdk/node/*.node
+          if-no-files-found: error
+
+  node-publish:
+    name: node · publish to npm
+    needs: node-build
+    if: ${{ github.event_name == 'push' || inputs.publish }}
+    runs-on: ubuntu-latest
+    # id-token: write enables npm provenance (now that the repo is public).
+    permissions:
+      contents: read
+      id-token: write
+    defaults:
+      run:
+        working-directory: sdk/node
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          registry-url: "https://registry.npmjs.org"
+          cache: npm
+          cache-dependency-path: sdk/node/package-lock.json
+      - run: npm ci
+      - run: npm run build:ts
+      - uses: actions/download-artifact@v4
+        with:
+          path: sdk/node/artifacts
+          pattern: node-native-*
+      # Single "fat" package: co-locate binding.js + every platform's
+      # smol.<triple>.node in dist/ (binding.js loads the local .node for the
+      # running platform), and ship the native/<plat>/ libs+helper. No
+      # optionalDependencies / per-platform packages. This exact layout was
+      # validated locally (npm pack → install → require).
+      - name: Assemble fat package
+        run: |
+          cp binding.js binding.d.ts dist/
+          cp artifacts/*/smol.*.node dist/
+          mkdir -p native && cp -R artifacts/*/native/* native/
+          # actions/upload-artifact STRIPS the executable bit — restore it on the
+          # smol-vmm boot helpers, or local transport fails with "Permission denied"
+          # (os error 13) when spawning it. npm preserves modes in the tarball.
+          chmod +x native/*/smol-vmm
+          echo "dist .node:" && ls dist/*.node
+          echo "native platforms:" && ls native/ && ls -l native/*/smol-vmm
+      # Pre-publish gate: fail (BEFORE npm publish, so the version isn't burned)
+      # unless the package actually contains the loader + all 3 platform addons.
+      - name: Verify package completeness
+        run: |
+          set -e
+          test -f dist/binding.js
+          # .node files use napi triple names; native/ dirs use the runtime's
+          # `${process.platform}-${process.arch}` names (see dist/assets.js) — they
+          # differ by the -gnu suffix on Linux, so check them separately.
+          for t in darwin-arm64 linux-x64-gnu linux-arm64-gnu; do
+            test -f "dist/smol.$t.node" || { echo "MISSING dist/smol.$t.node"; exit 1; }
+          done
+          for p in darwin-arm64 linux-x64 linux-arm64; do
+            test -d "native/$p" || { echo "MISSING native/$p"; exit 1; }
+            test -f "native/$p/smol-vmm" || { echo "MISSING native/$p/smol-vmm"; exit 1; }
+            test -s "native/$p/agent-rootfs.tar" || { echo "MISSING native/$p/agent-rootfs.tar"; exit 1; }
+          done
+          npm pack --dry-run 2>&1 | grep -E "binding.js|\.node|native/" >/dev/null
+          echo "package complete: binding.js + 3 addons + native libs + rootfs present"
+      - name: Publish to npm
+        # NOTE: re-add `--provenance` once this repo is PUBLIC. npm rejects
+        # provenance publishes from a private repo (422 "Unsupported … source
+        # repository visibility: private"), so it's omitted while private.
+        run: npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+  # ─── Python: abi3 wheels (one per platform, Py3.9+) ────────────────────────
+  python-wheels:
+    name: py · wheel ${{ matrix.target }}
+    needs: build-rootfs
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # `engine_lib` = the engine checkout's per-platform libkrun dir, relative
+          # to the SDK crate (sdk/node | sdk/python). x86_64-apple-darwin (Intel) is
+          # dropped: the engine ships no Intel-mac libkrun — re-add with an Intel
+          # lib build if needed.
+          - { os: macos-14, target: aarch64-apple-darwin, engine_lib: ../../__engine__/lib, lib_subdir: lib, rootfs_arch: aarch64 }
+          - { os: ubuntu-latest, target: x86_64-unknown-linux-gnu, engine_lib: ../../__engine__/lib/linux-x86_64, lib_subdir: lib/linux-x86_64, rootfs_arch: x86_64 }
+          - { os: ubuntu-24.04-arm, target: aarch64-unknown-linux-gnu, engine_lib: ../../__engine__/lib/linux-aarch64, lib_subdir: lib/linux-aarch64, rootfs_arch: aarch64 }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      # Engine source (see node-build): clone the engine for the root `smolvm`
+      # path dep + its LFS libkrun libs, then repoint the path dep. The perl step
+      # runs on the runner (not inside maturin's manylinux container).
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ vars.SMOLVM_ENGINE_REPO }}
+          ref: ${{ env.ENGINE_VERSION }}
+          token: ${{ secrets.SMOLVM_CHECKOUT_TOKEN }}
+          path: __engine__
+          lfs: true
+      - name: Repoint SDK path deps at the engine checkout
+        run: perl -i -pe 's{\.\./\.\./\.\.}{../../__engine__}g' sdk/python/Cargo.toml
+      # The local transport spawns a smol-vmm boot helper (the engine's `smolvm`
+      # binary) — on macOS it carries the hypervisor entitlement (the python
+      # process can't). Build it on the runner host (glibc 2.34 via zig on Linux),
+      # bundled into the wheel by the staging step below.
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - name: Set up zig (Linux glibc-floor cross-link)
+        if: runner.os == 'Linux'
+        uses: goto-bus-stop/setup-zig@v2
+        with:
+          version: 0.13.0
+      - name: Install cargo-zigbuild (Linux)
+        if: runner.os == 'Linux'
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-zigbuild
+      - name: Build the boot helper (smolvm)
+        env:
+          LIBKRUN_BUNDLE: ${{ github.workspace }}/__engine__/${{ matrix.lib_subdir }}
+          SMOLVM_LIB_DIR: ${{ github.workspace }}/__engine__/${{ matrix.lib_subdir }}
+        run: |
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            cargo zigbuild --release --target ${{ matrix.target }}.2.34 --bin smolvm --manifest-path __engine__/Cargo.toml
+          else
+            cargo build --release --target ${{ matrix.target }} --bin smolvm --manifest-path __engine__/Cargo.toml
+          fi
+      # Stage libkrun/libkrunfw into python/smol BEFORE maturin runs, so the
+      # `[tool.maturin] include` globs ship them inside the wheel next to _native
+      # (the @loader_path/$ORIGIN rpath from build.rs finds them at import). On
+      # the runner host (not the manylinux container) so macOS install_name_tool/
+      # codesign in the script work; the staged files are in the mounted workspace.
+      - name: Download guest rootfs tarball
+        uses: actions/download-artifact@v4
+        with:
+          name: rootfs-${{ matrix.rootfs_arch }}
+          path: ${{ github.workspace }}/rootfs
+      - name: Stage native libs + boot helper into the wheel
+        working-directory: sdk/python
+        env:
+          SMOLVM_LIB_DIR: ${{ matrix.engine_lib }}
+          SMOLVM_HELPER: ${{ github.workspace }}/__engine__/target/${{ matrix.target }}/release/smolvm
+          SMOLVM_ENTITLEMENTS: ${{ github.workspace }}/__engine__/smolvm.entitlements
+          SMOLVM_ROOTFS_TAR: ${{ github.workspace }}/rootfs/agent-rootfs.tar
+        run: |
+          # patchelf: bundle-native.sh strips libkrun's virglrenderer NEEDED (Linux).
+          [ "$RUNNER_OS" = "Linux" ] && python3 -m pip install --quiet patchelf || true
+          bash scripts/bundle-native.sh
+      - uses: PyO3/maturin-action@v1
+        env:
+          # python build.rs links libkrun via SMOLVM_LIB_DIR (relative to sdk/python,
+          # the build CWD) and emits @loader_path/$ORIGIN rpaths bundled into the wheel.
+          SMOLVM_LIB_DIR: ${{ matrix.engine_lib }}
+          LIBKRUN_BUNDLE: ${{ matrix.engine_lib }}
+        with:
+          working-directory: sdk/python
+          target: ${{ matrix.target }}
+          # Build _native in the manylinux_2_34 container (glibc 2.34), NOT on the
+          # glibc-2.39 runner. The bundled libkrun's true floor is 2.34 (measured),
+          # so building _native against 2.34 lets the wheel honestly tag
+          # manylinux_2_34 — covering RHEL9 / Ubuntu 22.04+ / Debian 12 / AL2023,
+          # instead of the artifact 2.39 (Ubuntu 24.04 only). Ignored on macOS.
+          manylinux: "2_34"
+          # --skip-auditwheel: the wheel deliberately bundles libkrun/libkrunfw,
+          # which auditwheel would otherwise re-vendor and break our $ORIGIN rpath.
+          # This leaves the wheel tagged linux_* (PyPI-rejected) — the next step
+          # relabels it to manylinux while leaving our bundled libs untouched.
+          args: --release --out dist --skip-auditwheel
+      # PyPI rejects plain linux_* wheels. auditwheel repair relabels to a proper
+      # manylinux tag (auto-detected from _native's glibc symbol versions), and
+      # --exclude tells it to leave our bundled libkrun/libkrunfw in place rather
+      # than vendor+rename them (which would break the rpath). Linux only; the
+      # macOS wheel's macosx_* tag is already PyPI-acceptable.
+      - name: Relabel Linux wheel to manylinux (keep bundled libkrun)
+        if: runner.os == 'Linux'
+        working-directory: sdk/python
+        run: |
+          python3 -m pip install --quiet auditwheel patchelf
+          mkdir -p dist_manylinux
+          for whl in dist/*.whl; do
+            auditwheel repair \
+              --exclude libkrun.so.1 --exclude libkrunfw.so.5 \
+              --exclude libkrun.so --exclude libkrunfw.so \
+              -w dist_manylinux "$whl"
+          done
+          rm -f dist/*.whl && mv dist_manylinux/*.whl dist/
+          echo "relabeled wheels:" && ls -1 dist/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: py-wheel-${{ matrix.target }}
+          path: sdk/python/dist/*.whl
+          if-no-files-found: error
+
+  python-publish:
+    name: py · publish to PyPI
+    # Also gate on node-publish: if node's pre-publish verify fails, PyPI must NOT
+    # publish either — keeps the version consistent across both registries (no
+    # half-published release / version divergence).
+    needs: [python-wheels, node-publish]
+    if: ${{ github.event_name == 'push' || inputs.publish }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          pattern: py-wheel-*
+          merge-multiple: true
+      # Pre-publish gate: every wheel must contain smol-vmm (the boot helper) +
+      # libkrun, or local transport is broken. Fail BEFORE upload so the version
+      # isn't burned. (This is what 0.1.1 shipped without.)
+      - name: Verify wheels contain the boot helper + libkrun
+        run: |
+          set -e
+          for whl in dist/*.whl; do
+            echo "checking $whl"
+            unzip -l "$whl" | grep -q "smol/smol-vmm" || { echo "MISSING smol-vmm in $whl"; exit 1; }
+            unzip -l "$whl" | grep -qE "smol/libkrun" || { echo "MISSING libkrun in $whl"; exit 1; }
+          done
+          echo "all wheels contain smol-vmm + libkrun"
+      - uses: PyO3/maturin-action@v1
+        with:
+          command: upload
+          args: --skip-existing dist/*.whl
+        env:
+          MATURIN_PYPI_TOKEN: ${{ secrets.PYPI_TOKEN }}

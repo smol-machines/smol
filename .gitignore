@@ -1,0 +1,38 @@
+# Rust build output
+/target
+
+# Self-contained release build output (scripts/build-smol-dist.sh)
+dist/
+
+# Secrets / credentials — never commit
+.env
+.env.*
+*.env
+*.pem
+*.key
+*.p12
+*.pfx
+.npmrc
+.pypirc
+
+# Dependencies (sub-packages have their own ignores too)
+node_modules/
+
+# Python caches / virtualenvs
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+
+# Native build artifacts (regenerable — bundled by scripts/bundle-native.sh)
+*.so
+*.so.*
+*.dylib
+*.node
+
+# Editor / OS noise
+.DS_Store
+*.log
+.idea/
+.vscode/
+*.swp

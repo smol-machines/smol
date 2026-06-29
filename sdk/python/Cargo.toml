@@ -1,0 +1,24 @@
+[package]
+name = "smol-py"
+version = "1.3.2"
+edition = "2021"
+description = "Native (pyo3) core for the smol Python SDK — embeds the smolvm engine in-process."
+
+[lib]
+name = "_native"
+# cdylib → the Python extension module (smol._native); rlib for tests.
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+# Mirrors the sibling `smol-node` crate (NAPI) but exposes the engine to Python.
+pyo3 = { version = "0.22", features = ["extension-module", "abi3-py39"] }
+smolvm = { path = "../../.." }
+# The embedded runtime returns `smolvm_protocol::ImageInfo` (distinct from the
+# REST `api::types::ImageInfo`), so this is needed on all platforms.
+smolvm-protocol = { path = "../../../crates/smolvm-protocol" }
+
+[profile.release]
+lto = true
+strip = "symbols"
+
+[workspace]

@@ -1,0 +1,87 @@
+name: SDK CI
+
+# Per-PR gate for the smol SDKs. Runs only the checks that work on a stock
+# runner with NO hypervisor and NO libkrun:
+#   * Node:   TypeScript type-check (the native .node addon is loaded lazily /
+#             via a dynamic require, so `tsc --noEmit` needs no built binary).
+#   * Python: the pure-stdlib unit + cloud-mock test scripts (the native
+#             extension is imported lazily, only when a local Machine is created).
+#
+# The native build and the local/live-cloud end-to-end tests need a microVM
+# (libkrun + hypervisor) AND the monorepo layout (the crates depend on the
+# engine via `path = "../../.."`), so they live in the manually-triggered
+# `native-e2e` job below — not the per-PR gate.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "sdk/**"
+      - ".github/workflows/sdk-ci.yml"
+  pull_request:
+    paths:
+      - "sdk/**"
+      - ".github/workflows/sdk-ci.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sdk-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  node-check:
+    name: Node · typecheck
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: sdk/node
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: sdk/node/package-lock.json
+      - run: npm ci
+      - name: Type-check (no native addon required)
+        run: npx tsc -p tsconfig.json --noEmit
+
+  python-check:
+    name: Python · unit + cloud-mock
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: sdk/python
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Byte-compile the package (catches syntax errors anywhere)
+        run: python -m compileall -q python/smol
+      - name: Unit tests (error parsing + path encoding; pure Python)
+        run: python tests/test_unit.py
+      - name: Cloud-transport tests (mock /v1 server; pure Python)
+        run: python tests/test_cloud_mock.py
+
+  # --------------------------------------------------------------------------
+  # Native build + microVM end-to-end. Requires a runner WITH libkrun + a
+  # hypervisor AND the full monorepo (the crates link the engine via a relative
+  # path dependency). Wire this to a self-hosted runner and uncomment the steps.
+  # Manually triggered so the per-PR gate stays green on stock runners.
+  # --------------------------------------------------------------------------
+  native-e2e:
+    name: Native build + e2e (manual; needs libkrun)
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest # replace with: [self-hosted, libkrun]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Placeholder
+        run: |
+          echo "Configure a libkrun-equipped self-hosted runner, then run e.g.:"
+          echo "  # Python: maturin develop --release && python tests/test_local_e2e.py"
+          echo "  # Node:   npm run test:e2e"
+          echo "These need /dev/kvm (Linux) or HVF (macOS) + the bundled libkrun."

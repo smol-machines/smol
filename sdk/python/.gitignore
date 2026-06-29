@@ -1,0 +1,21 @@
+# Rust build
+/target
+target/
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+*.egg-info/
+.pytest_cache/
+build/
+dist/
+
+# Native build artifacts
+*.so
+*.so.*
+*.dylib
+*.pyd
+# Bundled engine libs staged by scripts/bundle-native.sh (regenerable; never commit)
+python/smol/libkrun*
+python/smol/libkrunfw*
