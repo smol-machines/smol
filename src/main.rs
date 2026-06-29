@@ -36,9 +36,6 @@ enum Commands {
         /// Machine name (default: "default")
         #[arg(short = 'n', long, value_name = "NAME")]
         name: Option<String>,
-        /// Open the shell on a deployed cloud machine instead of a local VM
-        #[arg(long)]
-        cloud: bool,
     },
 
     /// Create a persistent machine
@@ -70,21 +67,8 @@ enum Commands {
     /// Show machine details
     Status(commands::status::StatusCmd),
 
-    /// List a machine's cached images and storage usage
-    Images(commands::images::ImagesCmd),
-
-    /// Remove a machine's unused images and layers to free disk space
-    Prune(commands::prune::PruneCmd),
-
-    /// Modify settings on a stopped machine (mounts, ports, resources, disks)
-    Update(commands::update::UpdateCmd),
-
-    /// Supervise a machine with health checks and a restart policy
-    Monitor(commands::monitor::MonitorCmd),
-
-    /// Print the on-disk data directory path for a machine
-    #[command(name = "data-dir")]
-    DataDir(commands::data_dir::DataDirCmd),
+    /// Per-machine maintenance: images, prune, update, monitor, data-dir
+    Machine(commands::machine::MachineCmd),
 
     /// Create a Smolfile in the current directory
     Init(commands::init::InitCmd),
@@ -95,36 +79,15 @@ enum Commands {
     /// Stop the machine started by `smol up`
     Down(commands::down::DownCmd),
 
-    /// Build portable .smolmachine artifacts
+    /// Build + publish portable .smolmachine artifacts (create, push, pull, inspect)
     #[command(subcommand)]
     Pack(commands::pack::PackCmd),
 
-    /// Push a .smolmachine artifact to a registry
-    Push(commands::push::PushCmd),
+    /// Registry + cloud authentication (login, logout)
+    Auth(commands::auth::AuthCmd),
 
-    /// Pull a .smolmachine artifact from a registry
-    Pull(commands::pull::PullCmd),
-
-    /// Inspect a .smolmachine artifact in a registry
-    Inspect(commands::inspect::InspectCmd),
-
-    /// Log in to a registry
-    Login(commands::login::LoginCmd),
-
-    /// Log out from a registry
-    Logout(commands::logout::LogoutCmd),
-
-    /// Deploy a machine to smolfleet
-    Deploy(commands::deploy::DeployCmd),
-
-    /// List deployed machines on smolfleet
-    Machines(commands::machines::MachinesCmd),
-
-    /// Destroy a deployed machine on smolfleet
-    Destroy(commands::destroy::DestroyCmd),
-
-    /// Scale a machine on smolfleet
-    Scale(commands::scale::ScaleCmd),
+    /// Manage machines on the smolfleet cloud (deploy, ls, rm, scale, shell)
+    Cloud(commands::cloud::CloudCmd),
 
     /// Manage CLI configuration
     Config(commands::config::ConfigCmd),
@@ -211,7 +174,7 @@ fn main() {
     let result = match cli.command {
         Commands::Run(cmd) => cmd.run(),
         Commands::Exec(cmd) => cmd.run(),
-        Commands::Shell { name, cloud } => commands::exec::ExecCmd {
+        Commands::Shell { name } => commands::exec::ExecCmd {
             name,
             command: vec!["/bin/sh".to_string()],
             interactive: true,
@@ -222,7 +185,7 @@ fn main() {
             secret_env: vec![],
             secret_file: vec![],
             timeout: None,
-            cloud,
+            cloud: false,
         }
         .run(),
         Commands::Create(cmd) => cmd.run(),
@@ -234,24 +197,13 @@ fn main() {
         Commands::Cp(cmd) => cmd.run(),
         Commands::Logs(cmd) => cmd.run(),
         Commands::Status(cmd) => cmd.run(),
-        Commands::Images(cmd) => cmd.run(),
-        Commands::Prune(cmd) => cmd.run(),
-        Commands::Update(cmd) => cmd.run(),
-        Commands::Monitor(cmd) => cmd.run(),
-        Commands::DataDir(cmd) => cmd.run(),
+        Commands::Machine(cmd) => cmd.run(),
         Commands::Init(cmd) => cmd.run(),
         Commands::Up(cmd) => cmd.run(),
         Commands::Down(cmd) => cmd.run(),
         Commands::Pack(cmd) => cmd.run(),
-        Commands::Push(cmd) => cmd.run(),
-        Commands::Pull(cmd) => cmd.run(),
-        Commands::Inspect(cmd) => cmd.run(),
-        Commands::Login(cmd) => cmd.run(),
-        Commands::Logout(cmd) => cmd.run(),
-        Commands::Deploy(cmd) => cmd.run(),
-        Commands::Machines(cmd) => cmd.run(),
-        Commands::Destroy(cmd) => cmd.run(),
-        Commands::Scale(cmd) => cmd.run(),
+        Commands::Auth(cmd) => cmd.run(),
+        Commands::Cloud(cmd) => cmd.run(),
         Commands::Config(cmd) => cmd.run(),
         Commands::BootVm { config } => boot_vm(config).map_err(|e| anyhow::anyhow!("{}", e)),
     };

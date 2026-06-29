@@ -1,11 +1,41 @@
 //! OAuth device flow and token refresh for smol CLI.
 //!
 //! Implements RFC 8628 (OAuth 2.0 Device Authorization Grant) for interactive
-//! `smol login` and silent token refresh for expired tokens.
+//! `smol auth login` and silent token refresh for expired tokens.
 
 use anyhow::{bail, Context, Result};
+use clap::{Args, Subcommand};
 use serde::Deserialize;
 use std::time::Duration;
+
+// ---------------------------------------------------------------------------
+// `smol auth` command group — registry + cloud authentication.
+// ---------------------------------------------------------------------------
+
+/// Manage registry and cloud authentication.
+#[derive(Args, Debug)]
+pub struct AuthCmd {
+    #[command(subcommand)]
+    pub command: AuthSubcommand,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum AuthSubcommand {
+    /// Log in to a registry
+    Login(crate::commands::login::LoginCmd),
+
+    /// Log out from a registry
+    Logout(crate::commands::logout::LogoutCmd),
+}
+
+impl AuthCmd {
+    pub fn run(self) -> anyhow::Result<()> {
+        match self.command {
+            AuthSubcommand::Login(cmd) => cmd.run(),
+            AuthSubcommand::Logout(cmd) => cmd.run(),
+        }
+    }
+}
 
 /// Default OIDC issuer for smolmachines.
 const DEFAULT_ISSUER: &str = "https://smolmachines.us.auth0.com";
@@ -14,7 +44,7 @@ const DEFAULT_ISSUER: &str = "https://smolmachines.us.auth0.com";
 const CLIENT_ID: &str = "Df3M6TXvVVMmTTzfyo0mjaLl9rhaI7nZ";
 
 /// Scopes requested during device flow. Includes the smolfleet machine/feature
-/// scopes so a `smol login` token can actually drive the cloud — without them
+/// scopes so a `smol auth login` token can actually drive the cloud — without them
 /// the token carries no authorization and every cloud op 403s (smolfleet reads
 /// the `scope` claim when RBAC isn't injecting `permissions`).
 const SCOPES: &str = "openid offline_access \
@@ -25,7 +55,7 @@ const SCOPES: &str = "openid offline_access \
 /// OAuth audience — the platform-wide API identifier registered in Auth0.
 ///
 /// A single audience covers both the artifact registry and the smolfleet API,
-/// so one `smol login` grants access to all platform services. Auth0 only
+/// so one `smol auth login` grants access to all platform services. Auth0 only
 /// issues a JWT access token (rather than an opaque string) when `audience`
 /// is present; zot validates by JWT signature and smolfleet validates by
 /// both signature and this audience claim. The value must exactly match the
@@ -165,7 +195,7 @@ pub async fn device_flow(no_browser: bool) -> Result<TokenResponse> {
                 interval += Duration::from_secs(5);
             }
             "expired_token" => {
-                bail!("device flow expired — run `smol login` again");
+                bail!("device flow expired — run `smol auth login` again");
             }
             "access_denied" => {
                 bail!("login denied — the request was rejected");
@@ -215,7 +245,7 @@ async fn refresh_access_token_at(issuer: &str, refresh_token: &str) -> Result<To
         let body = resp.text().await.unwrap_or_default();
         tracing::warn!(%status, "token refresh failed");
         bail!(
-            "token refresh failed ({}): {}. Run `smol login` to re-authenticate.",
+            "token refresh failed ({}): {}. Run `smol auth login` to re-authenticate.",
             status,
             body
         );
@@ -516,6 +546,6 @@ mod tests {
         let msg = format!("{err:#}");
         assert!(msg.contains("token refresh failed"), "got: {msg}");
         // A clear, actionable next step for the user.
-        assert!(msg.contains("smol login"), "got: {msg}");
+        assert!(msg.contains("smol auth login"), "got: {msg}");
     }
 }

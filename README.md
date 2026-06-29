@@ -23,6 +23,38 @@ against the **smolfleet** cloud, selected at connect time.
 └──────────────┘     └──────────────────────────────────────────────┘
 ```
 
+## Install
+
+### SDK
+
+```bash
+npm install smolmachines      # Node
+pip install smolmachines      # Python
+```
+
+Prebuilt packages bundle everything the **local** transport needs — the
+`libkrun` libraries, a code-signed boot helper, and the guest rootfs — so
+`Machine.create()` boots an in-process microVM with no separate install (macOS
+Apple Silicon and Linux x86_64/arm64, glibc ≥ 2.34). The **cloud** transport is
+pure-language and runs anywhere. Booting a local microVM needs hardware
+virtualization (macOS Hypervisor.framework or Linux `/dev/kvm`).
+
+### CLI
+
+The standalone **`smol` CLI** (create / run / exec, pack `.smolmachine`
+artifacts, container registry, cloud deploy) installs with a self-contained
+bundle — no SDK or separate engine required:
+
+```bash
+curl -sSL https://raw.githubusercontent.com/smol-machines/smol/main/scripts/install.sh | bash
+```
+
+The script auto-detects your platform, downloads the matching release bundle
+(which carries its own `libkrun` runtime + guest agent), verifies its checksum,
+extracts it to `~/.smol`, and symlinks `smol` onto your `PATH` (`~/.local/bin`).
+Pin a release with `SMOL_VERSION=v1.3.2`; override locations with `PREFIX` /
+`BIN_DIR`. Supports macOS Apple Silicon and Linux x86_64/arm64.
+
 ## Components
 
 | Path | What |
@@ -83,45 +115,13 @@ smol ls
 smol rm mybox
 
 # cloud (smolfleet)
-smol login
-smol deploy --image alpine:3.20
-smol machines
+smol auth login
+smol cloud deploy --image alpine:3.20
+smol cloud ls
 ```
 
 See **[docs/cli.md](docs/cli.md)** for the full command reference, and run
 `smol <command> --help` for flags.
-
-## Install
-
-### SDK
-
-```bash
-npm install smolmachines      # Node
-pip install smolmachines      # Python
-```
-
-Prebuilt packages bundle everything the **local** transport needs — the
-`libkrun` libraries, a code-signed boot helper, and the guest rootfs — so
-`Machine.create()` boots an in-process microVM with no separate install (macOS
-Apple Silicon and Linux x86_64/arm64, glibc ≥ 2.34). The **cloud** transport is
-pure-language and runs anywhere. Booting a local microVM needs hardware
-virtualization (macOS Hypervisor.framework or Linux `/dev/kvm`).
-
-### CLI
-
-The standalone **`smol` CLI** (create / run / exec, pack `.smolmachine`
-artifacts, container registry, cloud deploy) installs with a self-contained
-bundle — no SDK or separate engine required:
-
-```bash
-curl -sSL https://raw.githubusercontent.com/smol-machines/smol/main/scripts/install.sh | bash
-```
-
-The script auto-detects your platform, downloads the matching release bundle
-(which carries its own `libkrun` runtime + guest agent), verifies its checksum,
-extracts it to `~/.smol`, and symlinks `smol` onto your `PATH` (`~/.local/bin`).
-Pin a release with `SMOL_VERSION=v1.3.2`; override locations with `PREFIX` /
-`BIN_DIR`. Supports macOS Apple Silicon and Linux x86_64/arm64.
 
 ## Building from source / the engine core
 

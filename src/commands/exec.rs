@@ -263,7 +263,7 @@ impl ExecCmd {
         let token = cloud_config
             .api_key
             .clone()
-            .ok_or_else(|| anyhow::anyhow!("not logged in to the cloud; run `smol login`"))?;
+            .ok_or_else(|| anyhow::anyhow!("not logged in to the cloud; run `smol auth login`"))?;
 
         let rt = tokio::runtime::Runtime::new()?;
         rt.block_on(async move {

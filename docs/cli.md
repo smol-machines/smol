@@ -9,8 +9,11 @@ Global behavior:
   the file is created `0600`. Secrets (cloud API keys) are masked by `config show`.
 - Logging is controlled by `RUST_LOG` (default `warn`); set `RUST_LOG=debug` for
   verbose output.
-- `--cloud` on lifecycle commands targets the configured smolfleet cluster
-  instead of the local engine.
+- Related commands are grouped under nouns: `smol pack …` (artifacts),
+  `smol cloud …` (smolfleet), `smol auth …` (login), `smol machine …` (per-machine
+  maintenance). The daily-driver lifecycle verbs stay top-level.
+- `--cloud` on `exec`/`start`/`stop`/`status`/`logs` targets the configured
+  smolfleet cluster instead of the local engine.
 
 ## Local machine lifecycle
 
@@ -22,10 +25,6 @@ Global behavior:
 | `smol fork --golden <name> --name <clone>` | Clone a running, forkable machine (copy-on-write RAM + disks). The golden must have been started `--forkable`; it then stays frozen as the shared base. `-p HOST:GUEST` pins the clone's ports (otherwise they're remapped to free host ports). |
 | `smol ls` | List machines (`--json` for machine-readable output). |
 | `smol status <name>` | Show one machine's status (`--json`). |
-| `smol images --name <name>` | List a machine's cached images and storage usage (`--json`). |
-| `smol prune --name <name>` | Reclaim a machine's disk: free unreferenced layers, or `--all` to purge the cache (`--dry-run` to preview; `--all` requires the machine stopped). |
-| `smol update --name <name> …` | Modify a **stopped** machine: add/remove volumes/ports/env, set `--cpus`/`--mem`/`--workdir`, toggle `--net`/`--gpu`, expand `--storage`/`--overlay` (expand-only). |
-| `smol monitor --name <name>` | Supervise a machine in the foreground with health checks (`--health-cmd`, `--interval`, `--health-retries`) and a restart policy (`--restart never\|always\|on-failure\|unless-stopped`). |
 | `smol rm <name>` | Delete a machine (`--force` to skip the confirmation prompt). |
 
 ## Exec, shell & files
@@ -33,10 +32,19 @@ Global behavior:
 | Command | Description |
 |---------|-------------|
 | `smol exec --name <name> -- <cmd…>` | Run a command in a machine (`--stream` for live output; `-e KEY=VALUE`, `-w DIR`, `-i/-t`). Inject secrets host-side for the call with `--secret-env GUEST=HOST_VAR` / `--secret-file GUEST=/path` (never persisted). |
-| `smol shell --name <name>` | Interactive shell into a machine. |
+| `smol shell --name <name>` | Interactive shell into a local machine (cloud: `smol cloud shell`). |
 | `smol cp <src> <dst>` | Copy files host↔guest (`name:/path` denotes a guest path). |
 | `smol logs <name>` | Fetch machine logs (`--tail N`). |
-| `smol data-dir --name <name>` | Print the machine's on-disk data directory (scripting/debugging). |
+
+## Machine maintenance — `smol machine …`
+
+| Command | Description |
+|---------|-------------|
+| `smol machine images --name <name>` | List a machine's cached images and storage usage (`--json`). |
+| `smol machine prune --name <name>` | Reclaim a machine's disk: free unreferenced layers, or `--all` to purge the cache (`--dry-run` to preview; `--all` requires the machine stopped). |
+| `smol machine update --name <name> …` | Modify a **stopped** machine: add/remove volumes/ports/env, set `--cpus`/`--mem`/`--workdir`, toggle `--net`/`--gpu`, expand `--storage`/`--overlay` (expand-only). |
+| `smol machine monitor --name <name>` | Supervise a machine in the foreground with health checks (`--health-cmd`, `--interval`, `--health-retries`) and a restart policy (`--restart never\|always\|on-failure\|unless-stopped`). |
+| `smol machine data-dir --name <name>` | Print the machine's on-disk data directory (scripting/debugging). |
 
 ## Smolfile (declarative)
 
@@ -45,24 +53,30 @@ Global behavior:
 | `smol init` | Scaffold a `Smolfile` in the current directory. |
 | `smol up` / `smol down` | Bring the `Smolfile`-defined machine up / down. |
 
-## Container registry
+## Artifacts & registry — `smol pack …`
 
 | Command | Description |
 |---------|-------------|
-| `smol pack create …` | Build a packable image artifact. |
-| `smol push <ref>` / `smol pull <ref>` | Push / pull images to/from a registry. |
-| `smol inspect <ref>` | Inspect an image. |
-| `smol login` / `smol logout` | Authenticate to the registry / cloud (OAuth device flow). |
+| `smol pack create …` | Build a packable `.smolmachine` image artifact. |
+| `smol pack push <ref>` / `smol pack pull <ref>` | Push / pull artifacts to/from a registry. |
+| `smol pack inspect <ref>` | Inspect an artifact in a registry. |
 
-## Cloud (smolfleet)
+## Authentication — `smol auth …`
 
 | Command | Description |
 |---------|-------------|
-| `smol deploy --image <ref>` | Create + start a machine on the cloud cluster. |
-| `smol machines` | List cloud machines. |
-| `smol destroy <id>` | Delete a cloud machine. |
-| `smol scale …` | Scale a cloud deployment. |
-| `smol exec\|start\|stop\|status\|logs --cloud …` | Operate on cloud machines. |
+| `smol auth login` / `smol auth logout` | Authenticate to the registry / cloud (OAuth device flow). |
+
+## Cloud (smolfleet) — `smol cloud …`
+
+| Command | Description |
+|---------|-------------|
+| `smol cloud deploy --image <ref>` | Create + start a machine on the cloud cluster. |
+| `smol cloud ls` | List cloud machines. |
+| `smol cloud rm <id>` | Delete a cloud machine. |
+| `smol cloud scale …` | Scale a cloud deployment. |
+| `smol cloud shell --name <name>` | Interactive shell into a cloud machine. |
+| `smol exec\|start\|stop\|status\|logs --cloud …` | Operate on cloud machines with the flat lifecycle verbs. |
 
 ## Config
 

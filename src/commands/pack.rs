@@ -19,12 +19,24 @@ const PACK_DEFAULT_MEMORY_MIB: u32 = 256;
 pub enum PackCmd {
     /// Package an OCI image or VM snapshot into a portable executable
     Create(PackCreateCmd),
+
+    /// Push a .smolmachine artifact to a registry
+    Push(crate::commands::push::PushCmd),
+
+    /// Pull a .smolmachine artifact from a registry
+    Pull(crate::commands::pull::PullCmd),
+
+    /// Inspect a .smolmachine artifact in a registry
+    Inspect(crate::commands::inspect::InspectCmd),
 }
 
 impl PackCmd {
     pub fn run(self) -> anyhow::Result<()> {
         match self {
             PackCmd::Create(cmd) => cmd.run(),
+            PackCmd::Push(cmd) => cmd.run(),
+            PackCmd::Pull(cmd) => cmd.run(),
+            PackCmd::Inspect(cmd) => cmd.run(),
         }
     }
 }

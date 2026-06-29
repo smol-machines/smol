@@ -5,6 +5,7 @@
 
 use super::auth;
 use anyhow::{Context, Result};
+use clap::{Args, Subcommand};
 use smolvm::settings::{CloudSection, SmolSettings};
 
 // ---------------------------------------------------------------------------
@@ -119,25 +120,25 @@ pub fn cloud_client() -> Result<(reqwest::Client, CloudSection)> {
                 }
                 Err(e) => {
                     anyhow::bail!(
-                        "Session expired and refresh failed: {}. Run `smol login` to re-authenticate.",
+                        "Session expired and refresh failed: {}. Run `smol auth login` to re-authenticate.",
                         e
                     );
                 }
             }
         } else {
-            anyhow::bail!("Session expired. Run `smol login` to re-authenticate.");
+            anyhow::bail!("Session expired. Run `smol auth login` to re-authenticate.");
         }
     }
 
     let mut headers = reqwest::header::HeaderMap::new();
     if let Some(ref key) = settings.cloud.api_key {
         if key.is_empty() {
-            anyhow::bail!("API key is empty. Run `smol login` to authenticate.");
+            anyhow::bail!("API key is empty. Run `smol auth login` to authenticate.");
         }
         let header_value = reqwest::header::HeaderValue::from_str(&format!("Bearer {}", key))
             .map_err(|_| {
                 anyhow::anyhow!(
-                    "API key contains invalid characters. Run `smol login` to re-authenticate."
+                    "API key contains invalid characters. Run `smol auth login` to re-authenticate."
                 )
             })?;
         headers.insert(reqwest::header::AUTHORIZATION, header_value);
@@ -189,7 +190,7 @@ pub async fn check_response(resp: reqwest::Response, context: &str) -> Result<re
     };
     match status.as_u16() {
         401 => anyhow::bail!(
-            "{context}: not authenticated ({status}){detail}. Run `smol login` to re-authenticate."
+            "{context}: not authenticated ({status}){detail}. Run `smol auth login` to re-authenticate."
         ),
         403 => anyhow::bail!("{context}: permission denied ({status}){detail}."),
         404 => anyhow::bail!("{context}: not found ({status}){detail}."),
@@ -308,5 +309,64 @@ mod tests {
             machines[1].source.as_ref().unwrap().source_type,
             "smolmachine"
         );
+    }
+}
+
+// ---------------------------------------------------------------------------
+// `smol cloud` command group — smolfleet (cloud) operations.
+// ---------------------------------------------------------------------------
+
+/// Manage machines deployed on the smolfleet cloud.
+#[derive(Args, Debug)]
+pub struct CloudCmd {
+    #[command(subcommand)]
+    pub command: CloudSubcommand,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum CloudSubcommand {
+    /// Deploy a machine to smolfleet
+    Deploy(crate::commands::deploy::DeployCmd),
+
+    /// List deployed machines on smolfleet
+    Ls(crate::commands::machines::MachinesCmd),
+
+    /// Destroy a deployed machine on smolfleet
+    Rm(crate::commands::destroy::DestroyCmd),
+
+    /// Scale a machine on smolfleet
+    Scale(crate::commands::scale::ScaleCmd),
+
+    /// Open an interactive shell on a deployed cloud machine
+    #[command(visible_alias = "sh")]
+    Shell {
+        /// Machine name (default: "default")
+        #[arg(short = 'n', long, value_name = "NAME")]
+        name: Option<String>,
+    },
+}
+
+impl CloudCmd {
+    pub fn run(self) -> anyhow::Result<()> {
+        match self.command {
+            CloudSubcommand::Deploy(cmd) => cmd.run(),
+            CloudSubcommand::Ls(cmd) => cmd.run(),
+            CloudSubcommand::Rm(cmd) => cmd.run(),
+            CloudSubcommand::Scale(cmd) => cmd.run(),
+            CloudSubcommand::Shell { name } => crate::commands::exec::ExecCmd {
+                name,
+                command: vec!["/bin/sh".to_string()],
+                interactive: true,
+                tty: true,
+                stream: false,
+                env: vec![],
+                workdir: None,
+                secret_env: vec![],
+                secret_file: vec![],
+                timeout: None,
+                cloud: true,
+            }
+            .run(),
+        }
     }
 }

@@ -18,6 +18,7 @@ pub mod login;
 pub mod logout;
 pub mod logs;
 pub mod ls;
+pub mod machine;
 pub mod monitor;
 pub mod pack;
 pub mod prune;

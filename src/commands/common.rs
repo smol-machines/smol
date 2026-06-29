@@ -4,7 +4,7 @@ use smolvm::agent::{AgentClient, AgentManager};
 
 /// How long to wait for a TCP connection to a cloud/auth endpoint before
 /// giving up. Without this, a black-hole host (accepts SYN, never responds)
-/// makes `smol login` / `smol deploy` hang forever.
+/// makes `smol auth login` / `smol deploy` hang forever.
 pub const HTTP_CONNECT_TIMEOUT_SECS: u64 = 10;
 
 /// Overall per-request deadline for cloud/auth HTTP calls. Generous enough
@@ -208,7 +208,7 @@ enum ResolvedCredential {
     /// Auth0 JWT or similar upstream identity credential.
     /// Exchanged with the registry's token service per-operation to obtain a
     /// short-lived OCI bearer token. Only this variant is eligible for silent
-    /// OAuth refresh via `smol login`'s stored `refresh_token`.
+    /// OAuth refresh via `smol auth login`'s stored `refresh_token`.
     Identity(String),
     /// Static bearer token (legacy `username="token"` convention).
     /// Sent directly as `Authorization: Bearer` on every request.
@@ -249,7 +249,7 @@ pub fn build_registry_client(
 
     let mut client = smolvm_registry::RegistryClient::new(base_url);
 
-    // Credentials are stored by `smol login`. Identity tokens are refreshed
+    // Credentials are stored by `smol auth login`. Identity tokens are refreshed
     // here if expired. Route based on credential type, not registry hostname,
     // so self-hosted registries using the identity_token path work correctly.
     match resolve_token(registry, config, cloud)? {
@@ -340,11 +340,11 @@ fn resolve_smolmachines_cloud_token(
 
     // Expired (or within the refresh buffer): silently refresh via the cloud
     // refresh token. Without one, surface the stale token so the registry
-    // returns a clear 401 with a "run `smol login`" hint.
+    // returns a clear 401 with a "run `smol auth login`" hint.
     let refresh_token = match &cloud.refresh_token {
         Some(rt) => rt.clone(),
         None => {
-            eprintln!("warning: cloud session is expired. Run `smol login` to re-authenticate.");
+            eprintln!("warning: cloud session is expired. Run `smol auth login` to re-authenticate.");
             return Ok(Some(ResolvedCredential::Identity(token)));
         }
     };
@@ -355,7 +355,7 @@ fn resolve_smolmachines_cloud_token(
         .block_on(super::auth::refresh_access_token(&refresh_token))
         .map_err(|e| {
             anyhow::anyhow!(
-                "token refresh failed: {}. Run `smol login` to re-authenticate.",
+                "token refresh failed: {}. Run `smol auth login` to re-authenticate.",
                 e
             )
         })?;
@@ -418,7 +418,7 @@ fn resolve_identity_token(
                 "token expired and no refresh token available; using stale token"
             );
             eprintln!(
-                "warning: token for {} is expired. Run `smol login` to re-authenticate.",
+                "warning: token for {} is expired. Run `smol auth login` to re-authenticate.",
                 registry
             );
             // Return the stale token and let the registry return a clear 401.
@@ -434,7 +434,7 @@ fn resolve_identity_token(
         .block_on(super::auth::refresh_access_token(&refresh_token))
         .map_err(|e| {
             anyhow::anyhow!(
-                "token refresh failed: {}. Run `smol login` to re-authenticate.",
+                "token refresh failed: {}. Run `smol auth login` to re-authenticate.",
                 e
             )
         })?;
