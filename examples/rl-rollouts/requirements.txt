@@ -1,0 +1,2 @@
+# The smol SDK (cloud transport is pure-Python; no engine needed for cloud runs).
+smolmachines>=1.3.0

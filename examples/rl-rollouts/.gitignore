@@ -1,0 +1,6 @@
+# Per-run artifacts written by the harness (reports + tracked machine ids).
+rl-run-*/
+# Background-run logs.
+*.log
+__pycache__/
+smoke-run/
