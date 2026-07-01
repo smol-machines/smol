@@ -1,9 +1,9 @@
-//! smol fork — clone a running, forkable machine (copy-on-write RAM + disks).
+//! smol machine fork — clone a running, forkable machine (copy-on-write RAM + disks).
 //!
 //! Mirrors the engine's `machine fork` (src/cli/vm_common.rs::fork_vm) over the
 //! public `smolvm` library, matching smol's existing pattern of reimplementing
 //! engine flows rather than calling binary-internal helpers. The golden must
-//! have been started forkable (`smol start --forkable`), which leaves a control
+//! have been started forkable (`smol machine start --forkable`), which leaves a control
 //! socket the engine uses to freeze it and write a snapshot.
 
 use clap::Args;
@@ -37,15 +37,28 @@ pub struct ForkCmd {
 
     /// Fork on the cloud control plane (live-RAM CoW clone on the golden's node)
     /// instead of locally. The golden must have been started `--forkable --cloud`.
+    /// Usually unnecessary — the golden's location is resolved automatically.
     #[arg(long)]
     pub cloud: bool,
+
+    /// Force a local fork. Equivalent to a `local/` prefix on the golden.
+    #[arg(long, conflicts_with = "cloud")]
+    pub local: bool,
 }
 
 impl ForkCmd {
-    pub fn run(self) -> anyhow::Result<()> {
-        if self.cloud {
+    pub fn run(mut self) -> anyhow::Result<()> {
+        use super::resolve::{self, Location, Target};
+
+        // The clone lands wherever its golden lives: resolve the golden's
+        // location (+ optional --local/--cloud), then route.
+        let target = Target::from_flags(self.local, self.cloud)?;
+        let (location, golden_handle) = resolve::route(Some(&self.golden), target)?;
+        if location == Location::Cloud {
             return self.run_cloud();
         }
+        // Use the prefix-stripped handle as the local golden reference.
+        self.golden = golden_handle;
         let golden = &self.golden;
         let clone = &self.name;
 
@@ -73,13 +86,13 @@ impl ForkCmd {
         if !ctl.exists() {
             anyhow::bail!(
                 "golden '{golden}' is not running forkable; start it with \
-                 `smol start --forkable --name {golden}`"
+                 `smol machine start --forkable --name {golden}`"
             );
         }
         let status = control_socket_cmd(&ctl, "STATUS").map_err(|e| {
             anyhow::anyhow!(
                 "golden '{golden}' control socket not responding ({e}); start it with \
-                 `smol start --forkable --name {golden}`"
+                 `smol machine start --forkable --name {golden}`"
             )
         })?;
         if !status.starts_with("OK") {
@@ -159,7 +172,7 @@ impl ForkCmd {
             // boot subprocess from `features`, not from a (non-inherited) process
             // env. Without this the clone cold-boots and loses the warm RAM.
             snapshot_dir: Some(snapshot_dir.clone()),
-            // `smol fork` detaches the clone to persist; opt out of the boot
+            // `smol machine fork` detaches the clone to persist; opt out of the boot
             // subprocess's parent-death watchdog (see start.rs) so it survives
             // this command's exit.
             watch_parent: Some(false),

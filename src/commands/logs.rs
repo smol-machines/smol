@@ -1,4 +1,4 @@
-//! smol logs — stream machine output.
+//! smol machine logs — stream machine output.
 
 use super::common;
 use clap::Args;
@@ -18,18 +18,27 @@ pub struct LogsCmd {
     #[arg(short = 'n', long, default_value = "100")]
     pub tail: u32,
 
-    /// Show cloud machine events (by name or ID)
+    /// Show cloud machine events (by name or ID). Usually unnecessary — a
+    /// machine's location is resolved automatically; equivalent to `cloud/`.
     #[arg(long)]
     pub cloud: bool,
+
+    /// Force a local machine. Equivalent to a `local/` prefix.
+    #[arg(long, conflicts_with = "cloud")]
+    pub local: bool,
 }
 
 impl LogsCmd {
-    pub fn run(self) -> anyhow::Result<()> {
-        if self.cloud {
+    pub fn run(mut self) -> anyhow::Result<()> {
+        use super::resolve::{self, Location, Target};
+
+        let target = Target::from_flags(self.local, self.cloud)?;
+        let (location, handle) = resolve::route(self.name.as_deref(), target)?;
+        if location == Location::Cloud {
+            self.name = Some(handle);
             return self.run_cloud();
         }
-
-        let name = super::common::resolve_name(self.name.clone());
+        let name = handle;
 
         let (manager, mut client) = common::ensure_connected(&name)?;
         manager.detach();

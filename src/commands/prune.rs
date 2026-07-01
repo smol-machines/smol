@@ -44,7 +44,7 @@ impl PruneCmd {
             manager.detach();
             anyhow::bail!(
                 "cannot prune --all while machine '{}' is running. Stop it first with: \
-                 smol stop --name {}",
+                 smol machine stop --name {}",
                 self.name,
                 self.name
             );
@@ -88,7 +88,7 @@ impl PruneCmd {
                     );
                     eprintln!(
                         "(--all keeps images a machine needs to restart; to reclaim everything: \
-                         smol rm --name {})",
+                         smol machine rm --name {})",
                         self.name
                     );
                 }

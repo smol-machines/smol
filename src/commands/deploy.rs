@@ -243,8 +243,8 @@ impl DeployCmd {
             None => {
                 let who = machine.name.as_deref().unwrap_or(&machine.id);
                 eprintln!(
-                    "No URL yet (the port may still be starting) — check `smol ls`, or reach it now with \
-                     `smol exec --cloud --name {who}` / `smol shell --cloud --name {who}`."
+                    "No URL yet (the port may still be starting) — check `smol machine ls`, or reach it now with \
+                     `smol machine exec --cloud --name {who}` / `smol machine shell --cloud --name {who}`."
                 );
             }
         }

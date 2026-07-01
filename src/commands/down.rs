@@ -1,4 +1,4 @@
-//! smol down — stop the machine started by `smol up`.
+//! smol file down — stop the machine started by `smol file up`.
 
 use clap::Args;
 use smolvm::agent::AgentManager;
@@ -39,7 +39,7 @@ impl DownCmd {
                 println!("Stopped machine: {}", name);
             }
             None => {
-                println!("No machine '{}' found (was it started with 'smol up'?)", name);
+                println!("No machine '{}' found (was it started with 'smol file up'?)", name);
             }
         }
 

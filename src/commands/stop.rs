@@ -1,4 +1,4 @@
-//! smol stop — stop a machine.
+//! smol machine stop — stop a machine.
 
 use clap::Args;
 use smolvm::agent::AgentManager;
@@ -10,18 +10,27 @@ pub struct StopCmd {
     #[arg(short = 'n', long, value_name = "NAME")]
     pub name: Option<String>,
 
-    /// Stop a cloud machine (by name or ID)
+    /// Stop a cloud machine (by name or ID). Usually unnecessary — a machine's
+    /// location is resolved automatically; equivalent to a `cloud/` prefix.
     #[arg(long)]
     pub cloud: bool,
+
+    /// Force a local machine. Equivalent to a `local/` prefix.
+    #[arg(long, conflicts_with = "cloud")]
+    pub local: bool,
 }
 
 impl StopCmd {
-    pub fn run(self) -> anyhow::Result<()> {
-        if self.cloud {
+    pub fn run(mut self) -> anyhow::Result<()> {
+        use super::resolve::{self, Location, Target};
+
+        let target = Target::from_flags(self.local, self.cloud)?;
+        let (location, handle) = resolve::route(self.name.as_deref(), target)?;
+        if location == Location::Cloud {
+            self.name = Some(handle);
             return self.run_cloud();
         }
-
-        let name = super::common::resolve_name(self.name);
+        let name = handle;
 
         let mut config = SmolvmConfig::load()?;
 

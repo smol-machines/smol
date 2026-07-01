@@ -1,4 +1,4 @@
-//! smol create — create a persistent machine.
+//! smol machine create — create a persistent machine.
 
 use clap::Args;
 use smolvm::config::SmolvmConfig;
@@ -174,7 +174,7 @@ impl CreateCmd {
 
         println!("Created machine: {}", name);
         println!("  CPUs: {}, Memory: {} MiB", self.cpus, self.mem);
-        println!("\nUse 'smol start --name {}' to start the machine", name);
+        println!("\nUse 'smol machine start --name {}' to start the machine", name);
         Ok(())
     }
 
@@ -270,7 +270,7 @@ impl CreateCmd {
 
         println!("Created machine: {name} (from {})", sidecar_path.display());
         println!("  CPUs: {cpus}, Memory: {mem} MiB");
-        println!("\nUse 'smol start --name {name}' to start the machine");
+        println!("\nUse 'smol machine start --name {name}' to start the machine");
         Ok(())
     }
 }

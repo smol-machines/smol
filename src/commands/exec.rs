@@ -1,4 +1,4 @@
-//! smol exec — execute a command in a running machine.
+//! smol machine exec — execute a command in a running machine.
 
 use super::common;
 use clap::Args;
@@ -50,28 +50,49 @@ pub struct ExecCmd {
     #[arg(long, value_name = "SECS")]
     pub timeout: Option<u64>,
 
-    /// Execute in a cloud machine (by name or ID)
+    /// Force a cloud machine (by name or ID). Usually unnecessary — a machine's
+    /// location is resolved automatically; equivalent to a `cloud/` prefix.
     #[arg(long)]
     pub cloud: bool,
+
+    /// Force a local machine. Equivalent to a `local/` prefix.
+    #[arg(long, conflicts_with = "cloud")]
+    pub local: bool,
 }
 
 impl ExecCmd {
-    pub fn run(self) -> anyhow::Result<()> {
-        if self.cloud {
-            // An interactive/TTY session needs the PTY WebSocket; a plain command
-            // uses the buffered HTTP exec.
-            if self.interactive || self.tty {
-                return self.run_cloud_interactive();
-            }
-            return self.run_cloud();
-        }
+    pub fn run(mut self) -> anyhow::Result<()> {
+        use super::resolve::{self, Location, Target};
 
+        // A machine's location is an attribute, not a command path: resolve it
+        // from the reference (+ optional --local/--cloud override), then route.
+        let target = Target::from_flags(self.local, self.cloud)?;
+        let (location, handle) = resolve::locate(self.name.as_deref(), target)?;
+        // Normalize `name` to the bare handle so the downstream paths (which
+        // still key on a plain name/id) see no `local/`/`cloud/` prefix.
+        self.name = Some(handle);
+
+        match location {
+            Location::Cloud => {
+                // An interactive/TTY session needs the PTY WebSocket; a plain
+                // command uses the buffered HTTP exec.
+                if self.interactive || self.tty {
+                    self.run_cloud_interactive()
+                } else {
+                    self.run_cloud()
+                }
+            }
+            Location::Local => self.run_local(),
+        }
+    }
+
+    fn run_local(self) -> anyhow::Result<()> {
         let name = super::common::resolve_name(self.name.clone());
         let command = strip_separator(&self.command);
         if command.is_empty() {
             anyhow::bail!(
                 "no command specified.\n\
-                 Use: smol exec --name <NAME> -- <command>"
+                 Use: smol machine exec --name <NAME> -- <command>"
             );
         }
         let timeout = self.timeout.map(Duration::from_secs);
@@ -129,12 +150,7 @@ impl ExecCmd {
                     .with_env(env)
                     .with_workdir(self.workdir.clone())
                     .with_timeout(timeout)
-                    .with_tty(self.tty)
-                    // Run in the machine's persistent overlay so filesystem
-                    // changes survive across execs (and join the running main
-                    // container when started detached). Without this each exec
-                    // gets a fresh overlay and writes to `/` vanish.
-                    .with_persistent_overlay(Some(name.clone()));
+                    .with_tty(self.tty);
                 let exit_code = client.run_interactive(config)?;
                 manager.detach();
                 std::process::exit(exit_code);
@@ -143,8 +159,7 @@ impl ExecCmd {
             let config = RunConfig::new(image, command.clone())
                 .with_env(env)
                 .with_workdir(self.workdir.clone())
-                .with_timeout(timeout)
-                .with_persistent_overlay(Some(name.clone()));
+                .with_timeout(timeout);
             let (exit_code, stdout, stderr) = client.run_non_interactive(config)?;
             print_and_exit(
                 &manager,
@@ -182,7 +197,7 @@ impl ExecCmd {
         let command = strip_separator(&self.command);
         if command.is_empty() {
             anyhow::bail!(
-                "no command specified.\nUse: smol exec --cloud --name <NAME> -- <command>"
+                "no command specified.\nUse: smol machine exec --cloud --name <NAME> -- <command>"
             );
         }
 
@@ -196,7 +211,7 @@ impl ExecCmd {
         // Override the default error message for exec
         let name = self.name.clone();
         if name.is_none() {
-            anyhow::bail!("machine name or ID required for --cloud.\nUse: smol exec --cloud --name <NAME> -- <command>");
+            anyhow::bail!("machine name or ID required for --cloud.\nUse: smol machine exec --cloud --name <NAME> -- <command>");
         }
 
         super::cloud::run_cloud_command(name, |http, endpoint, id| async move {
@@ -251,7 +266,7 @@ impl ExecCmd {
         }
         let name = self.name.clone().ok_or_else(|| {
             anyhow::anyhow!(
-                "machine name or ID required for --cloud.\nUse: smol shell --cloud --name <NAME>"
+                "machine name or ID required for --cloud.\nUse: smol machine shell --cloud --name <NAME>"
             )
         })?;
         let cmd = command.join(" ");

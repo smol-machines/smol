@@ -1,4 +1,4 @@
-//! smol up — start a machine from a Smolfile.
+//! smol file up — start a machine from a Smolfile.
 
 use clap::Args;
 use smolvm::agent::{AgentManager, LaunchFeatures, VmResources};
@@ -25,7 +25,7 @@ impl UpCmd {
 
         if !smolfile_path.exists() {
             anyhow::bail!(
-                "Smolfile not found at '{}'. Run 'smol init' to create one.",
+                "Smolfile not found at '{}'. Run 'smol file init' to create one.",
                 smolfile_path.display()
             );
         }

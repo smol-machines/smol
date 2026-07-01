@@ -1,4 +1,4 @@
-//! smol status — show machine details.
+//! smol machine status — show machine details.
 
 use super::common;
 use clap::Args;
@@ -14,18 +14,27 @@ pub struct StatusCmd {
     #[arg(long)]
     pub json: bool,
 
-    /// Show cloud machine details (by name or ID)
+    /// Show cloud machine details (by name or ID). Usually unnecessary — a
+    /// machine's location is resolved automatically; equivalent to `cloud/`.
     #[arg(long)]
     pub cloud: bool,
+
+    /// Force a local machine. Equivalent to a `local/` prefix.
+    #[arg(long, conflicts_with = "cloud")]
+    pub local: bool,
 }
 
 impl StatusCmd {
-    pub fn run(self) -> anyhow::Result<()> {
-        if self.cloud {
+    pub fn run(mut self) -> anyhow::Result<()> {
+        use super::resolve::{self, Location, Target};
+
+        let target = Target::from_flags(self.local, self.cloud)?;
+        let (location, handle) = resolve::route(self.name.as_deref(), target)?;
+        if location == Location::Cloud {
+            self.name = Some(handle);
             return self.run_cloud();
         }
-
-        let name = super::common::resolve_name(self.name.clone());
+        let name = handle;
 
         let manager = common::get_manager(&name)?;
         let is_running = manager.try_connect_existing().is_some();

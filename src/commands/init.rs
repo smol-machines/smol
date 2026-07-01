@@ -1,4 +1,4 @@
-//! smol init — create a Smolfile in the current directory.
+//! smol file init — create a Smolfile in the current directory.
 
 use clap::Args;
 use std::path::Path;
@@ -45,6 +45,7 @@ volumes = [".:/workspace"]
 
         std::fs::write(path, &content)?;
         println!("Created Smolfile");
+        println!("\nUse 'smol file up' to start the machine it defines");
         Ok(())
     }
 }

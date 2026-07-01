@@ -242,7 +242,7 @@ impl PackCreateCmd {
 
         if vm.actual_state() == RecordState::Running {
             anyhow::bail!(
-                "VM '{}' is running. Stop it first: smol stop {}",
+                "VM '{}' is running. Stop it first: smol machine stop {}",
                 vm_name,
                 vm_name
             );
