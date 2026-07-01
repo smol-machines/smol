@@ -87,6 +87,13 @@ Cloud machines are also reachable through `smol machine …` with `--cloud` (or 
 | `smol cloud scale …` | Scale a cloud deployment. |
 | `smol cloud shell --name <name>` | Interactive shell into a cloud machine. Alias: `sh`. |
 
+> **Scoped egress and image pulls.** A cloud machine pulls its base image the
+> first time it runs a command, so a `--allow-host` scope automatically also
+> permits the image's own registry (e.g. `docker.io` for Docker Hub) — you do
+> not need to list it yourself. A registry that serves image blobs from an
+> unrelated CDN (some private registries) may still need an extra `--allow-host`
+> for that CDN; the pull error names the host it could not reach.
+
 ## Config — `smol config …`
 
 | Command | Description |
