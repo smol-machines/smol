@@ -28,6 +28,13 @@ class ResourceSpec:
     """Memory in MB."""
     network: Optional[bool] = None
     """Enable outbound network access (TSI). Default: False."""
+    allow_cidrs: Optional[list[str]] = None
+    """Scope egress to these CIDR ranges. Setting this (or allow_hosts) enables
+    networking and restricts it to the listed CIDRs. Cloud target only."""
+    allow_hosts: Optional[list[str]] = None
+    """Scope egress to these hostnames and their subdomains (e.g.
+    api.anthropic.com). Setting this (or allow_cidrs) enables networking and
+    restricts it to the listed hosts. Cloud target only."""
     storage_gb: Optional[int] = None
     """Storage disk size in GB."""
     overlay_gb: Optional[int] = None

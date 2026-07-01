@@ -531,7 +531,13 @@ def make_transport(config: MachineConfig, conn: Optional[ConnectOptions] = None)
             "autoStopSeconds": config.auto_stop_seconds,
             "ttlSeconds": config.ttl_seconds,
         }
-        if r and r.network:
+        if r and (r.allow_cidrs or r.allow_hosts):
+            body["network"] = {
+                "mode": "allowCidrs",
+                "cidrs": r.allow_cidrs or [],
+                "hosts": r.allow_hosts or [],
+            }
+        elif r and r.network:
             body["network"] = {"mode": "open"}
         # Publish ports: supply only the guest port; the control plane allocates
         # the node host port (read the allocated hostPort back from the machine
