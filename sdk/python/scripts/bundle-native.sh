@@ -94,18 +94,49 @@ case "$(uname -s)" in
       echo "bundled $base"
       copied=$((copied + 1))
     done
-    # The GPU-enabled libkrun carries a hard libvirglrenderer.so.1 NEEDED. Strip
-    # it (mirrors the engine's build-dist.sh) so the lib loads on non-GPU hosts
-    # via RTLD_LAZY and the wheel can be relabeled manylinux (auditwheel can't
-    # vendor virgl). GPU is loaded by soname at runtime only — unused by the SDK.
+    # The GPU-enabled libkrun references libvirglrenderer by a hard NEEDED AND by
+    # direct symbols. Simply removing the NEEDED (as the engine's build-dist.sh
+    # does) leaves those symbols undefined, so libkrun only loads under RTLD_LAZY
+    # and FAILS under RTLD_NOW / LD_BIND_NOW. Instead: drop the real NEEDED and
+    # satisfy the symbols with a tiny bundled stub of WEAK no-ops. Weak matters:
+    # a real system libvirglrenderer (strong symbols) OVERRIDES the stub, so GPU
+    # still works on hosts that have virglrenderer installed — the stub is only a
+    # fallback that lets libkrun load when virgl is absent. No graphics stack is
+    # pulled in and auditwheel sees a local dep, so the wheel still relabels
+    # manylinux, and libkrun loads under any binding mode.
     if command -v patchelf >/dev/null 2>&1; then
+      stubbed=""
       for lk in "$DEST"/libkrun.so*; do
         [ -e "$lk" ] || continue
         if patchelf --print-needed "$lk" 2>/dev/null | grep -q libvirglrenderer; then
           patchelf --remove-needed libvirglrenderer.so.1 "$lk"
-          echo "stripped libvirglrenderer NEEDED from $(basename "$lk")"
+          stubbed=1
         fi
       done
+      if [ -n "$stubbed" ]; then
+        syms="$(nm -D --undefined-only "$DEST"/libkrun.so* 2>/dev/null \
+                | awk '{print $NF}' | grep -iE 'virgl' | sort -u)"
+        if [ -n "$syms" ] && command -v cc >/dev/null 2>&1; then
+          stub_c="$(mktemp)"
+          # WEAK so a real (strong) system virglrenderer overrides them at runtime.
+          for s in $syms; do echo "__attribute__((weak)) void $s(void){}"; done > "$stub_c"
+          cc -x c -shared -fPIC -Wl,-soname,smol_virgl_stub.so \
+             -o "$DEST/smol_virgl_stub.so" "$stub_c"
+          rm -f "$stub_c"
+          for lk in "$DEST"/libkrun.so*; do
+            [ -e "$lk" ] || continue
+            patchelf --add-needed smol_virgl_stub.so "$lk"
+            cur="$(patchelf --print-rpath "$lk" 2>/dev/null || true)"
+            case ":$cur:" in
+              *':$ORIGIN:'*) ;;
+              *) patchelf --set-rpath "\$ORIGIN${cur:+:$cur}" "$lk" ;;
+            esac
+          done
+          echo "bundled smol_virgl_stub.so ($(printf '%s\n' "$syms" | wc -l | tr -d ' ') weak symbols); libkrun loads under RTLD_NOW"
+        else
+          echo "bundle-native: WARNING — no cc/nm virgl symbols; libkrun stripped but needs RTLD_LAZY" >&2
+        fi
+      fi
     else
       echo "bundle-native: WARNING — patchelf not found; libkrun keeps its virgl NEEDED (non-GPU Linux load + manylinux relabel will fail)" >&2
     fi
