@@ -21,6 +21,46 @@ if [ ! -d "$LIB_DIR" ]; then
 fi
 
 copied=0
+
+# macOS mini-delocate: a GPU-enabled libkrun.dylib hard-links Homebrew
+# libepoxy/virglrenderer by ABSOLUTE path (e.g.
+# /opt/homebrew/opt/virglrenderer/lib/libvirglrenderer.1.dylib). GPU is unused by
+# the SDK, but those load commands must still resolve or `dlopen` fails on any Mac
+# without those Homebrew formulae (the "Library not loaded" install error). Vendor
+# each absolute dep next to the bundled lib and repoint it to @loader_path,
+# recursively (virglrenderer itself pulls in libepoxy + libMoltenVK).
+_vendor_macho_deps() {
+  local target="$1" dep dbase
+  otool -L "$target" 2>/dev/null | awk 'NR>1{print $1}' | while read -r dep; do
+    dbase="$(basename "$dep")"
+    case "$dep" in
+      # Absolute Homebrew/MacPorts path: repoint to @loader_path AND vendor.
+      /opt/homebrew/*|/usr/local/*|/opt/local/*)
+        install_name_tool -change "$dep" "@loader_path/$dbase" "$target" 2>/dev/null || true
+        ;;
+      # Already relative to its loader (e.g. virglrenderer -> @loader_path/
+      # libMoltenVK): no repoint, but the sibling must still be vendored.
+      @loader_path/*|@rpath/*)
+        [ "$dbase" = "$(basename "$target")" ] && continue  # self-id, skip
+        ;;
+      *) continue ;;  # system lib / framework — leave it
+    esac
+    if [ ! -e "$DEST/$dbase" ]; then
+      if [ -e "$dep" ]; then cp -f "$dep" "$DEST/$dbase"
+      elif [ -e "$LIB_DIR/$dbase" ]; then cp -f "$LIB_DIR/$dbase" "$DEST/$dbase"
+      else
+        echo "bundle-native: WARNING — missing dep $dbase (wheel not self-contained)" >&2
+        continue
+      fi
+      chmod u+w "$DEST/$dbase"
+      install_name_tool -id "@rpath/$dbase" "$DEST/$dbase" 2>/dev/null || true
+      _vendor_macho_deps "$DEST/$dbase"
+      codesign --force --sign - "$DEST/$dbase" 2>/dev/null || true
+      echo "vendored dep $dbase"
+    fi
+  done
+}
+
 case "$(uname -s)" in
   Darwin)
     shopt -s nullglob
@@ -28,12 +68,16 @@ case "$(uname -s)" in
       [ -e "$src" ] || continue
       base="$(basename "$src")"
       cp -f "$src" "$DEST/$base"
+      chmod u+w "$DEST/$base"
       # Make the install-name relocatable.
       install_name_tool -id "@rpath/$base" "$DEST/$base" 2>/dev/null || true
       # libkrun depends on libkrunfw — give it an @loader_path rpath so it finds
       # the sibling libkrunfw bundled next to it, independent of build location.
       if [ "$base" = "libkrun.dylib" ]; then
         install_name_tool -add_rpath "@loader_path" "$DEST/$base" 2>/dev/null || true
+        # Vendor + repoint libkrun's absolute Homebrew GPU deps so the wheel is
+        # self-contained on a Mac without those formulae.
+        _vendor_macho_deps "$DEST/$base"
       fi
       # Ad-hoc re-sign LAST (macOS dlopen SIGKILLs an unsigned/altered dylib).
       codesign --force --sign - "$DEST/$base" 2>/dev/null || true
