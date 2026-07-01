@@ -51,6 +51,10 @@ include = [
     "python/smol/libkrunfw*.dylib",
     "python/smol/libkrun*.so*",
     "python/smol/libkrunfw*.so*",
+    # The virgl weak-symbol stub bundle-native.sh compiles next to libkrun so it
+    # loads under RTLD_NOW; without this glob the stub is dropped and libkrun's
+    # NEEDED dangles (auditwheel repair then fails to locate it).
+    "python/smol/smol_virgl_stub.so",
     "python/smol/smol-vmm",
     "python/smol/agent-rootfs.tar",
 ]

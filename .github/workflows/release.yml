@@ -295,7 +295,16 @@ jobs:
         # OIDC trusted publishing: no NPM_TOKEN. npm ≥11.5.1 exchanges the GitHub
         # OIDC token (id-token: write) for a short-lived registry credential, and
         # attaches provenance (the repo is public, so provenance is accepted).
-        run: npm publish --access public --provenance
+        # Skip if this exact version is already on npm so a re-run (e.g. to finish
+        # a half-published release) stays green instead of 403-ing on the duplicate
+        # and blocking the gated PyPI publish.
+        run: |
+          VER="$(node -p "require('./package.json').version")"
+          if npm view "smolmachines@$VER" version >/dev/null 2>&1; then
+            echo "smolmachines@$VER already published to npm — skipping"
+          else
+            npm publish --access public --provenance
+          fi
 
   # ─── Python: abi3 wheels (one per platform, Py3.9+) ────────────────────────
   python-wheels:
@@ -409,6 +418,7 @@ jobs:
             auditwheel repair \
               --exclude libkrun.so.1 --exclude libkrunfw.so.5 \
               --exclude libkrun.so --exclude libkrunfw.so \
+              --exclude smol_virgl_stub.so \
               -w dist_manylinux "$whl"
           done
           rm -f dist/*.whl && mv dist_manylinux/*.whl dist/
