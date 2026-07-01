@@ -1,11 +1,11 @@
-//! smol cp — copy files between host and machine.
+//! smol machine cp — copy files between host and machine.
 //!
 //! Targets a local VM by default (over the agent vsock), or a deployed cloud
 //! machine with `--cloud` (over the smolfleet files API). The environment is
-//! explicit — matching `smol exec/start/stop/status/logs --cloud` — so a copy
-//! never lands in the wrong place by surprise:
-//!   smol cp ./index.html devvm:/srv/index.html              # local VM
-//!   smol cp --cloud ./index.html webdemo2:/usr/share/nginx/html/index.html  # cloud
+//! explicit — matching `smol machine exec/start/stop/status/logs --cloud` — so a
+//! copy never lands in the wrong place by surprise:
+//!   smol machine cp ./index.html devvm:/srv/index.html              # local VM
+//!   smol machine cp --cloud ./index.html webdemo2:/usr/share/nginx/html/index.html  # cloud
 
 use super::{cloud, common};
 use clap::Args;
@@ -20,9 +20,15 @@ pub struct CpCmd {
     #[arg(value_name = "DST")]
     pub dst: String,
 
-    /// Copy to/from a deployed cloud machine (by name or ID) instead of a local VM
+    /// Copy to/from a deployed cloud machine (by name or ID) instead of a local
+    /// VM. Usually unnecessary — the machine's location is resolved
+    /// automatically; equivalent to a `cloud/` prefix on the machine ref.
     #[arg(long)]
     pub cloud: bool,
+
+    /// Force a local machine. Equivalent to a `local/` prefix on the machine ref.
+    #[arg(long, conflicts_with = "cloud")]
+    pub local: bool,
 }
 
 impl CpCmd {
@@ -41,14 +47,18 @@ impl CpCmd {
                 );
             };
 
-        // Target is explicit: --cloud → a deployed smolfleet machine; otherwise
-        // a local VM. (No implicit fallback — copying to the wrong environment
-        // should never happen by surprise.)
-        if self.cloud {
-            return cp_cloud(&machine_name, &guest_path, &local_path, is_upload);
+        // The machine's location is resolved from its ref (+ optional
+        // --local/--cloud): a name that is exclusively a cloud machine routes to
+        // the smolfleet files API, everything else to the local VM. A `local/` or
+        // `cloud/` prefix on the machine ref forces the choice.
+        use super::resolve::{self, Location, Target};
+        let target = Target::from_flags(self.local, self.cloud)?;
+        let (location, handle) = resolve::route(Some(&machine_name), target)?;
+        if location == Location::Cloud {
+            return cp_cloud(&handle, &guest_path, &local_path, is_upload);
         }
 
-        let (manager, mut client) = common::ensure_connected(&machine_name)?;
+        let (manager, mut client) = common::ensure_connected(&handle)?;
         manager.detach();
         if is_upload {
             // Stream the file in chunks so large files don't get read entirely

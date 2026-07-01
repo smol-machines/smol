@@ -41,6 +41,7 @@ fn restart_machine(name: &str) -> anyhow::Result<()> {
     StartCmd {
         name: Some(name.to_string()),
         cloud: false,
+        local: false,
         forkable: false,
     }
     .run()
@@ -50,6 +51,7 @@ fn stop_machine(name: &str) {
     let _ = StopCmd {
         name: Some(name.to_string()),
         cloud: false,
+        local: false,
     }
     .run();
 }

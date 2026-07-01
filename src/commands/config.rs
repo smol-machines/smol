@@ -85,12 +85,45 @@ fn validate_cloud_endpoint(value: &str) -> anyhow::Result<()> {
 fn show_config() -> anyhow::Result<()> {
     let settings = SmolSettings::load()?;
     println!("cloud.endpoint = {}", settings.cloud.endpoint.as_deref().unwrap_or("(not set)"));
-    println!("cloud.api_key  = {}", match settings.cloud.api_key.as_deref() {
-        Some(k) if k.len() > 12 => format!("{}...{}", &k[..8], &k[k.len()-4..]),
+    println!("cloud.api_key  = {}", mask_secret(settings.cloud.api_key.as_deref()));
+
+    // Registries are the other half of the config; enumerate both sections so
+    // `config show` is a complete picture of config.toml. Credentials are
+    // described by type, never printed.
+    print_registries("machines", &settings.machines);
+    print_registries("images", &settings.images);
+    Ok(())
+}
+
+/// Mask a secret for display: keep enough to recognize it, hide the rest.
+fn mask_secret(value: Option<&str>) -> String {
+    match value {
+        Some(k) if k.len() > 12 => format!("{}...{}", &k[..8], &k[k.len() - 4..]),
         Some(_) => "(set)".to_string(),
         None => "(not set)".to_string(),
-    });
-    Ok(())
+    }
+}
+
+/// Print a registry section's entries with credentials described, not revealed.
+fn print_registries(section: &str, config: &smolvm::registry::RegistryConfig) {
+    if config.registries.is_empty() {
+        return;
+    }
+    let mut hosts: Vec<&String> = config.registries.keys().collect();
+    hosts.sort();
+    for host in hosts {
+        let entry = &config.registries[host];
+        let auth = if entry.identity_token.is_some() {
+            "identity-token".to_string()
+        } else if let Some(var) = &entry.password_env {
+            format!("password_env:{var}")
+        } else if entry.password.is_some() {
+            "password".to_string()
+        } else {
+            "none".to_string()
+        };
+        println!("{section}.registries.\"{host}\" = {auth}");
+    }
 }
 
 #[cfg(test)]

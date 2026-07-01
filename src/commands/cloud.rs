@@ -204,7 +204,7 @@ pub async fn list_machines(http: &reqwest::Client, endpoint: &str) -> Result<Vec
     // Log method + path only; the Authorization header is never logged.
     tracing::debug!(method = "GET", path = "/v1/machines", %endpoint, "cloud request");
     // GET is idempotent → retry transient blips (the control plane is HA and a
-    // momentary 503 / connection reset during a rollover shouldn't fail `smol ls`).
+    // momentary 503 / connection reset during a rollover shouldn't fail `smol machine ls`).
     let resp = super::common::send_with_retry(http.get(format!("{}/v1/machines", endpoint)))
         .await
         .with_context(|| format!("could not reach smolfleet control plane at {endpoint}"))?;
@@ -365,6 +365,7 @@ impl CloudCmd {
                 secret_file: vec![],
                 timeout: None,
                 cloud: true,
+                local: false,
             }
             .run(),
         }

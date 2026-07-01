@@ -27,61 +27,18 @@ enum Commands {
     /// Run a command in an ephemeral VM (cleaned up after exit)
     Run(commands::run::RunCmd),
 
-    /// Execute a command in a running machine
-    Exec(commands::exec::ExecCmd),
-
-    /// Open an interactive shell in a machine
-    #[command(visible_alias = "sh")]
-    Shell {
-        /// Machine name (default: "default")
-        #[arg(short = 'n', long, value_name = "NAME")]
-        name: Option<String>,
-    },
-
-    /// Create a persistent machine
-    Create(commands::create::CreateCmd),
-
-    /// Start a machine
-    Start(commands::start::StartCmd),
-
-    /// Fork a running, forkable machine into a new clone (CoW RAM + disks)
-    Fork(commands::fork::ForkCmd),
-
-    /// Stop a machine
-    Stop(commands::stop::StopCmd),
-
-    /// Delete a machine
-    #[command(visible_alias = "delete")]
-    Rm(commands::rm::RmCmd),
-
-    /// List machines
-    #[command(visible_alias = "list")]
-    Ls(commands::ls::LsCmd),
-
-    /// Copy files between host and machine
-    Cp(commands::cp::CpCmd),
-
-    /// Stream machine logs
-    Logs(commands::logs::LogsCmd),
-
-    /// Show machine details
-    Status(commands::status::StatusCmd),
-
-    /// Per-machine maintenance: images, prune, update, monitor, data-dir
+    /// Manage machines: create, start, stop, rm, ls, status, exec, shell, logs, cp, fork
     Machine(commands::machine::MachineCmd),
 
-    /// Create a Smolfile in the current directory
-    Init(commands::init::InitCmd),
-
-    /// Start a machine from a Smolfile
-    Up(commands::up::UpCmd),
-
-    /// Stop the machine started by `smol up`
-    Down(commands::down::DownCmd),
+    /// Work with a Smolfile: init, up, down
+    File(commands::file::FileCmd),
 
     /// Build + publish portable .smolmachine artifacts (create, push, pull, inspect)
     #[command(subcommand)]
     Pack(commands::pack::PackCmd),
+
+    /// Work with registries: ls, catalog, tags, login, logout
+    Registry(commands::registry::RegistryCmd),
 
     /// Registry + cloud authentication (login, logout)
     Auth(commands::auth::AuthCmd),
@@ -173,35 +130,10 @@ fn main() {
 
     let result = match cli.command {
         Commands::Run(cmd) => cmd.run(),
-        Commands::Exec(cmd) => cmd.run(),
-        Commands::Shell { name } => commands::exec::ExecCmd {
-            name,
-            command: vec!["/bin/sh".to_string()],
-            interactive: true,
-            tty: true,
-            stream: false,
-            env: vec![],
-            workdir: None,
-            secret_env: vec![],
-            secret_file: vec![],
-            timeout: None,
-            cloud: false,
-        }
-        .run(),
-        Commands::Create(cmd) => cmd.run(),
-        Commands::Start(cmd) => cmd.run(),
-        Commands::Fork(cmd) => cmd.run(),
-        Commands::Stop(cmd) => cmd.run(),
-        Commands::Rm(cmd) => cmd.run(),
-        Commands::Ls(cmd) => cmd.run(),
-        Commands::Cp(cmd) => cmd.run(),
-        Commands::Logs(cmd) => cmd.run(),
-        Commands::Status(cmd) => cmd.run(),
         Commands::Machine(cmd) => cmd.run(),
-        Commands::Init(cmd) => cmd.run(),
-        Commands::Up(cmd) => cmd.run(),
-        Commands::Down(cmd) => cmd.run(),
+        Commands::File(cmd) => cmd.run(),
         Commands::Pack(cmd) => cmd.run(),
+        Commands::Registry(cmd) => cmd.run(),
         Commands::Auth(cmd) => cmd.run(),
         Commands::Cloud(cmd) => cmd.run(),
         Commands::Config(cmd) => cmd.run(),
@@ -311,7 +243,7 @@ fn boot_vm(config_path: std::path::PathBuf) -> smolvm::Result<()> {
 
     // Egress telemetry lands in the per-VM dir (the vsock socket's parent), the
     // same dir the node API resolves from the machine name — mirror the engine's
-    // internal_boot path so `smol ls`/inspect surface egressBytes too.
+    // internal_boot path so `smol machine ls`/inspect surface egressBytes too.
     let egress_telemetry_path = config.vsock_socket.parent().map(|dir| dir.join("egress"));
 
     let result = launch_agent_vm(&LaunchConfig {

@@ -1,4 +1,4 @@
-//! smol start — start a machine.
+//! smol machine start — start a machine.
 
 use clap::Args;
 use smolvm::agent::AgentManager;
@@ -11,23 +11,35 @@ pub struct StartCmd {
     #[arg(short = 'n', long, value_name = "NAME")]
     pub name: Option<String>,
 
-    /// Start a cloud machine (by name or ID)
+    /// Start a cloud machine (by name or ID). Usually unnecessary — a machine's
+    /// location is resolved automatically; equivalent to a `cloud/` prefix.
     #[arg(long)]
     pub cloud: bool,
 
+    /// Force a local machine. Equivalent to a `local/` prefix.
+    #[arg(long, conflicts_with = "cloud")]
+    pub local: bool,
+
     /// Start as a fork base: back guest RAM with a memfd (CoW-cloneable) and
-    /// expose a control socket so the machine can be forked with `smol fork`.
+    /// expose a control socket so the machine can be forked with `smol machine fork`.
     #[arg(long)]
     pub forkable: bool,
 }
 
 impl StartCmd {
-    pub fn run(self) -> anyhow::Result<()> {
-        if self.cloud {
+    pub fn run(mut self) -> anyhow::Result<()> {
+        use super::resolve::{self, Location, Target};
+
+        // Location is an attribute of the machine, not a command path: resolve it
+        // from the reference (+ optional --local/--cloud), then route.
+        let target = Target::from_flags(self.local, self.cloud)?;
+        let (location, handle) = resolve::route(self.name.as_deref(), target)?;
+        if location == Location::Cloud {
+            self.name = Some(handle);
             return self.run_cloud();
         }
-
-        let name = super::common::resolve_name(self.name.clone());
+        // `route` already applied the `default` fallback and stripped any prefix.
+        let name = handle;
 
         // Try named VM from database first
         let db = SmolvmDb::open()?;
@@ -39,7 +51,7 @@ impl StartCmd {
                     return self.start_default();
                 }
                 anyhow::bail!(
-                    "machine '{}' not found. Create it first with: smol create {}",
+                    "machine '{}' not found. Create it first with: smol machine create {}",
                     name,
                     name
                 );
@@ -95,7 +107,7 @@ impl StartCmd {
             record.source_smolmachine.as_deref(),
         )?;
 
-        // Fork base: memfd-back guest RAM + expose a control socket so `smol fork`
+        // Fork base: memfd-back guest RAM + expose a control socket so `smol machine fork`
         // can later freeze it as a CoW base. These MUST go on the launch features
         // — the manager forwards SMOLVM_FORKABLE / SMOLVM_CONTROL_SOCKET to the
         // boot subprocess from `features`, not from a (non-inherited) process env.
@@ -107,7 +119,7 @@ impl StartCmd {
         // `smol` sets SMOLVM_BOOT_BINARY (its own exe can't serve `_boot-vm`), but
         // `start` DETACHES the machine to persist after we exit. Opt out of the
         // boot subprocess's parent-death watchdog, or the VM would die the moment
-        // this command returns (and `smol exec`/`fork` would then fail).
+        // this command returns (and `smol machine exec`/`fork` would then fail).
         features.watch_parent = Some(false);
 
         manager.ensure_running_with_full_config(mounts, ports, resources, features)?;
@@ -207,7 +219,7 @@ impl StartCmd {
             eprintln!("Starting {}...", id);
             let mut req = http.post(format!("{}/v1/machines/{}/start", endpoint, id));
             if forkable {
-                // Start as a live-RAM fork base (golden) so it can be `smol fork --cloud`-ed.
+                // Start as a live-RAM fork base (golden) so it can be `smol machine fork --cloud`-ed.
                 req = req.query(&[("forkable", "true")]);
             }
             let resp = req.send().await?;

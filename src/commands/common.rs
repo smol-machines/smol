@@ -461,7 +461,7 @@ pub fn ensure_connected(name: &str) -> anyhow::Result<(AgentManager, AgentClient
     let manager = get_manager(name)?;
 
     if manager.try_connect_existing().is_none() {
-        anyhow::bail!("machine '{}' is not running. Use 'smol start' first.", name);
+        anyhow::bail!("machine '{}' is not running. Use 'smol machine start' first.", name);
     }
 
     let socket = manager.vsock_socket();

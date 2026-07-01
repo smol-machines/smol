@@ -109,15 +109,15 @@ with Machine.create(
 
 ```bash
 smol run python:3.12 -- python -c "print(2**10)"   # ephemeral one-shot
-smol create mybox --image alpine:3.20              # persistent machine
-smol exec --name mybox -- apk add curl
-smol ls
-smol rm mybox
+smol machine create mybox --image alpine:3.20      # persistent machine
+smol machine exec --name mybox -- apk add curl
+smol machine ls                                    # lists local + cloud
+smol machine rm mybox
 
 # cloud (smolfleet)
 smol auth login
 smol cloud deploy --image alpine:3.20
-smol cloud ls
+smol machine ls --cloud
 ```
 
 See **[docs/cli.md](docs/cli.md)** for the full command reference, and run
