@@ -1,6 +1,6 @@
 [package]
 name = "smol-py"
-version = "1.3.4"
+version = "1.3.6"
 edition = "2021"
 description = "Native (pyo3) core for the smol Python SDK — embeds the smolvm engine in-process."
 
