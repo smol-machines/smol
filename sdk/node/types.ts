@@ -12,6 +12,17 @@ export interface ResourceSpec {
   memoryMb?: number;
   /** Enable outbound network access (TSI). Default: false. */
   network?: boolean;
+  /**
+   * Scope egress to these CIDR ranges. Setting this (or `allowHosts`) enables
+   * networking and restricts it to the listed CIDRs. Cloud target only.
+   */
+  allowCidrs?: string[];
+  /**
+   * Scope egress to these hostnames and their subdomains (e.g.
+   * `api.anthropic.com`). Setting this (or `allowCidrs`) enables networking and
+   * restricts it to the listed hosts. Cloud target only.
+   */
+  allowHosts?: string[];
   /** Storage disk size in GB (default: 20). */
   storageGb?: number;
   /** Overlay disk size in GB (default: 10). */

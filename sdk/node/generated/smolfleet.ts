@@ -798,6 +798,7 @@ export interface components {
             mode: "open";
         } | {
             cidrs: string[];
+            hosts?: string[];
             /** @enum {string} */
             mode: "allowCidrs";
         };

@@ -37,6 +37,17 @@ pub struct DeployCmd {
     #[arg(long)]
     pub network: bool,
 
+    /// Scope egress to these CIDR ranges (repeatable). Implies `--network`;
+    /// the machine can reach only the listed CIDRs (plus any `--allow-host`).
+    #[arg(long = "allow-cidr", value_name = "CIDR")]
+    pub allow_cidr: Vec<String>,
+
+    /// Scope egress to these hostnames and their subdomains (repeatable).
+    /// Implies `--network`; the machine can reach only the listed hosts
+    /// (plus any `--allow-cidr`). Example: `--allow-host api.anthropic.com`.
+    #[arg(long = "allow-host", value_name = "HOSTNAME")]
+    pub allow_host: Vec<String>,
+
     /// Let ANY signed-in smolmachines user reach the app's URL. Without
     /// `--public` the URL works only for you, the owner. Either way the app sits
     /// behind a smolmachines login — it is never reachable anonymously.
@@ -118,7 +129,9 @@ impl DeployCmd {
         if name.is_empty() {
             anyhow::bail!("invalid reference: name cannot be empty");
         }
-        let network = if self.network {
+        let network = if !self.allow_cidr.is_empty() || !self.allow_host.is_empty() {
+            serde_json::json!({"mode": "allowCidrs", "cidrs": self.allow_cidr, "hosts": self.allow_host})
+        } else if self.network {
             serde_json::json!({"mode": "open"})
         } else {
             serde_json::json!({"mode": "blocked"})

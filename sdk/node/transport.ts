@@ -719,9 +719,18 @@ export async function makeTransport(
           : {}),
         diskGb: config.resources?.storageGb ?? null,
       },
-      ...(config.resources?.network
-        ? { network: { mode: "open" as const } }
-        : {}),
+      ...(config.resources?.allowCidrs?.length ||
+      config.resources?.allowHosts?.length
+        ? {
+            network: {
+              mode: "allowCidrs" as const,
+              cidrs: config.resources.allowCidrs ?? [],
+              hosts: config.resources.allowHosts ?? [],
+            },
+          }
+        : config.resources?.network
+          ? { network: { mode: "open" as const } }
+          : {}),
       // Publish ports: supply only the guest port; the control plane allocates
       // the node host port (read it back from the machine info after start).
       // Publishing a port implies the virtio-net backend on the node.
