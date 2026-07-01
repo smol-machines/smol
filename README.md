@@ -52,7 +52,7 @@ curl -sSL https://raw.githubusercontent.com/smol-machines/smol/main/scripts/inst
 The script auto-detects your platform, downloads the matching release bundle
 (which carries its own `libkrun` runtime + guest agent), verifies its checksum,
 extracts it to `~/.smol`, and symlinks `smol` onto your `PATH` (`~/.local/bin`).
-Pin a release with `SMOL_VERSION=v1.3.3`; override locations with `PREFIX` /
+Pin a release with `SMOL_VERSION=v1.3.4`; override locations with `PREFIX` /
 `BIN_DIR`. Supports macOS Apple Silicon and Linux x86_64/arm64.
 
 ## Components
