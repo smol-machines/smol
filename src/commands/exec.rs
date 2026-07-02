@@ -229,11 +229,7 @@ impl ExecCmd {
                 .send()
                 .await?;
 
-            if !resp.status().is_success() {
-                let status = resp.status();
-                let text = resp.text().await.unwrap_or_default();
-                anyhow::bail!("exec failed ({}): {}", status, text);
-            }
+            let resp = super::cloud::check_response(resp, "exec").await?;
 
             let result: serde_json::Value = resp.json().await?;
             let stdout = result.get("stdout").and_then(|v| v.as_str()).unwrap_or("");

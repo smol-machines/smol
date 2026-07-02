@@ -132,9 +132,16 @@ fn list_local() -> Result<Vec<MachineRef>> {
 /// the user is not logged in / the endpoint is unset, so callers can degrade to
 /// local-only cleanly. Real network/auth failures after a valid login DO surface.
 fn list_cloud() -> Result<Option<Vec<MachineRef>>> {
-    // `cloud_client()` fails cleanly when unconfigured/logged out — treat that as
-    // "cloud unavailable", not a hard error. It also does a `block_on` refresh
-    // internally, so it must run before we build our own runtime.
+    // Not logged in → skip the cloud entirely rather than fire an unauthenticated
+    // request that would 401 and hard-error. This is the fresh-install and
+    // post-`smol logout` default, and the whole point of best-effort enumeration.
+    if !cloud::cloud_is_authenticated() {
+        return Ok(None);
+    }
+    // `cloud_client()` can still fail cleanly (expired token + refresh failed);
+    // for a best-effort listing treat that as "cloud unavailable", not a hard
+    // error. It also does a `block_on` refresh internally, so it must run before
+    // we build our own runtime.
     let (http, cloud_config) = match cloud::cloud_client() {
         Ok(v) => v,
         Err(_) => return Ok(None),
@@ -142,7 +149,12 @@ fn list_cloud() -> Result<Option<Vec<MachineRef>>> {
     let endpoint = cloud_config.endpoint()?.to_string();
 
     let rt = tokio::runtime::Runtime::new()?;
-    let machines = rt.block_on(cloud::list_machines(&http, &endpoint))?;
+    // Unreachable control plane (offline) or rejected credentials (401/403) →
+    // degrade to local; only genuine server/protocol errors surface here.
+    let machines = match rt.block_on(cloud::list_machines_best_effort(&http, &endpoint))? {
+        Some(machines) => machines,
+        None => return Ok(None),
+    };
     Ok(Some(
         machines
             .into_iter()

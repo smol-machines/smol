@@ -23,9 +23,8 @@ impl DestroyCmd {
             match resp.status().as_u16() {
                 200 | 204 => eprintln!("Destroyed: {}", display_name),
                 404 => anyhow::bail!("machine '{}' not found", display_name),
-                status => {
-                    let text = resp.text().await.unwrap_or_default();
-                    anyhow::bail!("destroy failed ({}): {}", status, text);
+                _ => {
+                    super::cloud::check_response(resp, "destroy").await?;
                 }
             }
 
