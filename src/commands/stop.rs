@@ -90,9 +90,8 @@ impl StopCmd {
                     eprintln!("Machine {}: {}", id, machine.state);
                 }
                 404 => anyhow::bail!("machine '{}' not found", id),
-                status => {
-                    let text = resp.text().await.unwrap_or_default();
-                    anyhow::bail!("stop failed ({}): {}", status, text);
+                _ => {
+                    super::cloud::check_response(resp, "stop machine").await?;
                 }
             }
             Ok(())

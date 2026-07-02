@@ -127,9 +127,8 @@ impl StatusCmd {
                     }
                 }
                 404 => anyhow::bail!("machine '{}' not found", id),
-                status => {
-                    let text = resp.text().await.unwrap_or_default();
-                    anyhow::bail!("status failed ({}): {}", status, text);
+                _ => {
+                    super::cloud::check_response(resp, "get machine status").await?;
                 }
             }
             Ok(())

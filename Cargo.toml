@@ -44,7 +44,10 @@ smolvm-registry = { path = "../crates/smolvm-registry" }
 # rustls (not native-tls) so the build pulls no openssl-sys — which keeps the
 # Linux zigbuild cross-compile pure-Rust (no system OpenSSL headers). Matches the
 # engine's smolvm-registry, so reqwest's features unify on rustls across the tree.
-reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "stream"] }
+# Adapts a tokio file reader into a byte stream for streamed cloud `cp` uploads
+# (so a large file is never read wholly into RAM). `io` feature = ReaderStream.
+tokio-util = { version = "0.7", features = ["io"] }
 # WebSocket client for interactive cloud exec/shell (rustls so the cross-compile
 # stays openssl-free, matching reqwest above).
 tokio-tungstenite = { version = "0.28", default-features = false, features = ["connect", "rustls-tls-webpki-roots"] }

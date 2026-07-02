@@ -34,9 +34,8 @@ impl ScaleCmd {
             match resp.status().as_u16() {
                 200..=299 => eprintln!("Scaled group '{}' to {} replicas", self.name, self.count),
                 404 => anyhow::bail!("group '{}' not found", self.name),
-                status => {
-                    let text = resp.text().await.unwrap_or_default();
-                    anyhow::bail!("scale failed ({}): {}", status, text);
+                _ => {
+                    super::cloud::check_response(resp, "scale group").await?;
                 }
             }
 

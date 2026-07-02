@@ -109,22 +109,135 @@ fn cp_cloud(
                 rel
             );
             if is_upload {
-                let bytes = std::fs::read(&local_path)
+                // Stream the file straight from disk into the request body so a
+                // large upload is never read wholly into RAM (mirrors the local
+                // path's chunked `write_file_from_reader`).
+                let meta = tokio::fs::metadata(&local_path)
+                    .await
                     .map_err(|e| anyhow::anyhow!("{}: {}", local_path, e))?;
-                let size = bytes.len();
-                let resp = http.put(&url).body(bytes).send().await?;
+                if meta.is_dir() {
+                    anyhow::bail!("{}: is a directory (cp copies a single file)", local_path);
+                }
+                let size = meta.len();
+                let file = tokio::fs::File::open(&local_path)
+                    .await
+                    .map_err(|e| anyhow::anyhow!("{}: {}", local_path, e))?;
+                let body = reqwest::Body::wrap_stream(tokio_util::io::ReaderStream::new(file));
+                // Set Content-Length explicitly (a streamed body has unknown length
+                // and would otherwise be chunked) to preserve the prior semantics.
+                let resp = http
+                    .put(&url)
+                    .header(reqwest::header::CONTENT_LENGTH, size)
+                    .body(body)
+                    .send()
+                    .await?;
                 cloud::check_response(resp, "upload file to machine").await?;
                 eprintln!("Uploaded {local_path} ({size} bytes) -> {label}:{guest_path}");
             } else {
+                // Refuse to clobber a directory target, mirroring local `cp`.
+                if std::path::Path::new(&local_path).is_dir() {
+                    anyhow::bail!(
+                        "{}: is a directory (specify a destination file path)",
+                        local_path
+                    );
+                }
                 let resp = http.get(&url).send().await?;
                 let resp = cloud::check_response(resp, "download file from machine").await?;
-                let bytes = resp.bytes().await?;
-                let size = bytes.len();
-                std::fs::write(&local_path, &bytes)
+                // Stream the response body chunk-by-chunk to disk so a large
+                // download is never buffered entirely in memory.
+                let size = write_chunks_to_file(resp.bytes_stream(), &local_path)
+                    .await
                     .map_err(|e| anyhow::anyhow!("{}: {}", local_path, e))?;
                 eprintln!("Downloaded {label}:{guest_path} ({size} bytes) -> {local_path}");
             }
             Ok(())
         },
     )
+}
+
+/// Drain a byte stream to `path`, returning the number of bytes written.
+///
+/// Writes each chunk straight to the file as it arrives so a large download is
+/// never held wholly in memory. Generic over the chunk/error type so it works
+/// with `reqwest::Response::bytes_stream()` (chunks are `bytes::Bytes`, errors
+/// `reqwest::Error`) and is unit-testable with an in-memory stream.
+async fn write_chunks_to_file<S, B, E>(mut stream: S, path: &str) -> anyhow::Result<u64>
+where
+    S: futures_util::Stream<Item = Result<B, E>> + Unpin,
+    B: AsRef<[u8]>,
+    E: Into<anyhow::Error>,
+{
+    use futures_util::StreamExt;
+    use tokio::io::AsyncWriteExt;
+
+    let mut file = tokio::fs::File::create(path).await?;
+    let mut written: u64 = 0;
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(Into::into)?;
+        let bytes = chunk.as_ref();
+        file.write_all(bytes).await?;
+        written += bytes.len() as u64;
+    }
+    file.flush().await?;
+    Ok(written)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The streamed-download path round-trips a multi-chunk body to disk without
+    /// buffering it whole (the R2-C4 fix). Exercises the exact helper the cloud
+    /// download uses, fed an in-memory chunk stream standing in for `bytes_stream`.
+    #[tokio::test]
+    async fn write_chunks_round_trips_multi_chunk_body() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("out.bin").to_string_lossy().into_owned();
+
+        let chunks: Vec<Result<Vec<u8>, std::io::Error>> = vec![
+            Ok(b"hello ".to_vec()),
+            Ok(b"streamed ".to_vec()),
+            Ok(b"world".to_vec()),
+        ];
+        let stream = futures_util::stream::iter(chunks);
+
+        let written = write_chunks_to_file(stream, &path).await.unwrap();
+        assert_eq!(written, 20);
+        assert_eq!(std::fs::read(&path).unwrap(), b"hello streamed world");
+    }
+
+    /// A mid-stream error propagates instead of leaving a silently-truncated file
+    /// look like success.
+    #[tokio::test]
+    async fn write_chunks_propagates_stream_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("err.bin").to_string_lossy().into_owned();
+
+        let chunks: Vec<Result<Vec<u8>, std::io::Error>> =
+            vec![Ok(b"partial".to_vec()), Err(std::io::Error::other("boom"))];
+        let stream = futures_util::stream::iter(chunks);
+
+        let err = write_chunks_to_file(stream, &path).await.unwrap_err();
+        assert!(err.to_string().contains("boom"));
+    }
+
+    /// The upload side streams from a tokio file reader; confirm the reader-stream
+    /// reassembles to the original bytes (i.e. nothing is dropped/duplicated).
+    #[tokio::test]
+    async fn reader_stream_reassembles_file() {
+        use futures_util::StreamExt;
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("in.bin");
+        let payload: Vec<u8> = (0..10_000u32).map(|i| (i % 256) as u8).collect();
+        std::fs::write(&path, &payload).unwrap();
+
+        let file = tokio::fs::File::open(&path).await.unwrap();
+        let mut stream = tokio_util::io::ReaderStream::new(file);
+        let mut collected = Vec::new();
+        while let Some(chunk) = stream.next().await {
+            collected.extend_from_slice(&chunk.unwrap());
+        }
+        assert_eq!(collected, payload);
+    }
 }

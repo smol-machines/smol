@@ -260,9 +260,8 @@ impl ForkCmd {
                         let text = resp.text().await.unwrap_or_default();
                         anyhow::bail!("cannot fork golden '{}': {}", golden_id, text);
                     }
-                    status => {
-                        let text = resp.text().await.unwrap_or_default();
-                        anyhow::bail!("fork failed ({}): {}", status, text);
+                    _ => {
+                        super::cloud::check_response(resp, "fork golden").await?;
                     }
                 }
                 Ok(())

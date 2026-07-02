@@ -205,11 +205,7 @@ impl DeployCmd {
             .send()
             .await?;
 
-        if !resp.status().is_success() {
-            let status = resp.status();
-            let text = resp.text().await.unwrap_or_default();
-            anyhow::bail!("deploy failed ({}): {}", status, text);
-        }
+        let resp = cloud::check_response(resp, "deploy").await?;
 
         let machine: cloud::CloudMachine = resp.json().await?;
 

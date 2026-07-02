@@ -199,6 +199,50 @@ pub async fn check_response(resp: reqwest::Response, context: &str) -> Result<re
     }
 }
 
+/// Whether a stored api_key counts as "logged in" (present and non-empty).
+fn api_key_is_present(api_key: Option<&str>) -> bool {
+    api_key.is_some_and(|k| !k.is_empty())
+}
+
+/// True when a cloud API key is configured (i.e. the user has logged in).
+///
+/// The best-effort machine enumeration checks this BEFORE firing a request:
+/// with no key the control plane would just answer 401, so we skip the round
+/// trip and degrade to local instead. Explicit cloud verbs don't use this —
+/// they go through [`cloud_client`] and surface auth failures directly.
+pub fn cloud_is_authenticated() -> bool {
+    SmolSettings::load()
+        .map(|s| api_key_is_present(s.cloud.api_key.as_deref()))
+        .unwrap_or(false)
+}
+
+/// Best-effort variant of [`list_machines`] for the unified resolver.
+///
+/// Returns `Ok(None)` for every "cloud unavailable" condition — an unreachable
+/// control plane (connect/timeout, after retries) or rejected/forbidden
+/// credentials (401/403) — so `smol machine ls` and bare-name resolution degrade
+/// to local-only instead of surfacing a network or auth error. A genuine server
+/// error (5xx after retry) or a protocol/decode error still surfaces as `Err`.
+pub async fn list_machines_best_effort(
+    http: &reqwest::Client,
+    endpoint: &str,
+) -> Result<Option<Vec<CloudMachine>>> {
+    let resp =
+        match super::common::send_with_retry(http.get(format!("{}/v1/machines", endpoint))).await {
+            Ok(resp) => resp,
+            // Connection refused / timed out / DNS failure → control plane
+            // unreachable (offline). Degrade to local rather than error.
+            Err(_) => return Ok(None),
+        };
+    // Not authenticated / forbidden → treat as "cloud not available to this user"
+    // (logged out, or a stale/rejected token). Degrade to local.
+    if matches!(resp.status().as_u16(), 401 | 403) {
+        return Ok(None);
+    }
+    let resp = check_response(resp, "list machines").await?;
+    Ok(Some(resp.json().await?))
+}
+
 /// Fetch the list of all cloud machines.
 pub async fn list_machines(http: &reqwest::Client, endpoint: &str) -> Result<Vec<CloudMachine>> {
     // Log method + path only; the Authorization header is never logged.
@@ -297,6 +341,15 @@ mod tests {
     }
 
     #[test]
+    fn api_key_present_predicate() {
+        // Logged-out (None) and an empty key both count as "not authenticated";
+        // any non-empty key is present. This is the GAP1 degrade-to-local gate.
+        assert!(!api_key_is_present(None));
+        assert!(!api_key_is_present(Some("")));
+        assert!(api_key_is_present(Some("smk_live_xxx")));
+    }
+
+    #[test]
     fn cloud_machine_list_deserializes() {
         let json = r#"[
             {"id": "mach-1", "name": "a", "state": "started"},
@@ -308,6 +361,85 @@ mod tests {
         assert_eq!(
             machines[1].source.as_ref().unwrap().source_type,
             "smolmachine"
+        );
+    }
+}
+
+/// GAP1 regression: the best-effort enumeration must degrade to `Ok(None)` (not
+/// error) whenever the cloud is unavailable — logged out, unreachable, or the
+/// credentials are rejected — so `smol machine ls` and bare-name resolution fall
+/// back to local. A reachable, authenticated control plane still returns rows.
+#[cfg(test)]
+mod best_effort_tests {
+    use super::*;
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+
+    /// Spawn a one-shot HTTP/1.1 server that answers the first request with
+    /// `status_line` + `body`, then closes. Returns its base URL.
+    fn spawn_once(status_line: &'static str, body: &'static str) -> String {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        std::thread::spawn(move || {
+            if let Ok((mut stream, _)) = listener.accept() {
+                // Drain the request line/headers; we don't need to parse them.
+                let mut buf = [0u8; 2048];
+                let _ = stream.read(&mut buf);
+                let resp = format!(
+                    "{status_line}\r\nContent-Length: {}\r\nContent-Type: application/json\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+                let _ = stream.write_all(resp.as_bytes());
+                let _ = stream.flush();
+            }
+        });
+        format!("http://{addr}")
+    }
+
+    fn client() -> reqwest::Client {
+        super::super::common::http_client_builder().build().unwrap()
+    }
+
+    #[tokio::test]
+    async fn best_effort_401_degrades_to_none() {
+        let base = spawn_once("HTTP/1.1 401 Unauthorized", r#"{"error":"unauthorized"}"#);
+        let out = list_machines_best_effort(&client(), &base).await.unwrap();
+        assert!(out.is_none(), "a 401 must degrade to Ok(None), got {out:?}");
+    }
+
+    #[tokio::test]
+    async fn best_effort_403_degrades_to_none() {
+        let base = spawn_once("HTTP/1.1 403 Forbidden", r#"{"error":"forbidden"}"#);
+        let out = list_machines_best_effort(&client(), &base).await.unwrap();
+        assert!(out.is_none(), "a 403 must degrade to Ok(None), got {out:?}");
+    }
+
+    #[tokio::test]
+    async fn best_effort_200_returns_machines() {
+        let base = spawn_once(
+            "HTTP/1.1 200 OK",
+            r#"[{"id":"mach-1","name":"a","state":"started"}]"#,
+        );
+        let machines = list_machines_best_effort(&client(), &base)
+            .await
+            .unwrap()
+            .expect("a reachable, authenticated cloud returns Some(rows)");
+        assert_eq!(machines.len(), 1);
+        assert_eq!(machines[0].id, "mach-1");
+    }
+
+    #[tokio::test]
+    async fn best_effort_offline_degrades_to_none() {
+        // Bind then immediately drop to obtain a port nothing is listening on, so
+        // the connect is refused → the control plane is "unreachable" (offline).
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        drop(listener);
+        let base = format!("http://{addr}");
+        let out = list_machines_best_effort(&client(), &base).await.unwrap();
+        assert!(
+            out.is_none(),
+            "an unreachable cloud must degrade to Ok(None)"
         );
     }
 }

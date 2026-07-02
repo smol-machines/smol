@@ -125,9 +125,8 @@ impl LogsCmd {
                     }
                 }
                 404 => anyhow::bail!("machine '{}' not found", id),
-                status => {
-                    let text = resp.text().await.unwrap_or_default();
-                    anyhow::bail!("events failed ({}): {}", status, text);
+                _ => {
+                    super::cloud::check_response(resp, "list events").await?;
                 }
             }
             Ok(())
