@@ -1,6 +1,6 @@
 {
   "name": "smolmachines",
-  "version": "1.3.6",
+  "version": "1.3.7",
   "description": "Embed isolated microVM sandboxes directly in your code — no server to run.",
   "license": "Apache-2.0",
   "author": "smol-machines",
