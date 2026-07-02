@@ -128,7 +128,9 @@ fn register_in_catalog(
         "repo": repo,
         "tag": tag,
         "digest": digest,
-        "size_bytes": result.layer_size,
+        // The control-plane RegisterMachineRequest is camelCase — the field is
+        // `sizeBytes`; `size_bytes` is silently ignored (registers size 0).
+        "sizeBytes": result.layer_size,
         "platforms": platforms,
         "manifest": manifest,
     });
