@@ -150,7 +150,8 @@ impl ExecCmd {
                     .with_env(env)
                     .with_workdir(self.workdir.clone())
                     .with_timeout(timeout)
-                    .with_tty(self.tty);
+                    .with_tty(self.tty)
+                    .with_persistent_overlay(Some(name.clone()));
                 let exit_code = client.run_interactive(config)?;
                 manager.detach();
                 std::process::exit(exit_code);
@@ -159,7 +160,8 @@ impl ExecCmd {
             let config = RunConfig::new(image, command.clone())
                 .with_env(env)
                 .with_workdir(self.workdir.clone())
-                .with_timeout(timeout);
+                .with_timeout(timeout)
+                .with_persistent_overlay(Some(name.clone()));
             let (exit_code, stdout, stderr) = client.run_non_interactive(config)?;
             print_and_exit(
                 &manager,
