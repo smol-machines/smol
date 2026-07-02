@@ -57,6 +57,21 @@ pub struct DeployCmd {
     /// Push a local .smolmachine file before deploying
     #[arg(short = 'f', long, value_name = "PATH")]
     pub file: Option<PathBuf>,
+
+    /// Set an environment variable in the deployed machine (KEY=VALUE, repeatable)
+    #[arg(short = 'e', long = "env", value_name = "KEY=VALUE")]
+    pub env: Vec<String>,
+
+    /// Inject a secret from a host env var (GUEST_VAR=HOST_VAR), resolved on the
+    /// host at deploy time; the value is set in the machine, never persisted to
+    /// disk on the host (repeatable)
+    #[arg(long = "secret-env", value_name = "GUEST_VAR=HOST_VAR")]
+    pub secret_env: Vec<String>,
+
+    /// Inject a secret from a host file (GUEST_VAR=/abs/path), resolved on the
+    /// host at deploy time (repeatable)
+    #[arg(long = "secret-file", value_name = "GUEST_VAR=/abs/path")]
+    pub secret_file: Vec<String>,
 }
 
 /// Sync-resolved inputs for the push step. Resolved outside the runtime so
@@ -181,6 +196,16 @@ impl DeployCmd {
             })
         };
 
+        // Machine env: plain --env plus host-resolved --secret-env/--secret-file.
+        // Resolved on the host at deploy time; secret values are set in the
+        // machine but never written to the host disk.
+        let mut env_pairs = smolvm::util::parse_env_list(&self.env);
+        env_pairs.extend(crate::commands::common::resolve_cli_secrets(
+            &self.secret_env,
+            &self.secret_file,
+        )?);
+        let env: std::collections::BTreeMap<String, String> = env_pairs.into_iter().collect();
+
         let body = serde_json::json!({
             "name": name,
             "source": source,
@@ -189,6 +214,7 @@ impl DeployCmd {
                 "memoryMb": self.memory,
             },
             "network": network,
+            "env": env,
             // Publish the service port. Send only the guest port; the control
             // plane allocates the node host port. The app's URL always requires a
             // smolmachines login: owner-only by default, any signed-in user when

@@ -476,6 +476,39 @@ pub enum CloudSubcommand {
         #[arg(short = 'n', long, value_name = "NAME")]
         name: Option<String>,
     },
+
+    /// Run a command non-interactively on a deployed cloud machine.
+    ///
+    /// Prints the command's stdout to stdout and stderr to stderr, and exits
+    /// with the command's exit code — suitable for scripts and CI. Unlike
+    /// `shell` this does not allocate a PTY, so output is clean.
+    ///
+    ///   smol cloud exec -n myapp -- sh -c 'echo hi'
+    Exec(CloudExecArgs),
+}
+
+/// Arguments for `smol cloud exec` (non-interactive cloud command execution).
+#[derive(Args, Debug)]
+pub struct CloudExecArgs {
+    /// Machine name (default: "default")
+    #[arg(short = 'n', long, value_name = "NAME")]
+    pub name: Option<String>,
+
+    /// Command to run (everything after `--`)
+    #[arg(trailing_var_arg = true, required = true, value_name = "COMMAND")]
+    pub command: Vec<String>,
+
+    /// Set an environment variable for this command (repeatable)
+    #[arg(short = 'e', long = "env", value_name = "KEY=VALUE")]
+    pub env: Vec<String>,
+
+    /// Working directory for the command
+    #[arg(short = 'w', long, value_name = "DIR")]
+    pub workdir: Option<String>,
+
+    /// Command timeout in seconds (default 600)
+    #[arg(long, value_name = "SECONDS")]
+    pub timeout: Option<u64>,
 }
 
 impl CloudCmd {
@@ -496,6 +529,21 @@ impl CloudCmd {
                 secret_env: vec![],
                 secret_file: vec![],
                 timeout: None,
+                cloud: true,
+                local: false,
+            }
+            .run(),
+            CloudSubcommand::Exec(a) => crate::commands::exec::ExecCmd {
+                name: a.name,
+                command: a.command,
+                interactive: false,
+                tty: false,
+                stream: false,
+                env: a.env,
+                workdir: a.workdir,
+                secret_env: vec![],
+                secret_file: vec![],
+                timeout: a.timeout,
                 cloud: true,
                 local: false,
             }
