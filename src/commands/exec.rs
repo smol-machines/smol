@@ -111,7 +111,10 @@ impl ExecCmd {
         if let Some(ref r) = record {
             env.extend(common::resolve_record_secrets(&r.secret_refs)?);
         }
-        env.extend(common::resolve_cli_secrets(&self.secret_env, &self.secret_file)?);
+        env.extend(common::resolve_cli_secrets(
+            &self.secret_env,
+            &self.secret_file,
+        )?);
 
         // Check if this machine has an image — exec inside image rootfs if so.
         // Computed before the streaming branch so streamed execs on an image
@@ -253,7 +256,7 @@ impl ExecCmd {
             let result: serde_json::Value = resp.json().await?;
             let stdout = result.get("stdout").and_then(|v| v.as_str()).unwrap_or("");
             let stderr = result.get("stderr").and_then(|v| v.as_str()).unwrap_or("");
-            let exit_code = result.get("exitCode").and_then(|v| v.as_i64()).unwrap_or(1) as i32;
+            let exit_code = exec_exit_code(&result);
 
             if !stdout.is_empty() {
                 print!("{}", stdout);
@@ -423,4 +426,37 @@ fn print_and_exit(manager: &AgentManager, exit_code: i32, stdout: &str, stderr: 
     }
     manager.detach();
     std::process::exit(exit_code);
+}
+
+/// Exit code to propagate from a cloud exec response.
+///
+/// `check_response` has already confirmed the exec API call itself succeeded, so
+/// the JSON is a completed exec result. Use its `exitCode` when present; when it
+/// is ABSENT, default to 0 (success) — the command completed and the server
+/// reported no non-zero exit. Defaulting to 1 (the old behavior) wrongly failed
+/// a succeeding command and broke `$?` for scripting whenever the field was
+/// omitted.
+fn exec_exit_code(result: &serde_json::Value) -> i32 {
+    result.get("exitCode").and_then(|v| v.as_i64()).unwrap_or(0) as i32
+}
+
+#[cfg(test)]
+mod exec_exit_code_tests {
+    use super::exec_exit_code;
+    use serde_json::json;
+
+    #[test]
+    fn present_exit_code_is_used() {
+        assert_eq!(exec_exit_code(&json!({"exitCode": 0})), 0);
+        assert_eq!(exec_exit_code(&json!({"exitCode": 3})), 3);
+        assert_eq!(exec_exit_code(&json!({"exitCode": 137})), 137);
+    }
+
+    #[test]
+    fn missing_exit_code_defaults_to_success_not_failure() {
+        // A completed exec with no exitCode field must not report failure — the
+        // GAP3 fix (was unwrap_or(1), breaking $? on a succeeding command).
+        assert_eq!(exec_exit_code(&json!({"stdout": "ok\n"})), 0);
+        assert_eq!(exec_exit_code(&json!({})), 0);
+    }
 }
