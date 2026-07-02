@@ -113,36 +113,53 @@ impl ExecCmd {
         }
         env.extend(common::resolve_cli_secrets(&self.secret_env, &self.secret_file)?);
 
+        // Check if this machine has an image — exec inside image rootfs if so.
+        // Computed before the streaming branch so streamed execs on an image
+        // machine also run in the persistent container overlay (see below).
+        let record_image = record.as_ref().and_then(|r| r.image.clone());
+
         // Streaming mode
         if self.stream {
-            let events =
-                client.vm_exec_streaming(command.clone(), env, self.workdir.clone(), timeout)?;
             let mut exit_code = 0;
-            for event in events {
-                match event {
-                    ExecEvent::Stdout(data) => {
-                        use std::io::Write;
-                        let _ = std::io::stdout().write_all(&data);
-                        let _ = std::io::stdout().flush();
-                    }
-                    ExecEvent::Stderr(data) => {
-                        use std::io::Write;
-                        let _ = std::io::stderr().write_all(&data);
-                        let _ = std::io::stderr().flush();
-                    }
-                    ExecEvent::Exit(code) => exit_code = code,
-                    ExecEvent::Error(msg) => {
-                        eprintln!("error: {}", msg);
-                        exit_code = 1;
-                    }
+            let mut on_event = |event: ExecEvent| match event {
+                ExecEvent::Stdout(data) => {
+                    use std::io::Write;
+                    let _ = std::io::stdout().write_all(&data);
+                    let _ = std::io::stdout().flush();
+                }
+                ExecEvent::Stderr(data) => {
+                    use std::io::Write;
+                    let _ = std::io::stderr().write_all(&data);
+                    let _ = std::io::stderr().flush();
+                }
+                ExecEvent::Exit(code) => exit_code = code,
+                ExecEvent::Error(msg) => {
+                    eprintln!("error: {}", msg);
+                    exit_code = 1;
+                }
+            };
+            if let Some(ref image) = record_image {
+                // Image machine: stream INSIDE the machine's persistent container
+                // overlay so installs/writes survive across execs and restarts,
+                // matching the non-streaming image path. Without this the stream
+                // path runs in the bare agent rootfs and its changes are lost.
+                let config = RunConfig::new(image, command.clone())
+                    .with_env(env)
+                    .with_workdir(self.workdir.clone())
+                    .with_timeout(timeout)
+                    .with_persistent_overlay(Some(name.clone()));
+                client.run_streaming_with(config, on_event)?;
+            } else {
+                // Bare VM: stream directly against the guest.
+                for event in
+                    client.vm_exec_streaming(command.clone(), env, self.workdir.clone(), timeout)?
+                {
+                    on_event(event);
                 }
             }
             manager.detach();
             std::process::exit(exit_code);
         }
-
-        // Check if this machine has an image — exec inside image rootfs if so
-        let record_image = record.as_ref().and_then(|r| r.image.clone());
 
         if let Some(ref image) = record_image {
             if self.interactive || self.tty {
