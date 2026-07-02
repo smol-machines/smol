@@ -21,6 +21,11 @@ pub struct DeployCmd {
     )]
     pub ref_flag: Option<String>,
 
+    /// Machine name (default: derived from the artifact, e.g. `alpine`). Set a
+    /// distinct name to run several machines from the same image.
+    #[arg(short = 'n', long, value_name = "NAME")]
+    pub name: Option<String>,
+
     /// Service port inside the VM
     #[arg(long, default_value = "8080")]
     pub port: u16,
@@ -140,10 +145,13 @@ impl DeployCmd {
         let parsed_ref = smolvm::registry::Reference::parse(&reference)
             .map_err(|e| anyhow::anyhow!("invalid reference: {}", e))?;
         let repo = parsed_ref.repository();
-        let name = repo.rsplit('/').next().unwrap_or(repo.as_str());
+        // Name: explicit --name wins; otherwise derive from the artifact repo.
+        let derived = repo.rsplit('/').next().unwrap_or(repo.as_str());
+        let name = self.name.as_deref().map(str::trim).unwrap_or(derived);
         if name.is_empty() {
-            anyhow::bail!("invalid reference: name cannot be empty");
+            anyhow::bail!("machine name cannot be empty");
         }
+        super::common::validate_machine_name(name)?;
         let network = if !self.allow_cidr.is_empty() || !self.allow_host.is_empty() {
             serde_json::json!({"mode": "allowCidrs", "cidrs": self.allow_cidr, "hosts": self.allow_host})
         } else if self.network {
