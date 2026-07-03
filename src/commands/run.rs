@@ -75,6 +75,23 @@ impl RunCmd {
         }
 
         let mounts = HostMount::parse(&self.volume)?;
+        // Virtiofs binding form the agent uses to bind each mount into the
+        // container: (tag, guest_target, read_only). The tag is `smolvm{i}` and
+        // must match the virtiofs device order libkrun exposes at VM start, i.e.
+        // the order of `mounts` passed to `ensure_running_with_full_config`
+        // below. Without this the mounts reach the VM but are never bound into
+        // the container, so `-v host:/path` doesn't appear inside the image.
+        let mount_bindings: Vec<(String, String, bool)> = mounts
+            .iter()
+            .enumerate()
+            .map(|(i, m)| {
+                (
+                    HostMount::mount_tag(i),
+                    m.target.to_string_lossy().into_owned(),
+                    m.read_only,
+                )
+            })
+            .collect();
         let ports = self.port.clone();
 
         let resources = VmResources {
@@ -152,12 +169,14 @@ impl RunCmd {
                 let config = RunConfig::new(img, command)
                     .with_env(env)
                     .with_workdir(self.workdir)
+                    .with_mounts(mount_bindings.clone())
                     .with_tty(self.tty);
                 client.run_interactive(config)?
             } else {
                 let config = RunConfig::new(img, command)
                     .with_env(env)
-                    .with_workdir(self.workdir);
+                    .with_workdir(self.workdir)
+                    .with_mounts(mount_bindings.clone());
                 let (exit_code, stdout, stderr) = client.run_non_interactive(config)?;
                 if !stdout.is_empty() {
                     print!("{}", String::from_utf8_lossy(&stdout));
