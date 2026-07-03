@@ -30,14 +30,15 @@ copied=0
 # each absolute dep next to the bundled lib and repoint it to @loader_path,
 # recursively (virglrenderer itself pulls in libepoxy + libMoltenVK).
 _vendor_macho_deps() {
-  local target="$1" dep dbase
-  otool -L "$target" 2>/dev/null | awk 'NR>1{print $1}' | while read -r dep; do
+  local target="$1" dep dbase src cand pfx
+  # Read via process substitution (NOT a pipe) so this runs in the current shell:
+  # a pipeline would put the loop in a subshell where a fatal `exit 1` — a wheel
+  # that isn't self-contained must never publish — would be swallowed.
+  while read -r dep; do
     dbase="$(basename "$dep")"
     case "$dep" in
       # Absolute Homebrew/MacPorts path: repoint to @loader_path AND vendor.
-      /opt/homebrew/*|/usr/local/*|/opt/local/*)
-        install_name_tool -change "$dep" "@loader_path/$dbase" "$target" 2>/dev/null || true
-        ;;
+      /opt/homebrew/*|/usr/local/*|/opt/local/*) ;;
       # Already relative to its loader (e.g. virglrenderer -> @loader_path/
       # libMoltenVK): no repoint, but the sibling must still be vendored.
       @loader_path/*|@rpath/*)
@@ -45,20 +46,42 @@ _vendor_macho_deps() {
         ;;
       *) continue ;;  # system lib / framework — leave it
     esac
+    # Locate the actual dylib to vendor BEFORE repointing. The load command may
+    # name an absolute Homebrew path that doesn't exist verbatim on this builder
+    # (a different Homebrew prefix, or `brew install`ed after libkrun was built),
+    # so fall back to searching every known Homebrew prefix.
     if [ ! -e "$DEST/$dbase" ]; then
-      if [ -e "$dep" ]; then cp -f "$dep" "$DEST/$dbase"
-      elif [ -e "$LIB_DIR/$dbase" ]; then cp -f "$LIB_DIR/$dbase" "$DEST/$dbase"
+      src=""
+      if [ -e "$dep" ]; then src="$dep"
+      elif [ -e "$LIB_DIR/$dbase" ]; then src="$LIB_DIR/$dbase"
       else
-        echo "bundle-native: WARNING — missing dep $dbase (wheel not self-contained)" >&2
-        continue
+        for pfx in "${HOMEBREW_PREFIX:-}" /opt/homebrew /usr/local /opt/local; do
+          [ -n "$pfx" ] && [ -d "$pfx" ] || continue
+          cand="$(find "$pfx/opt" "$pfx/lib" -name "$dbase" 2>/dev/null | head -1)"
+          [ -n "$cand" ] && { src="$cand"; break; }
+        done
       fi
+      if [ -z "$src" ]; then
+        # FATAL, not a warning: a repoint-without-vendor ships a wheel whose
+        # libkrun dlopens @loader_path/<missing> and hard-fails at VM boot on any
+        # Mac lacking the Homebrew formula. Fail the build so it can't slip out.
+        echo "bundle-native: FATAL — GPU dep '$dbase' (referenced by $(basename "$target")) not found on this builder; the wheel would not be self-contained and would fail to boot. Install it first: brew install libepoxy virglrenderer" >&2
+        exit 1
+      fi
+      cp -f "$src" "$DEST/$dbase"
       chmod u+w "$DEST/$dbase"
       install_name_tool -id "@rpath/$dbase" "$DEST/$dbase" 2>/dev/null || true
       _vendor_macho_deps "$DEST/$dbase"
       codesign --force --sign - "$DEST/$dbase" 2>/dev/null || true
       echo "vendored dep $dbase"
     fi
-  done
+    # Repoint the parent to the now-guaranteed-present sibling (absolute paths only).
+    case "$dep" in
+      /opt/homebrew/*|/usr/local/*|/opt/local/*)
+        install_name_tool -change "$dep" "@loader_path/$dbase" "$target" 2>/dev/null || true
+        ;;
+    esac
+  done < <(otool -L "$target" 2>/dev/null | awk 'NR>1{print $1}')
 }
 
 case "$(uname -s)" in
