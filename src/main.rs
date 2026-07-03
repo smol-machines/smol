@@ -146,6 +146,24 @@ fn main() {
     }
 }
 
+/// Open a boot disk honoring its on-disk format — mirrors
+/// `internal_boot.rs::open_boot_disk`. A `.qcow2` path is a copy-on-write overlay
+/// that must be opened as qcow2; opening it as raw exposes the tiny overlay file
+/// as the whole device. Keep in sync with internal_boot.rs.
+fn open_boot_disk<K: smolvm::storage::DiskType>(
+    path: &std::path::Path,
+    size_gb: u64,
+) -> smolvm::Result<smolvm::storage::VmDisk<K>> {
+    if path.extension().and_then(|e| e.to_str()) == Some("qcow2") {
+        smolvm::storage::VmDisk::<K>::open_existing_with_format(
+            path,
+            smolvm::storage::DiskFormat::Qcow2,
+        )
+    } else {
+        smolvm::storage::VmDisk::<K>::open_or_create_at(path, size_gb)
+    }
+}
+
 /// Run the internal VM boot subprocess.
 ///
 /// Identical to smolvm's `src/cli/internal_boot.rs::run()`.
@@ -185,8 +203,12 @@ fn boot_vm(config_path: std::path::PathBuf) -> smolvm::Result<()> {
         }
     }
 
-    // Open storage and overlay disks
-    let storage_disk = match smolvm::storage::StorageDisk::open_or_create_at(
+    // Open storage and overlay disks honoring their on-disk format. A default
+    // machine's disks are instant qcow2 CoW overlays (`.qcow2`); opening one as a
+    // raw image tells libkrun the tiny (~256 KiB) overlay file is the whole
+    // device, so the guest formats a ~256 KiB ext4 and every image pull dies with
+    // "no space left on device". Mirrors `internal_boot.rs::open_boot_disk`.
+    let storage_disk = match open_boot_disk::<smolvm::storage::Storage>(
         &config.storage_disk_path,
         config.storage_size_gb,
     ) {
@@ -200,7 +222,7 @@ fn boot_vm(config_path: std::path::PathBuf) -> smolvm::Result<()> {
         }
     };
 
-    let overlay_disk = match smolvm::storage::OverlayDisk::open_or_create_at(
+    let overlay_disk = match open_boot_disk::<smolvm::storage::Overlay>(
         &config.overlay_disk_path,
         config.overlay_size_gb,
     ) {
