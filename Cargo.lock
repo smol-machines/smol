@@ -2198,6 +2198,7 @@ dependencies = [
  "rustls",
  "serde",
  "serde_json",
+ "serde_yaml",
  "smolvm",
  "smolvm-pack",
  "smolvm-protocol",

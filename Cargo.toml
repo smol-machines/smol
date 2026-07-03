@@ -24,6 +24,7 @@ name = "smol"
 path = "src/main.rs"
 
 [dependencies]
+serde_yaml = "0.9"
 # smolvm engine — VM lifecycle, agent protocol, config
 smolvm = { path = ".." }
 smolvm-pack = { path = "../crates/smolvm-pack" }

@@ -46,6 +46,9 @@ enum Commands {
     /// Manage machines on the smolfleet cloud (deploy, ls, rm, scale, shell)
     Cloud(commands::cloud::CloudCmd),
 
+    /// Run a docker-compose.yml against real Docker inside a microVM
+    Compose(commands::compose::ComposeCmd),
+
     /// Manage CLI configuration
     Config(commands::config::ConfigCmd),
 
@@ -136,6 +139,7 @@ fn main() {
         Commands::Registry(cmd) => cmd.run(),
         Commands::Auth(cmd) => cmd.run(),
         Commands::Cloud(cmd) => cmd.run(),
+        Commands::Compose(cmd) => cmd.run(),
         Commands::Config(cmd) => cmd.run(),
         Commands::BootVm { config } => boot_vm(config).map_err(|e| anyhow::anyhow!("{}", e)),
     };
