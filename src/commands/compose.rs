@@ -52,6 +52,11 @@ pub struct ComposeCmd {
     #[arg(long, value_name = "IP")]
     dns: Option<std::net::Ipv4Addr>,
 
+    /// Network backend. virtio-net gives the VM a real NIC — more robust for
+    /// large image pulls (docker:dind) and published ports; tsi is lighter.
+    #[arg(long = "net-backend", value_enum, default_value = "virtio-net")]
+    net_backend: smolvm::network::NetworkBackend,
+
     /// Arguments passed straight through to `docker compose` — e.g. `up`,
     /// `up -d`, `down`, `ps`, `logs -f web`, `build`. Defaults to `up`.
     #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
@@ -128,7 +133,7 @@ impl ComposeCmd {
             storage_gib: storage,
             overlay_gib: overlay,
             allowed_cidrs: None,
-            network_backend: None,
+            network_backend: Some(self.net_backend),
             gpu: false,
             gpu_vram_mib: None,
             dns: self.dns,
