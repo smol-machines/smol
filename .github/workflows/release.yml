@@ -209,6 +209,12 @@ jobs:
         with:
           name: rootfs-${{ matrix.rootfs_arch }}
           path: ${{ github.workspace }}/rootfs
+      # libkrun.dylib load-links Homebrew libepoxy/virglrenderer; bundle-native.sh
+      # vendors them next to the addon (repointed to @loader_path) so it's
+      # self-contained on a Mac without those formulae. Source must exist here.
+      - name: Install GPU dylibs to vendor (macOS)
+        if: runner.os == 'macOS'
+        run: brew install libepoxy virglrenderer
       - name: Bundle native libs + boot helper next to the addon
         env:
           SMOLVM_LIB_DIR: ${{ matrix.engine_lib }}

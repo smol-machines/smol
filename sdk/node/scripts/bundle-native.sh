@@ -48,20 +48,70 @@ else
   echo "bundle-native: WARNING — SMOLVM_ROOTFS_TAR not set/found; package ships no guest rootfs (boot needs one already on the host)" >&2
 fi
 
+# macOS: a GPU-enabled libkrun.dylib load-links Homebrew libepoxy/virglrenderer
+# by ABSOLUTE path. GPU is unused by the SDK, but those load commands must
+# resolve or `dlopen` fails on any Mac without those formulae ("Library not
+# loaded"). Vendor each dep next to libkrun repointed to @loader_path, recursively
+# (virglrenderer pulls in libepoxy + libMoltenVK). A missing dep is FATAL: shipping
+# a repoint-without-vendor addon would hard-fail at VM boot on a clean Mac.
+_vendor_macho_deps() {
+  local target="$1" dep dbase src cand pfx
+  # Process substitution (not a pipe) so the loop runs in this shell and a fatal
+  # `exit 1` propagates instead of dying in a subshell.
+  while read -r dep; do
+    dbase="$(basename "$dep")"
+    case "$dep" in
+      /opt/homebrew/*|/usr/local/*|/opt/local/*) ;;
+      @loader_path/*|@rpath/*)
+        [ "$dbase" = "$(basename "$target")" ] && continue ;;
+      *) continue ;;
+    esac
+    if [ ! -e "$DEST/$dbase" ]; then
+      src=""
+      if [ -e "$dep" ]; then src="$dep"
+      elif [ -e "$LIB_DIR/$dbase" ]; then src="$LIB_DIR/$dbase"
+      else
+        for pfx in "${HOMEBREW_PREFIX:-}" /opt/homebrew /usr/local /opt/local; do
+          [ -n "$pfx" ] && [ -d "$pfx" ] || continue
+          cand="$(find "$pfx/opt" "$pfx/lib" -name "$dbase" 2>/dev/null | head -1)"
+          [ -n "$cand" ] && { src="$cand"; break; }
+        done
+      fi
+      if [ -z "$src" ]; then
+        echo "bundle-native: FATAL — GPU dep '$dbase' (referenced by $(basename "$target")) not found on this builder; the addon would not be self-contained and would fail to boot. Install it first: brew install libepoxy virglrenderer" >&2
+        exit 1
+      fi
+      cp -f "$src" "$DEST/$dbase"; chmod u+w "$DEST/$dbase"
+      install_name_tool -id "@rpath/$dbase" "$DEST/$dbase" 2>/dev/null || true
+      _vendor_macho_deps "$DEST/$dbase"
+      codesign --force --sign - "$DEST/$dbase" 2>/dev/null || true
+      echo "vendored dep $dbase"
+    fi
+    case "$dep" in
+      /opt/homebrew/*|/usr/local/*|/opt/local/*)
+        install_name_tool -change "$dep" "@loader_path/$dbase" "$target" 2>/dev/null || true ;;
+    esac
+  done < <(otool -L "$target" 2>/dev/null | awk 'NR>1{print $1}')
+}
+
 if [ "$OS" = "Darwin" ]; then
-  # Copy the libs VERBATIM — they already resolve each other at runtime
-  # (libkrun dlopens libkrunfw by name from the lib dir). Do NOT run
-  # install_name_tool: it needlessly invalidates the working signatures.
   cp -p "$LIB_DIR/libkrun.dylib" "$DEST/"
   cp -p "$LIB_DIR/libkrunfw.5.dylib" "$DEST/"
+  chmod u+w "$DEST/libkrun.dylib"
+  # Vendor libkrun's absolute Homebrew GPU deps → @loader_path siblings, so the
+  # addon boots on a Mac without libepoxy/virglrenderer installed.
+  _vendor_macho_deps "$DEST/libkrun.dylib"
+  # install_name_tool invalidated libkrun's signature — re-sign (ad-hoc) or macOS
+  # dlopen SIGKILLs it. libkrunfw is untouched and keeps its original signature.
+  codesign --force --sign - "$DEST/libkrun.dylib" 2>/dev/null || true
   # Versioned soname symlinks — REQUIRED. libkrun is resolved as `libkrun.1.dylib`;
   # without it the VM exits 0 instantly ("boot subprocess exited during startup").
   ( cd "$DEST" \
       && ln -sf libkrunfw.5.dylib libkrunfw.dylib \
       && ln -sf libkrun.dylib libkrun.1.dylib )
 
-  # Only the helper needs (re)signing — with the hypervisor entitlement, so the
-  # user's `node` needs none. The copied dylibs keep their original signatures.
+  # The helper needs (re)signing with the hypervisor entitlement, so the user's
+  # `node` needs none.
   codesign --force --sign - --entitlements "${SMOLVM_ENTITLEMENTS:-$REPO_ROOT/smolvm.entitlements}" "$DEST/smol-vmm"
   # VERIFY the entitlement actually stuck — without it, krun_start_enter fails
   # with -22 and the VM never boots. (This silently regressed once; assert it.)
