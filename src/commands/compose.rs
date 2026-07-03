@@ -47,6 +47,11 @@ pub struct ComposeCmd {
     #[arg(long, default_value = DIND_IMAGE)]
     image: String,
 
+    /// Custom DNS resolver for the microVM (e.g. 1.1.1.1). Useful when the host
+    /// resolver is unreachable. Defaults to the backend's resolver.
+    #[arg(long, value_name = "IP")]
+    dns: Option<std::net::Ipv4Addr>,
+
     /// Arguments passed straight through to `docker compose` — e.g. `up`,
     /// `up -d`, `down`, `ps`, `logs -f web`, `build`. Defaults to `up`.
     #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
@@ -98,12 +103,19 @@ impl ComposeCmd {
                 })
                 .collect();
             let ports_tuples = PortMapping::to_tuples(&ports);
-            let mut record =
-                VmRecord::new(name.clone(), self.cpus, self.mem, mounts_tuples, ports_tuples, true);
+            let mut record = VmRecord::new(
+                name.clone(),
+                self.cpus,
+                self.mem,
+                mounts_tuples,
+                ports_tuples,
+                true,
+            );
             record.image = Some(self.image.clone());
             record.storage_gb = storage;
             record.overlay_gb = overlay;
             record.workdir = Some(WORKSPACE.to_string());
+            record.dns = self.dns;
             config.insert_vm(name.clone(), record)?;
         }
 
@@ -119,14 +131,22 @@ impl ComposeCmd {
             network_backend: None,
             gpu: false,
             gpu_vram_mib: None,
-            dns: None,
+            dns: self.dns,
         };
         if !ports.is_empty() {
-            let list: Vec<String> = ports.iter().map(|p| format!("{}→{}", p.host, p.guest)).collect();
+            let list: Vec<String> = ports
+                .iter()
+                .map(|p| format!("{}→{}", p.host, p.guest))
+                .collect();
             eprintln!("smol: forwarding ports {}", list.join(", "));
         }
         eprintln!("smol: starting Docker microVM '{}' ({})", name, self.image);
-        manager.ensure_running_with_full_config(mounts, ports, resources, LaunchFeatures::default())?;
+        manager.ensure_running_with_full_config(
+            mounts,
+            ports,
+            resources,
+            LaunchFeatures::default(),
+        )?;
 
         // 7. Assemble the in-VM command: ensure dockerd, then run docker compose.
         let compose_args = if self.args.is_empty() {
@@ -278,7 +298,7 @@ fn parse_short_port(s: &str) -> Option<u16> {
     let s = s.split('/').next().unwrap_or(s); // strip /tcp|/udp
     let parts: Vec<&str> = s.split(':').collect();
     match parts.as_slice() {
-        [_container] => None,          // "80" — container-only, host picks a port
+        [_container] => None, // "80" — container-only, host picks a port
         [host, _container] => host.parse().ok(), // "8080:80"
         [_ip, host, _container] => host.parse().ok(), // "127.0.0.1:8080:80"
         _ => None,
@@ -294,7 +314,13 @@ fn compose_machine_name(dir: &Path) -> String {
         .unwrap_or_else(|| "project".into());
     let sanitized: String = base
         .chars()
-        .map(|c| if c.is_ascii_alphanumeric() { c.to_ascii_lowercase() } else { '-' })
+        .map(|c| {
+            if c.is_ascii_alphanumeric() {
+                c.to_ascii_lowercase()
+            } else {
+                '-'
+            }
+        })
         .collect();
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     dir.hash(&mut hasher);
