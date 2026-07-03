@@ -156,9 +156,21 @@ impl ComposeCmd {
         };
         let script = build_in_vm_script(&compose_file_name, &compose_args);
 
-        // 8. Stream it inside the machine's persistent container overlay so the
-        //    daemon, images, and volumes all survive across invocations.
+        // 8. Ensure the Docker image is present in the machine. A registry image
+        //    pulls in-guest; skip it when the machine already has it so repeat
+        //    commands (ps/logs/down) stay fast.
         let mut client = smolvm::AgentClient::connect_with_retry(manager.vsock_socket())?;
+        let have_image = client
+            .list_images()
+            .map(|imgs| imgs.iter().any(|i| image_ref_matches(&i.reference, &self.image)))
+            .unwrap_or(false);
+        if !have_image {
+            eprintln!("smol: pulling {} (first run only)...", self.image);
+            client.pull_with_registry_config(&self.image)?;
+        }
+
+        // 9. Stream it inside the machine's persistent container overlay so the
+        //    daemon, images, and volumes all survive across invocations.
         let cfg = RunConfig::new(&self.image, vec!["sh".into(), "-c".into(), script])
             .with_workdir(Some(WORKSPACE.to_string()))
             .with_persistent_overlay(Some(name.clone()));
@@ -222,6 +234,21 @@ exec docker compose -f {file} {args}
 /// Minimal single-quote shell escaping.
 fn shell_quote(s: &str) -> String {
     format!("'{}'", s.replace('\'', "'\\''"))
+}
+
+/// Loosely match a stored image reference against the requested image,
+/// tolerating the `docker.io/library/` prefix the registry adds and an implicit
+/// `:latest` tag (so `docker:dind` matches `docker.io/library/docker:dind`).
+fn image_ref_matches(have: &str, want: &str) -> bool {
+    let norm = |s: &str| -> String {
+        let s = s.trim_start_matches("docker.io/").trim_start_matches("library/");
+        if s.contains(':') {
+            s.to_string()
+        } else {
+            format!("{s}:latest")
+        }
+    };
+    norm(have) == norm(want) || have.ends_with(want)
 }
 
 /// Find the compose file: an explicit `-f`, else the usual names in cwd.
