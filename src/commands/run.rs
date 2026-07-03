@@ -143,6 +143,17 @@ impl RunCmd {
 
         let mut client = AgentClient::connect_with_retry(manager.vsock_socket())?;
 
+        // Propagate host edits under -v mounts into the guest as fsnotify events
+        // so inotify-based hot-reload (Vite, webpack, nodemon) fires when a file
+        // is changed on the host. Held for the command's lifetime; dropped (which
+        // stops the watcher) when this scope exits. No-op without mounts or on a
+        // guest kernel that lacks the /proc/smolvm-fsnotify interface.
+        let _fs_watcher = if mounts.is_empty() {
+            None
+        } else {
+            smolvm::agent::FsNotifyWatcher::start(manager.vsock_socket().to_path_buf(), &mounts)
+        };
+
         // Registry images pull in-guest; a local image is already staged on the
         // host (mounted via packed_layers_dir), so skip the pull for it.
         if let Some(ref img) = resolved_image {
