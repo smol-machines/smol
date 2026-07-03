@@ -51,7 +51,16 @@ class MountSpec:
     """Absolute path on the host."""
     target: str
     """Absolute path inside the machine."""
-    readonly: bool = True
+    read_only: bool = False
+    """Mount read-only. Default: False (writable), matching the ``smol -v`` CLI."""
+    readonly: Optional[bool] = None
+    """Deprecated alias for :attr:`read_only`; kept for backwards compatibility."""
+
+    @property
+    def effective_read_only(self) -> bool:
+        """Resolve the read-only flag, preferring the deprecated ``readonly``
+        alias when explicitly set, else ``read_only``."""
+        return self.readonly if self.readonly is not None else self.read_only
 
 
 @dataclass

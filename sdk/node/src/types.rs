@@ -36,7 +36,7 @@ pub struct HostMountConfig {
     pub source: String,
     /// Absolute path inside the guest.
     pub target: String,
-    /// Mount as read-only (default: true).
+    /// Mount as read-only (default: false — writable, matching the CLI).
     pub read_only: Option<bool>,
 }
 
@@ -152,7 +152,10 @@ impl TryFrom<&HostMountConfig> for HostMount {
     type Error = smolvm::error::Error;
 
     fn try_from(m: &HostMountConfig) -> Result<Self, Self::Error> {
-        HostMount::new(&m.source, &m.target, m.read_only.unwrap_or(true))
+        // Default writable, matching the engine's own `HostMount::parse`
+        // (host:guest[:ro|:rw] defaults to writable) and the `smol -v` CLI. A
+        // read-only mount is opt-in via read_only: true.
+        HostMount::new(&m.source, &m.target, m.read_only.unwrap_or(false))
     }
 }
 

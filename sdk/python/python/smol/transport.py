@@ -90,7 +90,8 @@ def _native_config(name: str, config: MachineConfig) -> dict:
     cfg: dict[str, Any] = {"name": name, "persistent": config.persistent}
     if config.mounts:
         cfg["mounts"] = [
-            {"source": m.source, "target": m.target, "read_only": m.readonly} for m in config.mounts
+            {"source": m.source, "target": m.target, "read_only": m.effective_read_only}
+            for m in config.mounts
         ]
     if config.ports:
         cfg["ports"] = [{"host": p.host, "guest": p.guest} for p in config.ports]

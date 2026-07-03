@@ -94,7 +94,10 @@ export function toNativeConfig(
     mounts: config.mounts?.map((m) => ({
       source: m.source,
       target: m.target,
-      readOnly: m.readonly,
+      // Prefer the canonical camelCase `readOnly`; fall back to the deprecated
+      // lowercase `readonly` for backwards compatibility. Undefined → engine
+      // default (writable).
+      readOnly: m.readOnly ?? m.readonly,
     })),
     ports: config.ports?.map((p) => ({ host: p.host, guest: p.guest })),
     resources: config.resources && {
