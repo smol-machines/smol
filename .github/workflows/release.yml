@@ -372,6 +372,13 @@ jobs:
         with:
           name: rootfs-${{ matrix.rootfs_arch }}
           path: ${{ github.workspace }}/rootfs
+      # libkrun.dylib is built GPU-enabled and load-links Homebrew
+      # libepoxy/virglrenderer by absolute path; bundle-native.sh vendors them
+      # into the wheel (repointed to @loader_path) so it's self-contained on a
+      # Mac without those formulae. The vendor source must exist on THIS runner.
+      - name: Install GPU dylibs to vendor (macOS)
+        if: runner.os == 'macOS'
+        run: brew install libepoxy virglrenderer
       - name: Stage native libs + boot helper into the wheel
         working-directory: sdk/python
         env:
