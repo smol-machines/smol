@@ -39,7 +39,9 @@ export interface MountSpec {
   source: string;
   /** Absolute path inside the machine. */
   target: string;
-  /** Mount read-only (default: true). */
+  /** Mount read-only. Default: false (writable), matching the `smol -v` CLI. */
+  readOnly?: boolean;
+  /** @deprecated Use `readOnly`. Kept for backwards compatibility. */
   readonly?: boolean;
 }
 
