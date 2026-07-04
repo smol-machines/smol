@@ -27,6 +27,9 @@ enum Commands {
     /// Run a command in an ephemeral VM (cleaned up after exit)
     Run(commands::run::RunCmd),
 
+    /// Run a real Docker engine in a microVM and expose it as DOCKER_HOST
+    Docker(commands::docker::DockerCmd),
+
     /// Manage machines: create, start, stop, rm, ls, status, exec, shell, logs, cp, fork
     Machine(commands::machine::MachineCmd),
 
@@ -130,6 +133,7 @@ fn main() {
 
     let result = match cli.command {
         Commands::Run(cmd) => cmd.run(),
+        Commands::Docker(cmd) => cmd.run(),
         Commands::Machine(cmd) => cmd.run(),
         Commands::File(cmd) => cmd.run(),
         Commands::Pack(cmd) => cmd.run(),

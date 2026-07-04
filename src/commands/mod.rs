@@ -25,6 +25,7 @@ pub mod pack;
 pub mod prune;
 pub mod pull;
 pub mod push;
+pub mod docker;
 pub mod registry;
 pub mod resolve;
 pub mod rm;
