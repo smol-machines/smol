@@ -135,9 +135,79 @@ jobs:
             dist/smol-*-${{ matrix.platform }}.tar.gz.sha256
           if-no-files-found: error
 
+  # Windows is a CROSS build (mingw-w64 on Linux) with a different asset shape
+  # (a .zip with the DLLs beside smol.exe + agent-rootfs.tar.gz), so it lives in
+  # its own job rather than the tar.gz matrix. It reuses the runtime assets from
+  # the matching smolvm Windows release zip.
+  build-windows:
+    name: build · windows-x86_64
+    runs-on: ubuntu-latest
+    env:
+      ENGINE_VERSION: ${{ github.event.inputs.engine_version || github.ref_name }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Assert Cargo.toml version matches the release/engine version
+        shell: bash
+        run: |
+          cargo_ver="$(grep -m1 -E '^version[[:space:]]*=' Cargo.toml | sed -E 's/.*"([^"]+)".*/\1/')"
+          if [ "v$cargo_ver" != "$ENGINE_VERSION" ]; then
+            echo "::error::Cargo.toml version (v$cargo_ver) != release/engine version ($ENGINE_VERSION)."
+            exit 1
+          fi
+
+      - name: Check out engine source at ${{ env.ENGINE_VERSION }}
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ vars.SMOLVM_ENGINE_REPO }}
+          ref: ${{ env.ENGINE_VERSION }}
+          path: __engine__
+      - name: Repoint smol path deps at the engine checkout
+        shell: bash
+        run: |
+          perl -i -pe 's{path = "\.\./crates/}{path = "__engine__/crates/}g' Cargo.toml
+          perl -i -pe 's{path = "\.\."}{path = "__engine__"}g' Cargo.toml
+          if grep -nE 'path = "\.\.' Cargo.toml; then
+            echo "::error::a path dep was not repointed at __engine__"; exit 1
+          fi
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-gnu
+
+      - name: Install mingw-w64 + zip
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-mingw-w64-x86-64 zip unzip
+
+      - name: Download engine Windows zip
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ENGINE_REPO: ${{ vars.SMOLVM_ENGINE_REPO }}
+        run: |
+          mkdir -p engine-asset
+          asset="smolvm-${ENGINE_VERSION#v}-windows-x86_64.zip"
+          gh release download "$ENGINE_VERSION" --repo "$ENGINE_REPO" --pattern "$asset" --dir engine-asset --clobber
+          [ -f "engine-asset/$asset" ] || { echo "::error::engine Windows asset $asset not found in $ENGINE_VERSION"; exit 1; }
+          echo "ENGINE_ZIP=$PWD/engine-asset/$asset" >> "$GITHUB_ENV"
+
+      - name: Build self-contained Windows bundle
+        env:
+          SMOLVM_ENGINE_VERSION: ${{ env.ENGINE_VERSION }}
+        run: bash scripts/build-smol-dist-windows.sh
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: smol-windows-x86_64
+          path: |
+            dist/smol-*-windows-x86_64.zip
+            dist/smol-*-windows-x86_64.zip.sha256
+          if-no-files-found: error
+
   publish:
     name: publish release
-    needs: build
+    needs: [build, build-windows]
     # Publish ONLY for tag pushes or an explicit dispatch publish:true. (Guarding
     # on the tag ref, not just event==push, so a future branch trigger can't ship.)
     if: ${{ startsWith(github.ref, 'refs/tags/') || inputs.publish }}
@@ -158,6 +228,7 @@ jobs:
           for p in darwin-arm64 linux-x86_64 linux-arm64; do
             ls dist/smol-*-"$p".tar.gz >/dev/null 2>&1 || { echo "::error::missing $p tarball — refusing to publish a partial release"; exit 1; }
           done
+          ls dist/smol-*-windows-x86_64.zip >/dev/null 2>&1 || { echo "::error::missing windows-x86_64 zip — refusing to publish a partial release"; exit 1; }
       - name: Verify checksums
         shell: bash
         run: |
@@ -170,10 +241,10 @@ jobs:
         run: |
           notes="Self-contained \`smol\` CLI — bundles its own libkrun runtime + guest agent (smolvm $TAG). Install: \`curl -sSL https://raw.githubusercontent.com/$GITHUB_REPOSITORY/$TAG/scripts/install.sh | bash\`"
           if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" --clobber dist/smol-*.tar.gz dist/checksums.sha256
+            gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" --clobber dist/smol-*.tar.gz dist/smol-*.zip dist/checksums.sha256
           else
             # --target pins the tag to THIS run's commit when the tag doesn't exist yet
             # (the dispatch case); on a tag push the tag already exists and is used as-is.
             gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
-              --title "smol $TAG" --notes "$notes" dist/smol-*.tar.gz dist/checksums.sha256
+              --title "smol $TAG" --notes "$notes" dist/smol-*.tar.gz dist/smol-*.zip dist/checksums.sha256
           fi

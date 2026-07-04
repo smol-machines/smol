@@ -6,6 +6,17 @@ use smolvm::agent::{AgentManager, ExecEvent, RunConfig};
 use smolvm::db::SmolvmDb;
 use std::time::Duration;
 
+/// Windows stand-in for a SIGWINCH stream: `recv()` never completes, so the
+/// terminal-resize select arm stays inert (Windows has no resize signal).
+#[cfg(not(unix))]
+struct WinchStub;
+#[cfg(not(unix))]
+impl WinchStub {
+    async fn recv(&mut self) -> Option<()> {
+        std::future::pending::<Option<()>>().await
+    }
+}
+
 #[derive(Args, Debug)]
 pub struct ExecCmd {
     /// Machine name (default: "default")
@@ -342,8 +353,13 @@ impl ExecCmd {
             let mut stdout = tokio::io::stdout();
             let mut buf = vec![0u8; 8192];
             let mut stdin_open = true;
+            // Terminal-resize (SIGWINCH) forwarding is Unix-only; on Windows use a
+            // never-ready stub so the resize select arm below simply never fires.
+            #[cfg(unix)]
             let mut winch =
                 tokio::signal::unix::signal(tokio::signal::unix::SignalKind::window_change())?;
+            #[cfg(not(unix))]
+            let mut winch = WinchStub;
             let mut exit_code = 0i32;
 
             loop {

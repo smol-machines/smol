@@ -12,7 +12,7 @@ use smolvm::config::RecordState;
 use smolvm::data::network::PortMapping;
 use smolvm::db::SmolvmDb;
 use std::io::{Read, Write};
-use std::os::unix::net::UnixStream;
+use smolvm::platform::uds::UdsStream;
 use std::path::Path;
 use std::time::Duration;
 
@@ -383,7 +383,7 @@ fn host_random_hex(hex_len: usize) -> String {
 /// Send one line to a VM control socket and return its reply line.
 fn control_socket_cmd(sock: &Path, cmd: &str) -> anyhow::Result<String> {
     let mut stream =
-        UnixStream::connect(sock).map_err(|e| anyhow::anyhow!("connect control socket: {e}"))?;
+        UdsStream::connect(sock).map_err(|e| anyhow::anyhow!("connect control socket: {e}"))?;
     stream.set_read_timeout(Some(Duration::from_secs(60))).ok();
     stream
         .write_all(format!("{cmd}\n").as_bytes())

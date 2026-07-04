@@ -73,6 +73,16 @@ fn link_krun() {
 }
 
 fn main() {
+    // Build scripts run on the HOST, so `cfg!(target_os)` here describes the
+    // build machine, not the artifact. A Linux/macOS → Windows cross build must
+    // NOT emit the Unix libkrun link args: on Windows, libkrun (krun.dll) is
+    // loaded at runtime via libloading, with no link-time dependency. Gate on
+    // the actual compile target (mirrors the engine build.rs) so the Unix link
+    // path below is skipped when producing a Windows binary.
+    if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows") {
+        return;
+    }
+
     // On macOS, create a placeholder __SMOLVM,__smolvm Mach-O section.
     // This section is replaced with real data by `smolvm pack --single-file`.
     // The placeholder marker is NOT the SMOLSECT magic, so detect.rs won't
