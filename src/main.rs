@@ -172,7 +172,9 @@ fn boot_vm(config_path: std::path::PathBuf) -> smolvm::Result<()> {
     use smolvm::agent::boot_config::BootConfig;
     use smolvm::agent::{launch_agent_vm, LaunchConfig, VmDisks};
 
-    // Become a session leader (detach from parent's terminal session)
+    // Become a session leader (detach from parent's terminal session).
+    // POSIX-only; Windows has no process sessions.
+    #[cfg(unix)]
     unsafe {
         libc::setsid();
     }
@@ -195,7 +197,10 @@ fn boot_vm(config_path: std::path::PathBuf) -> smolvm::Result<()> {
         smolvm::process::exit_child(1);
     }
 
-    // Close ALL inherited file descriptors from the parent
+    // Close ALL inherited file descriptors from the parent. POSIX-only — fd
+    // numbers and getdtablesize are a Unix concept; on Windows inherited handles
+    // are managed differently and this loop does not apply.
+    #[cfg(unix)]
     unsafe {
         let max_fd = libc::getdtablesize();
         for fd in 3..max_fd {
