@@ -89,19 +89,25 @@ main() {
   echo ">> downloading $DIST.tar.gz"
   curl -fSL --progress-bar "$BASE/$DIST.tar.gz" -o "$TMP/$DIST.tar.gz" || err "download failed"
 
+  # Resolve the expected checksum: prefer a per-asset `<tarball>.sha256`, else
+  # the combined `checksums.sha256` that every release publishes (grep this
+  # tarball's line — format is `<hash>  <filename>`).
+  local want="" got=""
   if curl -fsSL "$BASE/$DIST.tar.gz.sha256" -o "$TMP/$DIST.tar.gz.sha256" 2>/dev/null; then
+    want="$(awk '{print $1; exit}' "$TMP/$DIST.tar.gz.sha256")"
+  elif curl -fsSL "$BASE/checksums.sha256" -o "$TMP/checksums.sha256" 2>/dev/null; then
+    want="$(awk -v f="$DIST.tar.gz" '$2 == f || $2 == "*" f {print $1; exit}' "$TMP/checksums.sha256")"
+  fi
+
+  if [ -n "$want" ]; then
     echo ">> verifying checksum"
-    ( cd "$TMP"
-      local want got
-      want="$(awk '{print $1}' "$DIST.tar.gz.sha256")"
-      if have shasum; then got="$(shasum -a 256 "$DIST.tar.gz" | awk '{print $1}')"
-      else got="$(sha256sum "$DIST.tar.gz" | awk '{print $1}')"; fi
-      [ -n "$want" ] && [ "$want" = "$got" ] || err "checksum mismatch (want '$want', got '$got')"
-    )
+    if have shasum; then got="$(shasum -a 256 "$TMP/$DIST.tar.gz" | awk '{print $1}')"
+    else got="$(sha256sum "$TMP/$DIST.tar.gz" | awk '{print $1}')"; fi
+    [ "$want" = "$got" ] || err "checksum mismatch (want '$want', got '$got')"
   elif [ "${SMOL_INSECURE_SKIP_CHECKSUM:-0}" = "1" ]; then
-    echo ">> WARNING: checksum file missing; SMOL_INSECURE_SKIP_CHECKSUM=1 — installing unverified"
+    echo ">> WARNING: checksum unavailable; SMOL_INSECURE_SKIP_CHECKSUM=1 — installing unverified"
   else
-    err "checksum file not found for $DIST.tar.gz (set SMOL_INSECURE_SKIP_CHECKSUM=1 to override)"
+    err "checksum not found for $DIST.tar.gz (set SMOL_INSECURE_SKIP_CHECKSUM=1 to override)"
   fi
 
   # ── extract on the prefix's filesystem, then mv into place atomically ─────
