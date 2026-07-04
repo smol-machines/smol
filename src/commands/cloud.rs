@@ -485,6 +485,24 @@ pub enum CloudSubcommand {
     ///
     ///   smol cloud exec -n myapp -- sh -c 'echo hi'
     Exec(CloudExecArgs),
+
+    /// Export a stopped machine to a portable .smolmachine pushed to your
+    /// registry namespace, re-deployable anywhere (cloud or local).
+    ///
+    ///   smol cloud export myapp --tag v1
+    Export(CloudExportArgs),
+}
+
+/// Arguments for `smol cloud export`.
+#[derive(Args, Debug)]
+pub struct CloudExportArgs {
+    /// Machine name or ID to export (must be stopped)
+    #[arg(value_name = "MACHINE")]
+    pub name: String,
+
+    /// Tag for the artifact (default: latest)
+    #[arg(long, default_value = "latest")]
+    pub tag: String,
 }
 
 /// Arguments for `smol cloud exec` (non-interactive cloud command execution).
@@ -548,6 +566,45 @@ impl CloudCmd {
                 local: false,
             }
             .run(),
+            CloudSubcommand::Export(a) => export_machine(a),
         }
     }
+}
+
+/// `smol cloud export <machine> [--tag <t>]` — export a stopped cloud machine to
+/// a `.smolmachine` pushed directly into the caller's registry namespace. The
+/// control plane authorizes, mints a short-lived scoped push token, and has the
+/// node build + push the artifact; the bytes never transit the control plane.
+fn export_machine(args: CloudExportArgs) -> Result<()> {
+    let tag = args.tag.clone();
+    run_cloud_command(Some(args.name), move |http, endpoint, id| async move {
+        eprintln!("Exporting machine (builds + pushes a .smolmachine; the machine must be stopped)...");
+        let resp = http
+            .post(format!("{}/v1/machines/{}/export", endpoint, id))
+            .json(&serde_json::json!({ "tag": tag }))
+            .send()
+            .await?;
+        let resp = check_response(resp, "export machine").await?;
+
+        #[derive(serde::Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct ExportResp {
+            reference: String,
+            digest: String,
+            size_bytes: u64,
+            #[serde(default)]
+            platforms: Vec<String>,
+        }
+        let out: ExportResp = resp.json().await?;
+
+        println!("Exported {}", out.reference);
+        println!("  digest    {}", out.digest);
+        println!("  size      {:.1} MiB", out.size_bytes as f64 / (1024.0 * 1024.0));
+        if !out.platforms.is_empty() {
+            println!("  platforms {}", out.platforms.join(", "));
+        }
+        println!();
+        println!("Re-deploy anywhere:  smol cloud deploy -I {}", out.reference);
+        Ok(())
+    })
 }
