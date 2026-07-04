@@ -26,6 +26,9 @@ pub enum AuthSubcommand {
 
     /// Log out from a registry
     Logout(crate::commands::logout::LogoutCmd),
+
+    /// Show who you're logged in as and what you can do
+    Status(crate::commands::auth_status::AuthStatusCmd),
 }
 
 impl AuthCmd {
@@ -33,6 +36,7 @@ impl AuthCmd {
         match self.command {
             AuthSubcommand::Login(cmd) => cmd.run(),
             AuthSubcommand::Logout(cmd) => cmd.run(),
+            AuthSubcommand::Status(cmd) => cmd.run(),
         }
     }
 }
