@@ -220,7 +220,8 @@ jobs:
         run: |
           brew install libepoxy
           brew tap libkrun/krun
-          HOMEBREW_NO_INSTALL_FROM_API=1 brew install virglrenderer
+          brew trust libkrun/krun
+          brew install libkrun/krun/virglrenderer
       - name: Bundle native libs + boot helper next to the addon
         env:
           SMOLVM_LIB_DIR: ${{ matrix.engine_lib }}
@@ -396,7 +397,8 @@ jobs:
         run: |
           brew install libepoxy
           brew tap libkrun/krun
-          HOMEBREW_NO_INSTALL_FROM_API=1 brew install virglrenderer
+          brew trust libkrun/krun
+          brew install libkrun/krun/virglrenderer
       - name: Stage native libs + boot helper into the wheel
         working-directory: sdk/python
         env:
