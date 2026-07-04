@@ -9,7 +9,7 @@ exclude = ["sdk", "__engine__"]
 name = "smol-cli"
 # Tracks the bundled smolvm engine release: a `smol` vX.Y.Z ships smolvm vX.Y.Z's
 # libkrun + agent-rootfs, so the host CLI and guest agent can never drift.
-version = "1.4.4"
+version = "1.4.5"
 edition = "2021"
 description = "Ship and run software with isolation by default"
 license = "Apache-2.0"
