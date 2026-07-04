@@ -1,4 +1,5 @@
 pub mod auth;
+pub mod auth_status;
 pub mod machines;
 pub mod cloud;
 pub mod common;
