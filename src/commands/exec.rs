@@ -265,15 +265,39 @@ impl ExecCmd {
             let resp = super::cloud::check_response(resp, "exec").await?;
 
             let result: serde_json::Value = resp.json().await?;
-            let stdout = result.get("stdout").and_then(|v| v.as_str()).unwrap_or("");
-            let stderr = result.get("stderr").and_then(|v| v.as_str()).unwrap_or("");
             let exit_code = exec_exit_code(&result);
 
-            if !stdout.is_empty() {
-                print!("{}", stdout);
+            // Prefer the byte-exact base64 output (binary-safe, untruncated);
+            // fall back to the lossy UTF-8 text when talking to an older
+            // control/node that only sends `stdout`/`stderr`.
+            use base64::Engine as _;
+            use std::io::Write as _;
+            let decode = |b64_key: &str, text_key: &str| -> Vec<u8> {
+                result
+                    .get(b64_key)
+                    .and_then(|v| v.as_str())
+                    .and_then(|s| base64::engine::general_purpose::STANDARD.decode(s).ok())
+                    .unwrap_or_else(|| {
+                        result
+                            .get(text_key)
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("")
+                            .as_bytes()
+                            .to_vec()
+                    })
+            };
+            let stdout_bytes = decode("stdoutB64", "stdout");
+            let stderr_bytes = decode("stderrB64", "stderr");
+
+            if !stdout_bytes.is_empty() {
+                let mut out = std::io::stdout();
+                let _ = out.write_all(&stdout_bytes);
+                let _ = out.flush();
             }
-            if !stderr.is_empty() {
-                eprint!("{}", stderr);
+            if !stderr_bytes.is_empty() {
+                let mut err = std::io::stderr();
+                let _ = err.write_all(&stderr_bytes);
+                let _ = err.flush();
             }
             std::process::exit(exit_code);
         })
