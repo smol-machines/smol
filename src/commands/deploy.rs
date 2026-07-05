@@ -256,8 +256,28 @@ impl DeployCmd {
             .await?;
 
         if !start_resp.status().is_success() {
+            let status = start_resp.status();
             let text = start_resp.text().await.unwrap_or_default();
-            anyhow::bail!("machine created but start failed: {}", text);
+            // Roll back the just-created machine so a failed deploy doesn't leave
+            // a leaked `error`-state machine behind for the user to clean up.
+            let _ = http
+                .delete(format!("{}/v1/machines/{}", endpoint, machine.id))
+                .send()
+                .await;
+            // A bare single-segment name resolves to the caller's own registry
+            // namespace; if it wasn't found there, point at the public form.
+            let not_found = status == reqwest::StatusCode::NOT_FOUND
+                || text.to_lowercase().contains("not found");
+            let hint = if not_found && is_smolmachine && !reference.contains('/') {
+                format!(
+                    "\nhint: '{reference}' was looked up in your own registry namespace. \
+                     For a public image, use 'library/{reference}' (or a full reference \
+                     like 'docker.io/library/{reference}')."
+                )
+            } else {
+                String::new()
+            };
+            anyhow::bail!("deploy failed: {}{}", text.trim(), hint);
         }
 
         let started: cloud::CloudMachine = start_resp.json().await?;
