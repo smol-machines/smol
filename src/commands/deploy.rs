@@ -77,6 +77,11 @@ pub struct DeployCmd {
     /// host at deploy time (repeatable)
     #[arg(long = "secret-file", value_name = "GUEST_VAR=/abs/path")]
     pub secret_file: Vec<String>,
+
+    /// Sleep the app after N seconds idle; a request wakes it (scale-to-zero).
+    /// Omit to keep the app always-on.
+    #[arg(long = "auto-stop", value_name = "SECONDS")]
+    pub auto_stop: Option<u64>,
 }
 
 /// Sync-resolved inputs for the push step. Resolved outside the runtime so
@@ -85,6 +90,18 @@ pub struct DeployCmd {
 struct PushInputs {
     client: smolvm_registry::RegistryClient,
     reference: smolvm::registry::Reference,
+}
+
+/// Apply the optional scale-to-zero setting to a create-request body.
+///
+/// `Some(seconds)` sets `autoStopSeconds` (the camelCase wire name the control
+/// plane expects) so the machine sleeps after that many idle seconds and wakes
+/// on the next request. `None` leaves the body untouched — the field is absent,
+/// so the request is identical to an always-on deploy (the server default).
+fn apply_auto_stop(body: &mut serde_json::Value, auto_stop: Option<u64>) {
+    if let Some(seconds) = auto_stop {
+        body["autoStopSeconds"] = serde_json::json!(seconds);
+    }
 }
 
 impl DeployCmd {
@@ -214,7 +231,7 @@ impl DeployCmd {
         )?);
         let env: std::collections::BTreeMap<String, String> = env_pairs.into_iter().collect();
 
-        let body = serde_json::json!({
+        let mut body = serde_json::json!({
             "name": name,
             "source": source,
             "resources": {
@@ -230,6 +247,10 @@ impl DeployCmd {
             "ports": [{ "port": self.port }],
             "public": self.public,
         });
+        // Opt into scale-to-zero only when `--auto-stop` was given. Omitting the
+        // flag omits the field, keeping the request byte-for-byte identical to
+        // the always-on default the control plane already applies.
+        apply_auto_stop(&mut body, self.auto_stop);
 
         eprintln!("Deploying {} to {}...", reference, endpoint);
 
@@ -312,5 +333,57 @@ impl DeployCmd {
             }
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::Parser;
+
+    // `DeployCmd` derives `Args`, not `Parser`, so flatten it into a throwaway
+    // `Parser` to exercise it through clap exactly as `smol cloud deploy` would.
+    #[derive(Parser, Debug)]
+    struct Wrap {
+        #[command(flatten)]
+        inner: DeployCmd,
+    }
+
+    fn parse(args: &[&str]) -> Result<DeployCmd, clap::Error> {
+        Wrap::try_parse_from(args).map(|w| w.inner)
+    }
+
+    #[test]
+    fn auto_stop_flag_parses_to_optional_u64() {
+        let cmd = parse(&["smol", "myapp:v1", "--auto-stop", "300"]).unwrap();
+        assert_eq!(cmd.auto_stop, Some(300));
+    }
+
+    #[test]
+    fn auto_stop_flag_absent_is_none() {
+        let cmd = parse(&["smol", "myapp:v1"]).unwrap();
+        assert_eq!(cmd.auto_stop, None, "no flag ⇒ None ⇒ always-on");
+    }
+
+    #[test]
+    fn auto_stop_flag_rejects_non_integer() {
+        assert!(parse(&["smol", "myapp:v1", "--auto-stop", "soon"]).is_err());
+    }
+
+    #[test]
+    fn body_carries_auto_stop_seconds_when_set() {
+        let mut body = serde_json::json!({ "name": "myapp" });
+        apply_auto_stop(&mut body, Some(300));
+        assert_eq!(body["autoStopSeconds"], serde_json::json!(300));
+    }
+
+    #[test]
+    fn body_omits_auto_stop_seconds_when_unset() {
+        let mut body = serde_json::json!({ "name": "myapp" });
+        apply_auto_stop(&mut body, None);
+        assert!(
+            body.get("autoStopSeconds").is_none(),
+            "an always-on deploy must omit the field entirely (byte-identical to today)"
+        );
     }
 }

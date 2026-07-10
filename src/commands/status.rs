@@ -112,6 +112,10 @@ impl StatusCmd {
                             .unwrap_or(0);
                         let created = machine.created_at.as_deref().unwrap_or("-");
                         let updated = machine.updated_at.as_deref().unwrap_or("-");
+                        let auto_stop = machine
+                            .auto_stop_seconds
+                            .map(|s| format!("{s}s idle (scale-to-zero)"))
+                            .unwrap_or_else(|| "always-on".to_string());
 
                         println!(
                             "Machine '{}' ({}): {}",
@@ -122,6 +126,7 @@ impl StatusCmd {
                         println!("  Source:  {}", source);
                         println!("  CPUs:    {}", cpus);
                         println!("  Memory:  {} MiB", mem);
+                        println!("  Auto-stop: {}", auto_stop);
                         println!("  Created: {}", created);
                         println!("  Updated: {}", updated);
                     }
