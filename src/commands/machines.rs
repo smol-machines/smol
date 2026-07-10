@@ -28,8 +28,8 @@ impl MachinesCmd {
         }
 
         println!(
-            "{:<36} {:<20} {:<25} {:<12} {:<20}",
-            "ID", "NAME", "SOURCE", "STATE", "UPDATED"
+            "{:<36} {:<20} {:<25} {:<12} {:<12} {:<20}",
+            "ID", "NAME", "SOURCE", "STATE", "AUTO-STOP", "UPDATED"
         );
 
         for m in &machines {
@@ -40,13 +40,18 @@ impl MachinesCmd {
                 .unwrap_or("-");
             let updated = m.updated_at.as_deref().unwrap_or("-");
             let updated_short = updated.split('T').next().unwrap_or(updated);
+            let auto_stop = m
+                .auto_stop_seconds
+                .map(|s| format!("{s}s"))
+                .unwrap_or_else(|| "always-on".to_string());
 
             println!(
-                "{:<36} {:<20} {:<25} {:<12} {:<20}",
+                "{:<36} {:<20} {:<25} {:<12} {:<12} {:<20}",
                 m.id,
                 m.name.as_deref().unwrap_or("-"),
                 source,
                 m.state,
+                auto_stop,
                 updated_short
             );
         }
