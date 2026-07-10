@@ -439,9 +439,9 @@ dependencies = [
 
 [[package]]
 name = "crossbeam-epoch"
-version = "0.9.18"
+version = "0.9.20"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5b82ac4a3c2ca9c3460964f020e1402edd5753411d7737aa39c3714ad1b5420e"
+checksum = "2d6914041f254d6e9176c01941b21115dcfb7089e55135a35411081bd106ef3f"
 dependencies = [
  "crossbeam-utils",
 ]
@@ -2302,7 +2302,7 @@ dependencies = [
 
 [[package]]
 name = "smolfile"
-version = "1.4.5"
+version = "1.4.7"
 dependencies = [
  "serde",
  "smolvm-protocol",
@@ -2327,7 +2327,7 @@ dependencies = [
 
 [[package]]
 name = "smolvm"
-version = "1.4.5"
+version = "1.4.7"
 dependencies = [
  "async-stream",
  "axum",
@@ -2367,6 +2367,7 @@ dependencies = [
  "thiserror 1.0.69",
  "tokio",
  "tokio-stream",
+ "tokio-util",
  "toml",
  "tower-http",
  "tracing",
@@ -2387,7 +2388,7 @@ dependencies = [
 
 [[package]]
 name = "smolvm-network"
-version = "1.4.5"
+version = "1.4.7"
 dependencies = [
  "crossbeam-queue",
  "humantime",
@@ -2399,7 +2400,7 @@ dependencies = [
 
 [[package]]
 name = "smolvm-pack"
-version = "1.4.5"
+version = "1.4.7"
 dependencies = [
  "crc32fast",
  "dirs",
@@ -2418,7 +2419,7 @@ dependencies = [
 
 [[package]]
 name = "smolvm-protocol"
-version = "1.4.5"
+version = "1.4.7"
 dependencies = [
  "base64",
  "serde",
@@ -2428,7 +2429,7 @@ dependencies = [
 
 [[package]]
 name = "smolvm-registry"
-version = "1.4.5"
+version = "1.4.7"
 dependencies = [
  "bytes",
  "dirs",

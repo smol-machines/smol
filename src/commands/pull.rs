@@ -58,6 +58,7 @@ impl PullCmd {
             tag_or_digest,
             self.output.as_deref(),
             &cache,
+            &[], // no brokered P2P peers for a CLI pull
         ))?;
 
         tracing::debug!(digest = %result.digest, size = result.size, cached = result.cached, "pull completed");
