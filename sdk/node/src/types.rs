@@ -177,6 +177,7 @@ impl VmResourcesConfig {
             allowed_cidrs: None,
             gpu: self.gpu.unwrap_or(false),
             gpu_vram_mib: self.gpu_vram_mib,
+            rosetta: false,
             dns: None,
         }
     }
