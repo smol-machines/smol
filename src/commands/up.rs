@@ -110,6 +110,7 @@ impl UpCmd {
             network_backend: None,
             gpu,
             gpu_vram_mib,
+            rosetta: false,
             dns: None,
         };
 

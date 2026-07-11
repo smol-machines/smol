@@ -58,6 +58,7 @@ impl PullCmd {
             tag_or_digest,
             self.output.as_deref(),
             &cache,
+            &[],
         ))?;
 
         tracing::debug!(digest = %result.digest, size = result.size, cached = result.cached, "pull completed");

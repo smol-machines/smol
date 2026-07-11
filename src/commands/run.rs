@@ -104,6 +104,7 @@ impl RunCmd {
             network_backend: None,
             gpu: self.gpu,
             gpu_vram_mib: self.gpu_vram,
+            rosetta: false,
             dns: None,
         };
 
