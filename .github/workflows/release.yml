@@ -261,8 +261,10 @@ jobs:
           registry-url: "https://registry.npmjs.org"
           cache: npm
           cache-dependency-path: sdk/node/package-lock.json
-      # OIDC trusted publishing needs npm ≥ 11.5.1; node 20 ships npm 10.x.
-      - run: npm install -g npm@latest
+      # OIDC trusted publishing needs npm ≥ 11.5.1; node 20 ships npm 10.x. Pin
+      # the 11.x line rather than @latest — npm 12 dropped Node 20 support and
+      # fails this step with EBADENGINE on the node-20 runner.
+      - run: npm install -g npm@11
       - run: npm ci
       - run: npm run build:ts
       - uses: actions/download-artifact@v4
