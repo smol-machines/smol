@@ -150,6 +150,7 @@ impl PackCreateCmd {
                 network_backend: None,
                 gpu: false,
                 gpu_vram_mib: None,
+                rosetta: false,
                 dns: None,
             },
         )?;
