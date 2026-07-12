@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "smolmachines"
-version = "1.5.0"
+version = "1.5.1"
 description = "Embed isolated microVM sandboxes directly in your Python code — local (embedded) or smolfleet cloud."
 readme = "README.md"
 license = { text = "Apache-2.0" }
