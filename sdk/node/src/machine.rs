@@ -81,6 +81,7 @@ impl NapiMachine {
             ports,
             resources,
             persistent: config.persistent.unwrap_or(false),
+            runtime_managed: false,
         };
 
         runtime().into_napi()?.create_machine(spec).into_napi()?;
