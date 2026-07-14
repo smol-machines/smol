@@ -286,6 +286,7 @@ fn boot_vm(config_path: std::path::PathBuf) -> smolvm::Result<()> {
         dns_filter_socket: dns_filter_socket_path.as_deref(),
         cuda_socket: None,
         docker_socket: None,
+        pod_net: None,
         packed_layers_dir: config.packed_layers_dir.as_deref(),
         extra_disks: &config.extra_disks,
         dns_filter_enabled: config
