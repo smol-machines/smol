@@ -349,6 +349,7 @@ impl Machine {
             ports,
             resources,
             persistent,
+            runtime_managed: false,
         };
         runtime().map_err(err)?.create_machine(spec).map_err(err)?;
         Ok(Self { name })
