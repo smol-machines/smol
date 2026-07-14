@@ -100,6 +100,7 @@ impl UpCmd {
             cpus,
             memory_mib: mem,
             network: net,
+            cuda: false,
             storage_gib: sf.storage,
             overlay_gib: sf.overlay,
             allowed_cidrs: if allowed_cidrs.is_empty() {

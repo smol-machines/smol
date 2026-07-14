@@ -68,6 +68,10 @@ pub struct VmResourcesConfig {
     pub gpu: Option<bool>,
     /// GPU VRAM in MiB (default: engine default when GPU is enabled).
     pub gpu_vram_mib: Option<u32>,
+    /// Run the guest's unmodified CUDA/PyTorch code on the host's NVIDIA GPU by
+    /// remoting CUDA calls over vsock (distinct from `gpu`, which is Vulkan; no
+    /// CUDA toolkit needed in the image). Local target only (default: false).
+    pub cuda: Option<bool>,
 }
 
 /// Options for executing a command.
@@ -177,6 +181,7 @@ impl VmResourcesConfig {
             allowed_cidrs: None,
             gpu: self.gpu.unwrap_or(false),
             gpu_vram_mib: self.gpu_vram_mib,
+            cuda: self.cuda.unwrap_or(false),
             rosetta: false,
             dns: None,
         }
