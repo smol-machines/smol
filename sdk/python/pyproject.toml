@@ -51,6 +51,11 @@ include = [
     "python/smol/libkrunfw*.dylib",
     "python/smol/libkrun*.so*",
     "python/smol/libkrunfw*.so*",
+    # A GPU-enabled libkrun.dylib load-links libepoxy/virglrenderer/MoltenVK via
+    # @loader_path; bundle-native.sh vendors them next to libkrun, so they must be
+    # packaged too or the wheel's libkrun dangles and the VM boot process exits 1
+    # (dyld: "Library not loaded: @loader_path/libepoxy.0.dylib").
+    "python/smol/*.dylib",
     # The virgl weak-symbol stub bundle-native.sh compiles next to libkrun so it
     # loads under RTLD_NOW; without this glob the stub is dropped and libkrun's
     # NEEDED dangles (auditwheel repair then fails to locate it).
