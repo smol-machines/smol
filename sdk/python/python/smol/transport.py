@@ -112,6 +112,8 @@ def _native_config(name: str, config: MachineConfig) -> dict:
             res["gpu"] = r.gpu
         if r.gpu_vram_mib is not None:
             res["gpu_vram_mib"] = r.gpu_vram_mib
+        if r.cuda is not None:
+            res["cuda"] = r.cuda
         cfg["resources"] = res
     return cfg
 

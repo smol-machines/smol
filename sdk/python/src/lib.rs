@@ -285,6 +285,11 @@ impl Machine {
                         resources.gpu_vram_mib = Some(v.extract()?);
                     }
                 }
+                if let Some(v) = rd.get_item("cuda")? {
+                    if !v.is_none() {
+                        resources.cuda = v.extract()?;
+                    }
+                }
             }
         }
         // Map the Python `mounts` list (dicts of {source, target, read_only})

@@ -43,6 +43,10 @@ class ResourceSpec:
     """Enable GPU acceleration (virtio-gpu/venus). Local target only. Default: False."""
     gpu_vram_mib: Optional[int] = None
     """GPU VRAM in MiB (default: engine default when GPU is enabled). Local target only."""
+    cuda: Optional[bool] = None
+    """Run the guest's unmodified CUDA/PyTorch code on the host's NVIDIA GPU by
+    remoting CUDA Driver-API calls to the host over vsock (distinct from ``gpu``,
+    which is Vulkan; no CUDA toolkit needed in the image). Local target only."""
 
 
 @dataclass

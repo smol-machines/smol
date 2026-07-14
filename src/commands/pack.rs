@@ -144,6 +144,7 @@ impl PackCreateCmd {
                 cpus: 2,
                 memory_mib: 512,
                 network: true,
+                cuda: false,
                 storage_gib: None,
                 overlay_gib: None,
                 allowed_cidrs: None,

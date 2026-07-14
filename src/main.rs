@@ -262,6 +262,26 @@ fn boot_vm(config_path: std::path::PathBuf) -> smolvm::Result<()> {
         None
     };
 
+    // Start the per-VM CUDA-over-vsock host server when requested (mirrors the
+    // engine's internal_boot). With it, unmodified CUDA/PyTorch code in the guest
+    // runs on the host GPU — the launcher bridges vsock port CUDA to this socket.
+    let cuda_socket_path = if config.cuda || config.resources.cuda {
+        let path = config
+            .vsock_socket
+            .parent()
+            .unwrap_or(std::path::Path::new("/tmp"))
+            .join("cuda.sock");
+        match smolvm::cuda_host::start(&path) {
+            Ok(()) => Some(path),
+            Err(e) => {
+                tracing::warn!(error = %e, "failed to start CUDA host server — CUDA disabled");
+                None
+            }
+        }
+    } else {
+        None
+    };
+
     // Launch the VM (blocks until exit)
     let disks = VmDisks {
         storage: &storage_disk,
@@ -284,7 +304,7 @@ fn boot_vm(config_path: std::path::PathBuf) -> smolvm::Result<()> {
         resources: config.resources,
         ssh_agent_socket: config.ssh_agent_socket.as_deref(),
         dns_filter_socket: dns_filter_socket_path.as_deref(),
-        cuda_socket: None,
+        cuda_socket: cuda_socket_path.as_deref(),
         docker_socket: None,
         pod_net: None,
         packed_layers_dir: config.packed_layers_dir.as_deref(),

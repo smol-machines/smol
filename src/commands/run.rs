@@ -59,6 +59,12 @@ pub struct RunCmd {
     /// GPU VRAM in MiB (requires --gpu)
     #[arg(long, value_name = "MiB")]
     pub gpu_vram: Option<u32>,
+
+    /// Run unmodified CUDA/PyTorch code on the host's NVIDIA GPU by remoting the
+    /// guest's CUDA calls to the host over vsock (distinct from --gpu, which is
+    /// Vulkan). No CUDA toolkit needed in the image.
+    #[arg(long)]
+    pub cuda: bool,
 }
 
 impl RunCmd {
@@ -104,6 +110,7 @@ impl RunCmd {
             network_backend: None,
             gpu: self.gpu,
             gpu_vram_mib: self.gpu_vram,
+            cuda: self.cuda,
             rosetta: false,
             dns: None,
         };

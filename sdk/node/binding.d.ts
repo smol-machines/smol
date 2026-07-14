@@ -48,6 +48,8 @@ export interface VmResourcesConfig {
   gpu?: boolean
   /** GPU VRAM in MiB (default: engine default when GPU is enabled). */
   gpuVramMib?: number
+  /** Run the guest's unmodified CUDA/PyTorch code on the host's NVIDIA GPU by remoting CUDA calls over vsock (distinct from `gpu`, which is Vulkan). Local target only (default: false). */
+  cuda?: boolean
 }
 /** Options for executing a command. */
 export interface ExecOptions {
