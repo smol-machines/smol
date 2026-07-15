@@ -44,6 +44,10 @@ pub struct CreateCmd {
     #[arg(long, value_name = "MiB")]
     pub gpu_vram: Option<u32>,
 
+    /// Remote guest CUDA Driver-API calls to the host NVIDIA GPU over vsock
+    #[arg(long, help_heading = "Hardware")]
+    pub cuda: bool,
+
     /// Mount host directory (HOST:GUEST[:ro])
     #[arg(short = 'v', long = "volume", value_name = "HOST:GUEST[:ro]")]
     pub volume: Vec<String>,
@@ -168,6 +172,7 @@ impl CreateCmd {
         record.gpu = if self.gpu { Some(true) } else { None };
         record.gpu_vram_mib = smolvm::data::resources::validate_gpu_vram_mib(self.gpu_vram)
             .map_err(|e| anyhow::anyhow!("--gpu-vram: {}", e))?;
+        record.cuda = self.cuda;
 
         let mut config = SmolvmConfig::load()?;
         config.insert_vm(name.clone(), record)?;
