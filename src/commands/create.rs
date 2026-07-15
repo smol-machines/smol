@@ -110,6 +110,21 @@ impl CreateCmd {
             return self.create_from_smolmachine(&from);
         }
 
+        // A registry `--image` can name a smolmachine PACK artifact (e.g.
+        // registry.smolmachines.com/library/enforra-node:0.1.0) whose single
+        // "layer" is a complete .smolmachine sidecar, not an OCI filesystem
+        // layer. The in-guest OCI puller would tar-unpack its multi-GiB
+        // storage.ext4 into the guest disk and fill it before boot, so probe
+        // the manifest on the host and, when it is a pack, reroute through the
+        // proven from-.smolmachine flow (the same path as `--from`). The probe
+        // fails open — a non-pack ref or any probe error returns None and falls
+        // through to the normal registry pull, so ordinary images are untouched.
+        if let Some(img) = self.image.clone() {
+            if let Some(sidecar) = smolvm::data::pack_ref::resolve_pack_ref_blocking(&img)? {
+                return self.create_from_smolmachine(&sidecar);
+            }
+        }
+
         let name = self
             .name
             .unwrap_or_else(smolvm::util::generate_machine_name);

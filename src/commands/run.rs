@@ -123,6 +123,29 @@ impl RunCmd {
         // exposed through `smol`.
         let (resolved_image, packed_layers_dir) = match self.image.as_deref() {
             Some(img) => {
+                // A registry `--image` can name a smolmachine PACK artifact
+                // (e.g. registry.smolmachines.com/library/enforra-node:0.1.0)
+                // whose single "layer" is a complete .smolmachine sidecar, not
+                // an OCI filesystem layer. The in-guest OCI puller would unpack
+                // its multi-GiB storage.ext4 into the guest disk and stall the
+                // boot. Unlike `machine create`, `run` is ephemeral and has no
+                // packed-layers cache to route a sidecar through, so probe the
+                // manifest on the host and refuse rather than start a doomed
+                // run — directing the user to the persistent pack flow. The
+                // probe fails open: a non-pack ref (or any probe error) returns
+                // None and falls through to normal resolution, so ordinary
+                // registry/local images are untouched.
+                if smolvm::data::pack_ref::resolve_pack_ref_blocking(img)?.is_some() {
+                    anyhow::bail!(
+                        "'{img}' is a smolmachine pack artifact, which `smol run` \
+                         cannot execute ephemerally.\n\
+                         Create a persistent machine from it instead:\n  \
+                         smol machine create --image {img}\n  \
+                         smol machine start\n\
+                         Or deploy it to the cloud:\n  \
+                         smol cloud deploy {img}"
+                    );
+                }
                 use smolvm::data::image_source::{classify, resolve, ResolvedImage};
                 match resolve(classify(img))? {
                     ResolvedImage::Registry(reference) => (Some(reference), None),
@@ -233,5 +256,25 @@ fn strip_separator(args: &[String]) -> Vec<String> {
         args[1..].to_vec()
     } else {
         args.to_vec()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    /// Bare / Docker-convention image names must never be treated as smolmachine
+    /// packs: the probe short-circuits them to `None` (no registry round-trip),
+    /// so `run`/`create` fall through to the ordinary image path instead of
+    /// rerouting a Docker Hub pull into the pack flow. This guards the invariant
+    /// that only explicit-registry refs are probed.
+    #[test]
+    fn bare_and_hub_refs_are_not_rerouted_as_packs() {
+        for img in ["alpine", "alpine:3.20", "library/ubuntu:24.04"] {
+            let probed = smolvm::data::pack_ref::resolve_pack_ref_blocking(img)
+                .expect("probe fails open, never errors on a bare name");
+            assert!(
+                probed.is_none(),
+                "bare ref {img:?} must not be rerouted through the pack flow"
+            );
+        }
     }
 }
