@@ -31,6 +31,13 @@ export interface ResourceSpec {
   gpu?: boolean;
   /** GPU VRAM in MiB (default: engine default when GPU is enabled). Local target only. */
   gpuVramMib?: number;
+  /**
+   * Run the guest's unmodified CUDA/PyTorch code on the host's NVIDIA GPU by
+   * remoting CUDA Driver-API calls over vsock (distinct from `gpu`, which is
+   * Vulkan). On a host without an NVIDIA GPU this falls back to a CPU-emulation
+   * backend. Local target only. Default: false.
+   */
+  cuda?: boolean;
 }
 
 /** Host directory mounted into the machine. */

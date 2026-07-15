@@ -70,6 +70,14 @@ check('omits gpu fields when unset (engine defaults apply)', () => {
   assert.strictEqual(cfg.resources?.gpu, undefined);
   assert.strictEqual(cfg.resources?.gpuVramMib, undefined);
 });
+check('forwards cuda to native resources', () => {
+  const cfg = toNativeConfig('m', { resources: { cuda: true } });
+  assert.strictEqual(cfg.resources?.cuda, true);
+});
+check('omits cuda when unset (engine default applies)', () => {
+  const cfg = toNativeConfig('m', { resources: { cpus: 2 } });
+  assert.strictEqual(cfg.resources?.cuda, undefined);
+});
 
 console.log(`\n${passed} passed, ${failed} failed`);
 if (failed > 0) process.exit(1);

@@ -108,6 +108,7 @@ export function toNativeConfig(
       overlayGib: config.resources.overlayGb,
       gpu: config.resources.gpu,
       gpuVramMib: config.resources.gpuVramMib,
+      cuda: config.resources.cuda,
     },
   };
 }

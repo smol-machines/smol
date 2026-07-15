@@ -38,6 +38,7 @@ export interface NativeResources {
   overlayGib?: number | undefined;
   gpu?: boolean | undefined;
   gpuVramMib?: number | undefined;
+  cuda?: boolean | undefined;
 }
 
 export interface NativeMachineConfig {
