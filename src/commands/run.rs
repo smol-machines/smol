@@ -105,6 +105,7 @@ impl RunCmd {
             gpu: self.gpu,
             gpu_vram_mib: self.gpu_vram,
             rosetta: false,
+            cuda: false,
             dns: None,
         };
 

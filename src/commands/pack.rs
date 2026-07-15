@@ -151,6 +151,7 @@ impl PackCreateCmd {
                 gpu: false,
                 gpu_vram_mib: None,
                 rosetta: false,
+                cuda: false,
                 dns: None,
             },
         )?;
