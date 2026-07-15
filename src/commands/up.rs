@@ -112,6 +112,7 @@ impl UpCmd {
             gpu,
             gpu_vram_mib,
             rosetta: false,
+            cuda: false,
             dns: None,
         };
 

@@ -112,6 +112,7 @@ impl RunCmd {
             gpu_vram_mib: self.gpu_vram,
             cuda: self.cuda,
             rosetta: false,
+            cuda: false,
             dns: None,
         };
 
