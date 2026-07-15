@@ -10,8 +10,8 @@ pub struct RmCmd {
     #[arg(short = 'n', long, value_name = "NAME")]
     pub name: String,
 
-    /// Skip confirmation prompt
-    #[arg(long)]
+    /// Skip the confirmation prompt (non-interactive). Alias: --force
+    #[arg(short = 'y', long = "yes", visible_alias = "force")]
     pub force: bool,
 
     /// Delete a cloud machine (by name or ID). Usually unnecessary — a machine's
@@ -47,7 +47,18 @@ impl RmCmd {
 }
 
 /// Prompt on stderr for a delete; returns true if the user confirmed.
+///
+/// In a non-interactive context (a pipe, CI, a background job) there is no one
+/// to answer the prompt, and blocking on stdin would hang forever. Detect that
+/// and fail with an actionable message instead — the caller should pass `--yes`.
 fn confirm_delete(name: &str) -> anyhow::Result<bool> {
+    use std::io::IsTerminal;
+    if !std::io::stdin().is_terminal() {
+        anyhow::bail!(
+            "refusing to delete '{}' without confirmation in a non-interactive context; pass --yes",
+            name
+        );
+    }
     eprint!("Delete machine '{}'? [y/N] ", name);
     let mut input = String::new();
     if std::io::stdin().read_line(&mut input).is_ok() {
