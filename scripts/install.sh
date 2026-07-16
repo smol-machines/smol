@@ -63,7 +63,9 @@ main() {
     local auth=()
     [ -n "${GITHUB_TOKEN:-}" ] && auth=(-H "Authorization: Bearer $GITHUB_TOKEN")
     local api
-    api="$(curl -fsSL "${auth[@]}" "https://api.github.com/repos/$SMOL_REPO/releases/latest" 2>/dev/null || true)"
+    # "${auth[@]+...}" guards the empty-array expansion: under `set -u`,
+    # bare "${auth[@]}" on an empty array aborts on Bash 3.2 (macOS default).
+    api="$(curl -fsSL "${auth[@]+"${auth[@]}"}" "https://api.github.com/repos/$SMOL_REPO/releases/latest" 2>/dev/null || true)"
     VERSION="$(printf '%s' "$api" | grep -m1 '"tag_name"' | sed -E 's/.*"tag_name"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/')"
     if [ -z "$VERSION" ]; then
       if printf '%s' "$api" | grep -q "rate limit"; then
