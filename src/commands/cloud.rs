@@ -491,6 +491,17 @@ pub enum CloudSubcommand {
     ///
     ///   smol cloud export myapp --tag v1
     Export(CloudExportArgs),
+
+    /// Mint an anonymous share link for a machine's published app: anyone with
+    /// the URL can reach it without a smolmachines account.
+    ///
+    ///   smol cloud share myapp
+    Share(CloudShareArgs),
+
+    /// Revoke a machine's anonymous share link (existing link stops working).
+    ///
+    ///   smol cloud unshare myapp
+    Unshare(CloudShareArgs),
 }
 
 /// Arguments for `smol cloud export`.
@@ -503,6 +514,14 @@ pub struct CloudExportArgs {
     /// Tag for the artifact (default: latest)
     #[arg(long, default_value = "latest")]
     pub tag: String,
+}
+
+/// Arguments for `smol cloud share` / `smol cloud unshare`.
+#[derive(Args, Debug)]
+pub struct CloudShareArgs {
+    /// Machine name or ID
+    #[arg(value_name = "MACHINE")]
+    pub name: String,
 }
 
 /// Arguments for `smol cloud exec` (non-interactive cloud command execution).
@@ -567,6 +586,8 @@ impl CloudCmd {
             }
             .run(),
             CloudSubcommand::Export(a) => export_machine(a),
+            CloudSubcommand::Share(a) => share_machine(a),
+            CloudSubcommand::Unshare(a) => unshare_machine(a),
         }
     }
 }
@@ -605,6 +626,58 @@ fn export_machine(args: CloudExportArgs) -> Result<()> {
         }
         println!();
         println!("Re-deploy anywhere:  smol cloud deploy -I {}", out.reference);
+        Ok(())
+    })
+}
+
+/// `smol cloud share <machine>` — mint a per-machine anonymous share link. The
+/// returned URL carries the token as `?t=`, so anyone with it reaches this
+/// machine's published app without a smolmachines account. Re-running mints a
+/// fresh token (the previous link stops working).
+fn share_machine(args: CloudShareArgs) -> Result<()> {
+    run_cloud_command(Some(args.name), move |http, endpoint, id| async move {
+        let resp = http
+            .post(format!("{}/v1/machines/{}/share", endpoint, id))
+            .send()
+            .await?;
+        let resp = check_response(resp, "share machine").await?;
+
+        #[derive(serde::Deserialize)]
+        struct ShareResp {
+            token: String,
+            #[serde(default)]
+            url: Option<String>,
+        }
+        let out: ShareResp = resp.json().await?;
+
+        match out.url {
+            Some(url) => {
+                println!("Anonymous share link (anyone with this URL can reach the app):");
+                println!("  {url}");
+            }
+            None => {
+                // No apps domain configured or the name isn't DNS-safe — surface
+                // the raw token so the caller can still attach it as `?t=`.
+                println!("Share token minted (attach as `?t=` on the app URL):");
+                println!("  {}", out.token);
+            }
+        }
+        println!();
+        println!("Revoke with:  smol cloud unshare");
+        Ok(())
+    })
+}
+
+/// `smol cloud unshare <machine>` — revoke the machine's anonymous share link.
+/// The existing URL immediately stops granting access.
+fn unshare_machine(args: CloudShareArgs) -> Result<()> {
+    run_cloud_command(Some(args.name), move |http, endpoint, id| async move {
+        let resp = http
+            .delete(format!("{}/v1/machines/{}/share", endpoint, id))
+            .send()
+            .await?;
+        check_response(resp, "unshare machine").await?;
+        println!("Share link revoked.");
         Ok(())
     })
 }
