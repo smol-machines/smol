@@ -63,13 +63,28 @@ if [[ ! -x "$SMOL_BIN" ]]; then
     exit 1
 fi
 
-if [[ ! -d "$SMOL_LIB" ]]; then
-    echo "Error: library directory not found at $SMOL_LIB" >&2
-    echo "Make sure you extracted the full distribution." >&2
+# Verify the bundled libkrun/libkrunfw are actually present — not just that a
+# lib/ directory exists. A partial or interrupted extraction can leave an empty
+# lib/, in which case the engine's own discovery fails deep in the boot path with
+# the cryptic "libkrun/libkrunfw not found"; catch it here with a clear message.
+if [[ "$(uname -s)" == "Darwin" ]]; then
+    _krun="$SMOL_LIB/libkrun.dylib"; _krunfw="$SMOL_LIB/libkrunfw.dylib"
+else
+    _krun="$SMOL_LIB/libkrun.so"; _krunfw="$SMOL_LIB/libkrunfw.so"
+fi
+if [[ ! -e "$_krun" || ! -e "$_krunfw" ]]; then
+    echo "Error: bundled libkrun/libkrunfw missing under $SMOL_LIB" >&2
+    echo "The install is incomplete — re-run the installer to fetch a full bundle." >&2
     exit 1
 fi
 
-# Point the dynamic loader at the bundled libkrun/libkrunfw, then exec.
+# Hand the engine the bundled lib dir authoritatively via SMOLVM_LIB_DIR (its
+# first and highest-priority lookup), exactly like the language SDKs do. This is
+# more robust than relying solely on the engine re-deriving its own location from
+# the executable path, which can miss under unusual symlink/re-exec layouts and
+# is the failure mode this wrapper existed to prevent. Also point the dynamic
+# loader at the same dir for the initial dlopen.
+export SMOLVM_LIB_DIR="${SMOLVM_LIB_DIR:-$SMOL_LIB}"
 if [[ "$(uname -s)" == "Darwin" ]]; then
     export DYLD_LIBRARY_PATH="$SMOL_LIB${DYLD_LIBRARY_PATH:+:$DYLD_LIBRARY_PATH}"
 else
