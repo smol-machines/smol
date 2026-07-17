@@ -55,6 +55,25 @@ enum Commands {
         /// Path to boot config JSON file
         config: std::path::PathBuf,
     },
+
+    /// Internal: the shared CUDA daemon (not for direct use). The engine
+    /// spawns `current_exe() _cuda-daemon <socket>` on first CUDA use, and
+    /// current_exe is THIS binary — without this arm, CUDA machines silently
+    /// fall back to per-VM in-process serving, which breaks fork clones (their
+    /// warm GPU state lives in the shared daemon, not the golden's VMM).
+    #[command(name = "_cuda-daemon", hide = true)]
+    CudaDaemon {
+        /// Unix socket path to listen on
+        socket: std::path::PathBuf,
+    },
+
+    /// Internal: serve one isolating fork-clone connection in this dedicated
+    /// worker process (own CUDA context/UVA). Spawned by the daemon.
+    #[command(name = "_cuda-clone-worker", hide = true)]
+    CudaCloneWorker {
+        /// Inherited connection file descriptor
+        fd: i32,
+    },
 }
 
 /// Build the tracing `EnvFilter` for the CLI.
@@ -138,6 +157,19 @@ fn main() {
         Commands::Cloud(cmd) => cmd.run(),
         Commands::Config(cmd) => cmd.run(),
         Commands::BootVm { config } => boot_vm(config).map_err(|e| anyhow::anyhow!("{}", e)),
+        #[cfg(unix)]
+        Commands::CudaDaemon { socket } => {
+            smolvm::cuda_daemon::run(&socket).map_err(|e| anyhow::anyhow!("cuda daemon: {e}"))
+        }
+        #[cfg(not(unix))]
+        Commands::CudaDaemon { .. } => Err(anyhow::anyhow!("the shared CUDA daemon is unix-only")),
+        #[cfg(unix)]
+        Commands::CudaCloneWorker { fd } => smolvm::cuda_daemon::run_clone_worker(fd)
+            .map_err(|e| anyhow::anyhow!("cuda clone worker: {e}")),
+        #[cfg(not(unix))]
+        Commands::CudaCloneWorker { .. } => {
+            Err(anyhow::anyhow!("the CUDA clone worker is unix-only"))
+        }
     };
 
     if let Err(e) = result {

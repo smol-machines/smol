@@ -11,8 +11,8 @@ use smolvm::agent::{resolve_disk_image, vm_data_dir, AgentClient, AgentManager, 
 use smolvm::config::RecordState;
 use smolvm::data::network::PortMapping;
 use smolvm::db::SmolvmDb;
-use std::io::{Read, Write};
 use smolvm::platform::uds::UdsStream;
+use std::io::{Read, Write};
 use std::path::Path;
 use std::time::Duration;
 
@@ -102,8 +102,22 @@ impl ForkCmd {
             anyhow::bail!("machine '{clone}' already exists");
         }
 
+        // Clone dir must be PRISTINE at disk-clone time: a leftover directory
+        // (orphan of a crashed fork) holds stale qcow2 overlays that make
+        // krun_create_disk_overlay refuse with rc=-5. The DB check above
+        // guarantees no live clone owns this name, so clearing is safe.
         let clone_dir = vm_data_dir(clone);
-        let snapshot_dir = clone_dir.join("snapshot");
+        if clone_dir.exists() {
+            std::fs::remove_dir_all(&clone_dir)?;
+        }
+        std::fs::create_dir_all(&clone_dir)?;
+        // The snapshot lives under the GOLDEN's dir (gdir/fork-snapshots/<clone>),
+        // matching the engine: the frozen golden VMM writes the checkpoint AND
+        // pre-creates disk overlays NEXT TO the snapshot dir — putting it inside
+        // the clone dir made those collide with clone_disks below (rc=-5), and a
+        // Landlock-confined golden could not write outside its own dir anyway.
+        let gdir = vm_data_dir(golden);
+        let snapshot_dir = gdir.join("fork-snapshots").join(clone);
         std::fs::create_dir_all(&snapshot_dir)?;
 
         // Clone the golden's config, clear running-state, and remap inbound
@@ -137,7 +151,6 @@ impl ForkCmd {
             clone_rec.ports = remapped;
         }
         clone_rec.golden = Some(golden.clone());
-        let gdir = vm_data_dir(golden);
         db.insert_vm(clone, &clone_rec)?;
 
         // Freeze the golden and write its snapshot (checkpoint + memfd manifest).
@@ -302,6 +315,26 @@ fn clone_disks(gdir: &Path, clone_dir: &Path) -> anyhow::Result<()> {
                 .map_err(|e| anyhow::anyhow!("clone disk {}: {e}", src.display()))?;
             let overlay = clone_dir.join(Path::new(raw).with_extension("qcow2"));
             specs.push((overlay, base, *fmt));
+        }
+        if std::env::var_os("SMOL_FORK_DEBUG").is_some() {
+            for (overlay, base, fmt) in &specs {
+                eprintln!(
+                    "[fork-dbg] overlay={} exists={} | base={} exists={} fmt={:?}",
+                    overlay.display(),
+                    overlay.exists(),
+                    base.display(),
+                    base.exists(),
+                    fmt
+                );
+            }
+            if let Ok(rd) = std::fs::read_dir(clone_dir) {
+                for e in rd.flatten() {
+                    eprintln!(
+                        "[fork-dbg] clone_dir has: {}",
+                        e.file_name().to_string_lossy()
+                    );
+                }
+            }
         }
         smolvm::agent::create_disk_overlays(&specs)
             .map_err(|e| anyhow::anyhow!("create clone overlays: {e}"))?;
