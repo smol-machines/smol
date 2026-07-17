@@ -48,6 +48,11 @@ pub struct CreateCmd {
     #[arg(long, help_heading = "Hardware")]
     pub cuda: bool,
 
+    /// Workload command to run when the machine starts (overrides the image's
+    /// entrypoint/cmd, matching the engine's `machine create -- <command>`).
+    #[arg(trailing_var_arg = true, value_name = "COMMAND")]
+    pub command: Vec<String>,
+
     /// Mount host directory (HOST:GUEST[:ro])
     #[arg(short = 'v', long = "volume", value_name = "HOST:GUEST[:ro]")]
     pub volume: Vec<String>,
@@ -129,10 +134,11 @@ impl CreateCmd {
             .name
             .unwrap_or_else(smolvm::util::generate_machine_name);
 
-        let mounts: Vec<(String, String, bool)> = smolvm::data::storage::HostMount::parse(&self.volume)?
-            .into_iter()
-            .map(|m| m.to_storage_tuple())
-            .collect();
+        let mounts: Vec<(String, String, bool)> =
+            smolvm::data::storage::HostMount::parse(&self.volume)?
+                .into_iter()
+                .map(|m| m.to_storage_tuple())
+                .collect();
 
         let ports = smolvm::data::network::PortMapping::to_tuples(&self.port);
 
@@ -144,7 +150,8 @@ impl CreateCmd {
         let mut allow_cidrs: Vec<String> = Vec::new();
         for c in &self.allow_cidr {
             allow_cidrs.push(
-                smolvm::smolfile::parse_cidr(c).map_err(|e| anyhow::anyhow!("--allow-cidr: {e}"))?,
+                smolvm::smolfile::parse_cidr(c)
+                    .map_err(|e| anyhow::anyhow!("--allow-cidr: {e}"))?,
             );
         }
         for h in &self.allow_host {
@@ -158,14 +165,8 @@ impl CreateCmd {
         }
         let net = self.net || !allow_cidrs.is_empty();
 
-        let mut record = smolvm::config::VmRecord::new(
-            name.clone(),
-            self.cpus,
-            self.mem,
-            mounts,
-            ports,
-            net,
-        );
+        let mut record =
+            smolvm::config::VmRecord::new(name.clone(), self.cpus, self.mem, mounts, ports, net);
         if !allow_cidrs.is_empty() {
             record.allowed_cidrs = Some(allow_cidrs);
         }
@@ -173,12 +174,18 @@ impl CreateCmd {
             record.dns_filter_hosts = Some(self.allow_host.clone());
         }
         record.image = self.image;
+        // CLI trailing args become the machine's workload (entrypoint cleared
+        // so they win over the image default, matching the engine).
+        if !self.command.is_empty() {
+            record.cmd = self.command.clone();
+        }
         record.env = env;
         record.workdir = self.workdir;
         record.init = self.init;
         record.ssh_agent = self.ssh_agent;
         // Store secret references (not plaintext); resolved at each start/exec.
-        record.secret_refs = super::common::parse_cli_secret_refs(&self.secret_env, &self.secret_file)?;
+        record.secret_refs =
+            super::common::parse_cli_secret_refs(&self.secret_env, &self.secret_file)?;
         record.network_backend = self.net_backend;
         record.storage_gb = self.storage;
         record.overlay_gb = self.overlay;
@@ -194,7 +201,10 @@ impl CreateCmd {
 
         println!("Created machine: {}", name);
         println!("  CPUs: {}, Memory: {} MiB", self.cpus, self.mem);
-        println!("\nUse 'smol machine start --name {}' to start the machine", name);
+        println!(
+            "\nUse 'smol machine start --name {}' to start the machine",
+            name
+        );
         Ok(())
     }
 
@@ -222,8 +232,16 @@ impl CreateCmd {
             .unwrap_or_else(smolvm::util::generate_machine_name);
 
         // CLI flags override manifest defaults (defaults are 4 cpus / 8192 MiB).
-        let cpus = if self.cpus != 4 { self.cpus } else { manifest.cpus };
-        let mem = if self.mem != 8192 { self.mem } else { manifest.mem };
+        let cpus = if self.cpus != 4 {
+            self.cpus
+        } else {
+            manifest.cpus
+        };
+        let mem = if self.mem != 8192 {
+            self.mem
+        } else {
+            manifest.mem
+        };
 
         // A .smolmachine is an untrusted, portable artifact: reject any secret
         // refs it carries (Untrusted scope rejects every source kind) so a packed
@@ -235,10 +253,11 @@ impl CreateCmd {
                 })?;
         }
 
-        let mounts: Vec<(String, String, bool)> = smolvm::data::storage::HostMount::parse(&self.volume)?
-            .into_iter()
-            .map(|m| m.to_storage_tuple())
-            .collect();
+        let mounts: Vec<(String, String, bool)> =
+            smolvm::data::storage::HostMount::parse(&self.volume)?
+                .into_iter()
+                .map(|m| m.to_storage_tuple())
+                .collect();
         let ports = smolvm::data::network::PortMapping::to_tuples(&self.port);
         let mut env = smolvm::util::parse_env_list(&manifest.env);
         env.extend(smolvm::util::parse_env_list(&self.env));
@@ -252,8 +271,15 @@ impl CreateCmd {
             self.net || manifest.network,
         );
         record.image = Some(manifest.image);
-        record.entrypoint = manifest.entrypoint;
-        record.cmd = manifest.cmd;
+        // CLI trailing args override the artifact's baked (entrypoint, cmd),
+        // matching the engine's precedence.
+        if self.command.is_empty() {
+            record.entrypoint = manifest.entrypoint;
+            record.cmd = manifest.cmd;
+        } else {
+            record.entrypoint = Vec::new();
+            record.cmd = self.command.clone();
+        }
         record.env = env;
         record.workdir = manifest.workdir;
         record.init = self.init;
@@ -280,8 +306,9 @@ impl CreateCmd {
             Err(e) => anyhow::bail!("clear packed layers cache: {e}"),
         }
         println!("Extracting .smolmachine assets...");
-        let result = smolvm_pack::extract::extract_sidecar(sidecar_path, &cache_dir, &footer, false, false)
-            .map_err(|e| anyhow::anyhow!("extract sidecar: {e}"));
+        let result =
+            smolvm_pack::extract::extract_sidecar(sidecar_path, &cache_dir, &footer, false, false)
+                .map_err(|e| anyhow::anyhow!("extract sidecar: {e}"));
         smolvm_pack::extract::force_detach_layers_volume(&cache_dir);
         result?;
 

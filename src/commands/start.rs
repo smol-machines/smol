@@ -197,6 +197,61 @@ impl StartCmd {
             }
         }
 
+        // Launch the machine's workload, mirroring the engine's `machine start`:
+        // an image machine runs its (entrypoint, cmd) as a detached container
+        // (empty command → the agent resolves the image's own ENTRYPOINT+CMD);
+        // a bare machine execs it directly. Without this, a golden created with
+        // `smol machine create ... -- <workload>` silently never ran it — which
+        // also left CUDA fork goldens with nothing to fork.
+        {
+            let mut exec_env = record.env.clone();
+            exec_env.extend(super::common::resolve_record_secrets(&record.secret_refs)?);
+            let mut cmd = record.entrypoint.clone();
+            cmd.extend(record.cmd.clone());
+            if let Some(ref img) = record.image {
+                // Positional virtiofs tags, same rule as the engine (smolvm{i}).
+                let bindings: Vec<(String, String, bool)> = record
+                    .mounts
+                    .iter()
+                    .enumerate()
+                    .map(|(i, (_host, target, ro))| {
+                        (
+                            smolvm::data::storage::HostMount::mount_tag(i),
+                            target.clone(),
+                            *ro,
+                        )
+                    })
+                    .collect();
+                let bg = smolvm::agent::RunConfig::new(img, cmd)
+                    .with_env(exec_env)
+                    .with_workdir(record.workdir.clone())
+                    .with_user(record.user.clone())
+                    .with_mounts(bindings)
+                    .with_persistent_overlay(Some(name.clone()));
+                let mut client = smolvm::AgentClient::connect_with_retry(manager.vsock_socket())?;
+                if let Err(e) = client.run_container_detached(bg) {
+                    if let Err(stop_err) = manager.stop() {
+                        eprintln!(
+                            "Warning: failed to stop machine after workload launch failure: {}",
+                            stop_err
+                        );
+                    }
+                    anyhow::bail!("start workload: {}", e);
+                }
+            } else if !cmd.is_empty() {
+                let mut client = smolvm::AgentClient::connect_with_retry(manager.vsock_socket())?;
+                let (exit_code, _stdout, stderr) =
+                    client.vm_exec(cmd, exec_env, record.workdir.clone(), None, None)?;
+                if exit_code != 0 {
+                    eprintln!(
+                        "workload exited with code {}: {}",
+                        exit_code,
+                        String::from_utf8_lossy(&stderr).trim()
+                    );
+                }
+            }
+        }
+
         println!("Machine '{}' running (PID: {})", name, pid.unwrap_or(0));
 
         // Persist running state
