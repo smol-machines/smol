@@ -297,7 +297,30 @@ impl DeployCmd {
             machine.id,
             started.state
         );
-        match started.url.as_deref() {
+        // The app URL appears once the node reports the service port, typically
+        // a few seconds after start — poll for it briefly instead of telling the
+        // user to go look for it themselves.
+        let mut url = started.url.clone();
+        if url.is_none() {
+            eprintln!("Waiting for the app URL...");
+            for _ in 0..15 {
+                tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                let Ok(resp) = http
+                    .get(format!("{}/v1/machines/{}", endpoint, machine.id))
+                    .send()
+                    .await
+                else {
+                    continue;
+                };
+                if let Ok(m) = resp.json::<cloud::CloudMachine>().await {
+                    if m.url.is_some() {
+                        url = m.url;
+                        break;
+                    }
+                }
+            }
+        }
+        match url.as_deref() {
             Some(url) => {
                 println!("{url}");
                 if self.public {
