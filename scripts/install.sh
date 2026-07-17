@@ -146,6 +146,28 @@ main() {
     *":$BIN_DIR:"*) ;;
     *) echo ">> add $BIN_DIR to your PATH:  export PATH=\"$BIN_DIR:\$PATH\"" ;;
   esac
+
+  # ── warn about OTHER smol binaries shadowing this one ─────────────────────
+  # A stale copy earlier in PATH (e.g. an old `cargo install` in ~/.cargo/bin)
+  # silently wins over this install: `smol` then reports an old version and
+  # lacks newer subcommands — a very confusing failure. Detect and say so.
+  local shadow="" dir
+  local IFS_SAVE="$IFS"
+  IFS=":"
+  for dir in $PATH; do
+    [ -z "$dir" ] && continue
+    [ "$dir" = "$BIN_DIR" ] && break        # ours resolves first — all good
+    if [ -x "$dir/smol" ] && [ ! -d "$dir/smol" ]; then
+      shadow="$dir/smol"
+      break
+    fi
+  done
+  IFS="$IFS_SAVE"
+  if [ -n "$shadow" ]; then
+    echo ">> WARNING: another smol at $shadow comes BEFORE $BIN_DIR in your PATH"
+    echo "   ($("$shadow" --version 2>/dev/null || echo "version unknown") — it will shadow the version you just installed)"
+    echo "   remove it:  rm '$shadow'   then run:  hash -r"
+  fi
   echo ">> done — try:  smol run -I alpine --net -- cat /etc/os-release"
 }
 
