@@ -85,6 +85,11 @@ pub struct DeployCmd {
 struct PushInputs {
     client: smolvm_registry::RegistryClient,
     reference: smolvm::registry::Reference,
+    /// Tenant-namespaced repo for the push (e.g. `tenants/<id>/doom`). The
+    /// registry token only grants the caller's own namespace, so a bare repo
+    /// must be scoped exactly as `smol pack push` does — otherwise the push
+    /// targets a path the token doesn't grant and 401s.
+    repo: String,
 }
 
 impl DeployCmd {
@@ -106,9 +111,15 @@ impl DeployCmd {
                 &settings.machines,
                 &settings.cloud,
             )?;
+            let repo = super::common::namespaced_repo(
+                &parsed.registry,
+                &parsed.repository(),
+                &settings.machines,
+            );
             Some(PushInputs {
                 client,
                 reference: parsed,
+                repo,
             })
         } else {
             None
@@ -129,10 +140,9 @@ impl DeployCmd {
     ) -> anyhow::Result<()> {
         // If -f provided, push first then deploy
         if let (Some(ref file), Some(inputs)) = (&self.file, push_inputs) {
-            eprintln!("Pushing {} to registry...", file.display());
-            let repo = inputs.reference.repository();
             let tag = inputs.reference.tag.as_deref().unwrap_or("latest");
-            smolvm_registry::push(&inputs.client, &repo, tag, file).await?;
+            eprintln!("Pushing {} to {}:{}...", file.display(), inputs.repo, tag);
+            smolvm_registry::push(&inputs.client, &inputs.repo, tag, file).await?;
             eprintln!("Pushed.");
         }
 
