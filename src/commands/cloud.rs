@@ -508,20 +508,46 @@ pub enum CloudSubcommand {
 #[derive(Args, Debug)]
 pub struct CloudExportArgs {
     /// Machine name or ID to export (must be stopped)
-    #[arg(value_name = "MACHINE")]
-    pub name: String,
+    #[arg(value_name = "MACHINE", conflicts_with = "name_flag")]
+    pub name: Option<String>,
+
+    /// Machine name or ID (same as the positional; matches the other verbs)
+    #[arg(short = 'n', long = "name", value_name = "NAME")]
+    pub name_flag: Option<String>,
 
     /// Tag for the artifact (default: latest)
     #[arg(long, default_value = "latest")]
     pub tag: String,
 }
 
+impl CloudExportArgs {
+    /// The machine name, from `-n/--name` or the positional.
+    fn machine(&self) -> Result<String> {
+        self.name_flag.clone().or_else(|| self.name.clone()).ok_or_else(|| {
+            anyhow::anyhow!("a machine name is required, e.g. `smol cloud export -n myapp`")
+        })
+    }
+}
+
 /// Arguments for `smol cloud share` / `smol cloud unshare`.
 #[derive(Args, Debug)]
 pub struct CloudShareArgs {
     /// Machine name or ID
-    #[arg(value_name = "MACHINE")]
-    pub name: String,
+    #[arg(value_name = "MACHINE", conflicts_with = "name_flag")]
+    pub name: Option<String>,
+
+    /// Machine name or ID (same as the positional; matches the other verbs)
+    #[arg(short = 'n', long = "name", value_name = "NAME")]
+    pub name_flag: Option<String>,
+}
+
+impl CloudShareArgs {
+    /// The machine name, from `-n/--name` or the positional.
+    fn machine(&self) -> Result<String> {
+        self.name_flag.clone().or_else(|| self.name.clone()).ok_or_else(|| {
+            anyhow::anyhow!("a machine name is required, e.g. `smol cloud share -n myapp`")
+        })
+    }
 }
 
 /// Arguments for `smol cloud exec` (non-interactive cloud command execution).
@@ -598,7 +624,7 @@ impl CloudCmd {
 /// node build + push the artifact; the bytes never transit the control plane.
 fn export_machine(args: CloudExportArgs) -> Result<()> {
     let tag = args.tag.clone();
-    run_cloud_command(Some(args.name), move |http, endpoint, id| async move {
+    run_cloud_command(Some(args.machine()?), move |http, endpoint, id| async move {
         eprintln!("Exporting machine (builds + pushes a .smolmachine; the machine must be stopped)...");
         let resp = http
             .post(format!("{}/v1/machines/{}/export", endpoint, id))
@@ -635,7 +661,7 @@ fn export_machine(args: CloudExportArgs) -> Result<()> {
 /// machine's published app without a smolmachines account. Re-running mints a
 /// fresh token (the previous link stops working).
 fn share_machine(args: CloudShareArgs) -> Result<()> {
-    run_cloud_command(Some(args.name), move |http, endpoint, id| async move {
+    run_cloud_command(Some(args.machine()?), move |http, endpoint, id| async move {
         let resp = http
             .post(format!("{}/v1/machines/{}/share", endpoint, id))
             .send()
@@ -671,7 +697,7 @@ fn share_machine(args: CloudShareArgs) -> Result<()> {
 /// `smol cloud unshare <machine>` — revoke the machine's anonymous share link.
 /// The existing URL immediately stops granting access.
 fn unshare_machine(args: CloudShareArgs) -> Result<()> {
-    run_cloud_command(Some(args.name), move |http, endpoint, id| async move {
+    run_cloud_command(Some(args.machine()?), move |http, endpoint, id| async move {
         let resp = http
             .delete(format!("{}/v1/machines/{}/share", endpoint, id))
             .send()
