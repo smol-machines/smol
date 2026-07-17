@@ -611,7 +611,24 @@ def connect_transport(machine_id: str, conn: Optional[ConnectOptions] = None) ->
             "or set SMOL_CLOUD_TOKEN (run `smol login`)."
         )
     base_url = (conn.base_url or os.environ.get("SMOL_CLOUD_URL") or DEFAULT_CLOUD_URL).rstrip("/")
-    m = _cloud_fetch(base_url, api_key, "GET", f"/v1/machines/{machine_id}") or {}
+    # Resolve like the CLI does: try the id path first, and when that 404s,
+    # list machines and match by NAME. `machine.name` returns the human name,
+    # so `Machine.connect(other.name)` — the natural composition of this API —
+    # must work, not just the raw `mach-…` id.
+    try:
+        m = _cloud_fetch(base_url, api_key, "GET", f"/v1/machines/{machine_id}") or {}
+    except SmolError as e:
+        if "404" not in str(e):
+            raise
+        listed = _cloud_fetch(base_url, api_key, "GET", "/v1/machines") or {}
+        machines = listed.get("machines", listed) if isinstance(listed, dict) else listed
+        hit = next(
+            (x for x in (machines or []) if x.get("name") == machine_id or x.get("id") == machine_id),
+            None,
+        )
+        if hit is None:
+            raise
+        m = hit
     return CloudTransport(base_url, api_key, str(m.get("id", machine_id)), str(m.get("name", machine_id)))
 
 

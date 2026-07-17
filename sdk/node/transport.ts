@@ -825,10 +825,24 @@ export async function connectTransport(
     DEFAULT_CLOUD_URL
   ).replace(/\/+$/, "");
   const cloudConn: CloudConn = { baseUrl, apiKey };
-  const m = await cloudFetch<MachineInfo>(
-    cloudConn,
-    "GET",
-    `/v1/machines/${id}`,
-  );
+  // Resolve like the CLI does: try the id path first, and when that 404s,
+  // list machines and match by NAME. `machine.name` returns the human name,
+  // so `Machine.connect(other.name)` — the natural composition of this API —
+  // must work, not just the raw `mach-…` id.
+  let m: MachineInfo;
+  try {
+    m = await cloudFetch<MachineInfo>(cloudConn, "GET", `/v1/machines/${id}`);
+  } catch (e) {
+    if (!/404/.test(String(e))) throw e;
+    const listed = await cloudFetch<{ machines?: MachineInfo[] } | MachineInfo[]>(
+      cloudConn,
+      "GET",
+      "/v1/machines",
+    );
+    const all = Array.isArray(listed) ? listed : (listed.machines ?? []);
+    const hit = all.find((x) => x.name === id || x.id === id);
+    if (!hit) throw e;
+    m = hit;
+  }
   return new CloudTransport(cloudConn, m.name ?? id, m.id ?? id);
 }
