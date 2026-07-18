@@ -208,28 +208,11 @@ impl StartCmd {
             exec_env.extend(super::common::resolve_record_secrets(&record.secret_refs)?);
             let mut cmd = record.entrypoint.clone();
             cmd.extend(record.cmd.clone());
-            if let Some(ref img) = record.image {
-                // Positional virtiofs tags, same rule as the engine (smolvm{i}).
-                let bindings: Vec<(String, String, bool)> = record
-                    .mounts
-                    .iter()
-                    .enumerate()
-                    .map(|(i, (_host, target, ro))| {
-                        (
-                            smolvm::data::storage::HostMount::mount_tag(i),
-                            target.clone(),
-                            *ro,
-                        )
-                    })
-                    .collect();
-                let bg = smolvm::agent::RunConfig::new(img, cmd)
-                    .with_env(exec_env)
-                    .with_workdir(record.workdir.clone())
-                    .with_user(record.user.clone())
-                    .with_mounts(bindings)
-                    .with_persistent_overlay(Some(name.clone()));
+            if record.image.is_some() {
                 let mut client = smolvm::AgentClient::connect_with_retry(manager.vsock_socket())?;
-                if let Err(e) = client.run_container_detached(bg) {
+                if let Err(e) =
+                    smolvm::workload::launch_image_workload(&mut client, &name, &record, exec_env)
+                {
                     if let Err(stop_err) = manager.stop() {
                         eprintln!(
                             "Warning: failed to stop machine after workload launch failure: {}",
