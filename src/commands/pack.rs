@@ -6,7 +6,7 @@ use smolvm::config::{RecordState, SmolvmConfig};
 use smolvm::data::resources::DEFAULT_MICROVM_CPU_COUNT;
 use smolvm::smolfile;
 use smolvm_pack::assets::AssetCollector;
-use smolvm_pack::format::{PackManifest, PackMode};
+use smolvm_pack::format::PackManifest;
 use smolvm_pack::packer::Packer;
 use smolvm_protocol::AgentResponse;
 use std::path::PathBuf;
@@ -250,11 +250,6 @@ impl PackCreateCmd {
             );
         }
 
-        let overlay_path = smolvm::agent::vm_data_dir(&vm_name).join("overlay.raw");
-        if !overlay_path.exists() {
-            anyhow::bail!("overlay disk not found. The VM may not have been started yet.");
-        }
-
         println!("Packing VM '{}' snapshot...", vm_name);
 
         let temp_dir = tempfile::tempdir()?;
@@ -264,10 +259,18 @@ impl PackCreateCmd {
             .map_err(|e| anyhow::anyhow!("collect assets: {}", e))?;
         self.collect_base_assets(&mut collector)?;
 
-        println!("Copying overlay disk...");
-        collector
-            .add_overlay_template(&overlay_path)
-            .map_err(|e| anyhow::anyhow!("collect overlay: {}", e))?;
+        // Shared export: single source of truth for bare / image /
+        // artifact-sourced dispatch and the single-layer flatten. An
+        // image machine's base layers + container overlay are collected
+        // here — a bare machine contributes its rootfs overlay template.
+        let assets = smolvm::pack_export::collect_from_vm_assets(
+            &mut collector,
+            &vm_name,
+            vm,
+            temp_dir.path(),
+            &smolvm::pack_export::FromVmExportOptions::default(),
+        )
+        .map_err(|e| anyhow::anyhow!("{}", e))?;
 
         let pack_config = self.resolve_pack_config()?;
 
@@ -281,17 +284,9 @@ impl PackCreateCmd {
             platform,
             host_platform,
         );
-        manifest.mode = PackMode::Vm;
+        smolvm::pack_export::seed_manifest_from_vm(&mut manifest, vm, &assets);
         manifest.cpus = pack_config.cpus;
         manifest.mem = pack_config.mem;
-        manifest.entrypoint = if !vm.entrypoint.is_empty() {
-            vm.entrypoint.clone()
-        } else {
-            vec!["/bin/sh".to_string()]
-        };
-        manifest.cmd = vm.cmd.clone();
-        manifest.env = vm.env.iter().map(|(k, v)| format!("{}={}", k, v)).collect();
-        manifest.workdir = vm.workdir.clone();
 
         apply_pack_overrides(&mut manifest, &pack_config);
 
