@@ -44,6 +44,13 @@ pub struct ForkCmd {
     /// Force a local fork. Equivalent to a `local/` prefix on the golden.
     #[arg(long, conflicts_with = "cloud")]
     pub local: bool,
+
+    /// Share the golden's loaded CUDA weights with this clone instead of
+    /// copying them — sibling clones then keep ONE copy of the base model in
+    /// VRAM. Correct when the base stays frozen (LoRA/QLoRA fine-tuning,
+    /// inference); use a plain fork when the clone trains the base weights.
+    #[arg(long)]
+    pub share_weights: bool,
 }
 
 impl ForkCmd {
@@ -185,6 +192,7 @@ impl ForkCmd {
             // boot subprocess from `features`, not from a (non-inherited) process
             // env. Without this the clone cold-boots and loses the warm RAM.
             snapshot_dir: Some(snapshot_dir.clone()),
+            cuda_share_weights: self.share_weights,
             // `smol machine fork` detaches the clone to persist; opt out of the boot
             // subprocess's parent-death watchdog (see start.rs) so it survives
             // this command's exit.
