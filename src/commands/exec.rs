@@ -132,6 +132,31 @@ impl ExecCmd {
         // machine also run in the persistent container overlay (see below).
         let record_image = record.as_ref().and_then(|r| r.image.clone());
 
+        // Bind each of the machine's mounts into the exec's container:
+        // (tag, guest_target, read_only), tag `smolvm{i}` in the VM's virtiofs
+        // device order — the same form `smol run` and the engine's exec use.
+        // Without this, an image machine whose workload command exits (alpine,
+        // busybox, any finished CMD) has no live container, so this exec
+        // re-establishes the keep-alive from an empty mount set and the
+        // `/storage/workspace` fallback shadows the user's `-v host:/workspace`
+        // — the mount silently vanishes inside exec sessions.
+        let mount_bindings: Vec<(String, String, bool)> = record
+            .as_ref()
+            .map(|r| {
+                r.host_mounts()
+                    .iter()
+                    .enumerate()
+                    .map(|(i, m)| {
+                        (
+                            smolvm::data::storage::HostMount::mount_tag(i),
+                            m.target.to_string_lossy().into_owned(),
+                            m.read_only,
+                        )
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+
         // Streaming mode
         if self.stream {
             let mut exit_code = 0;
@@ -161,6 +186,7 @@ impl ExecCmd {
                     .with_env(env)
                     .with_workdir(self.workdir.clone())
                     .with_timeout(timeout)
+                    .with_mounts(mount_bindings.clone())
                     .with_persistent_overlay(Some(name.clone()));
                 client.run_streaming_with(config, on_event)?;
             } else {
@@ -182,6 +208,7 @@ impl ExecCmd {
                     .with_workdir(self.workdir.clone())
                     .with_timeout(timeout)
                     .with_tty(self.tty)
+                    .with_mounts(mount_bindings.clone())
                     .with_persistent_overlay(Some(name.clone()));
                 let exit_code = client.run_interactive(config)?;
                 manager.detach();
@@ -192,6 +219,7 @@ impl ExecCmd {
                 .with_env(env)
                 .with_workdir(self.workdir.clone())
                 .with_timeout(timeout)
+                .with_mounts(mount_bindings)
                 .with_persistent_overlay(Some(name.clone()));
             let (exit_code, stdout, stderr) = client.run_non_interactive(config)?;
             print_and_exit(
