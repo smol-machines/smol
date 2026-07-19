@@ -64,7 +64,11 @@ async fn run_inspect(
     tag_or_digest: &str,
     json_output: bool,
 ) -> anyhow::Result<()> {
-    let manifest_bytes = client.get_manifest(repo, tag_or_digest).await?;
+    // Resolve an OCI image index to this host's platform manifest — the same
+    // path `pull` uses — so an index-wrapped .smolmachine (what `cloud export`
+    // and multi-arch packs produce) inspects instead of being rejected as a
+    // "Docker image". A plain single manifest passes straight through.
+    let manifest_bytes = client.get_manifest_resolved(repo, tag_or_digest).await?;
     let oci_manifest: smolvm_registry::OciManifest = serde_json::from_slice(&manifest_bytes)?;
 
     let layer_size = oci_manifest.layers.first().map(|l| l.size).unwrap_or(0);
