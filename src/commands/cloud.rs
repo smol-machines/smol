@@ -651,7 +651,7 @@ fn export_machine(args: CloudExportArgs) -> Result<()> {
             println!("  platforms {}", out.platforms.join(", "));
         }
         println!();
-        println!("Re-deploy anywhere:  smol cloud deploy -I {}", out.reference);
+        println!("Re-deploy anywhere:  smol cloud deploy {}", out.reference);
         Ok(())
     })
 }
