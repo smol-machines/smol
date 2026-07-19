@@ -293,6 +293,10 @@ class CloudTransport:
             exit_code=int(r.get("exitCode", 0)),
             stdout=str(r.get("stdout", "")),
             stderr=str(r.get("stderr", "")),
+            # The cloud caps captured output at 1 MiB and flags the cut
+            # (camelCase per smolfleet's MachineExecResponse).
+            stdout_truncated=bool(r.get("stdoutTruncated", False)),
+            stderr_truncated=bool(r.get("stderrTruncated", False)),
         )
 
     def run(self, image: str, command: list[str], opts: Optional[ExecOptions] = None) -> ExecResult:
@@ -472,6 +476,46 @@ def _cloud_fetch(
         raise SmolError("TIMEOUT", f"cloud {method} {path} timed out after {timeout}s") from e
 
 
+def _cli_config_api_key() -> Optional[str]:
+    """API key from the smol CLI's stored login — ``smol login`` writes
+    ``api_key`` under ``[cloud]`` in ``<config-dir>/smolvm/config.toml``
+    (``$XDG_CONFIG_HOME``, defaulting to ``~/.config``). Returns ``None`` when
+    the file or key is absent or unreadable."""
+    base = os.environ.get("XDG_CONFIG_HOME") or os.path.join(os.path.expanduser("~"), ".config")
+    path = os.path.join(base, "smolvm", "config.toml")
+    try:
+        with open(path, encoding="utf-8") as f:
+            text = f.read()
+    except OSError:
+        return None
+    try:
+        # Stdlib TOML parser on Python 3.11+; the hand parse below covers
+        # 3.9/3.10 (the package supports >=3.9) and malformed files.
+        import tomllib
+
+        cloud = tomllib.loads(text).get("cloud")
+        key = cloud.get("api_key") if isinstance(cloud, dict) else None
+        return key if isinstance(key, str) and key else None
+    except ModuleNotFoundError:
+        pass
+    except Exception:  # noqa: BLE001 - malformed TOML: fall through to the line parse
+        pass
+    in_cloud = False
+    for raw in text.splitlines():
+        line = raw.strip()
+        if line.startswith("["):
+            in_cloud = line == "[cloud]"
+        elif in_cloud and line.startswith("api_key"):
+            rest = line[len("api_key"):].lstrip()
+            if not rest.startswith("="):
+                continue
+            val = rest[1:].strip()
+            if len(val) >= 2 and val[0] == val[-1] and val[0] in "\"'":
+                val = val[1:-1]
+            return val or None
+    return None
+
+
 def _wait_for_ready(base_url: str, api_key: str, machine_id: str, timeout_s: float = 120.0) -> None:
     deadline = time.monotonic() + timeout_s
     while True:
@@ -499,10 +543,15 @@ def make_transport(config: MachineConfig, conn: Optional[ConnectOptions] = None)
     use_cloud = conn.target == "cloud" or (conn.target != "local" and bool(api_key))
 
     if use_cloud:
+        # Fall back to the CLI's stored login only AFTER the cloud target is
+        # selected, so a `smol login` on the machine never silently flips the
+        # SDK's default target away from local.
+        api_key = api_key or _cli_config_api_key()
         if not api_key:
             raise InvalidConfigError(
-                "cloud target requires an api_key — pass ConnectOptions(api_key=...) "
-                "or set SMOL_CLOUD_TOKEN (run `smol login`)."
+                "cloud target requires an api_key — pass ConnectOptions(api_key=...), "
+                "set SMOL_CLOUD_TOKEN, or run `smol login` (the SDK reads the CLI's "
+                "config at ~/.config/smolvm/config.toml)."
             )
         if not config.image:
             raise InvalidConfigError(
@@ -547,6 +596,13 @@ def make_transport(config: MachineConfig, conn: Optional[ConnectOptions] = None)
         # info after start). Publishing a port implies the virtio-net backend.
         if config.ports:
             body["ports"] = [{"port": p.guest} for p in config.ports]
+        # Machine-level workload env/workdir (the same shape the CLI's deploy
+        # sends: env as a plain map). Omitted entirely when unset so the server
+        # applies its own defaults.
+        if config.env:
+            body["env"] = dict(config.env)
+        if config.workdir is not None:
+            body["workdir"] = config.workdir
 
         created = _cloud_fetch(base_url, api_key, "POST", "/v1/machines", json_body=body) or {}
         machine_id = created["id"]
@@ -573,6 +629,16 @@ def make_transport(config: MachineConfig, conn: Optional[ConnectOptions] = None)
         return CloudTransport(base_url, api_key, machine_id, name)
 
     # Local embedded engine via the native extension.
+    # Machine-level env/workdir configure the machine's WORKLOAD (init commands
+    # and the image entrypoint) — a cloud concept; the embedded engine runs no
+    # workload at create, and its create spec has no field for them. Reject
+    # rather than silently drop (mirrors the mounts-on-cloud gate above).
+    if config.env or config.workdir is not None:
+        raise NotSupportedError(
+            "machine-level env/workdir apply to the machine's workload and are "
+            "cloud-only; on the local target pass ExecOptions(env=..., "
+            "workdir=...) per command instead."
+        )
     native = _load_native()
     name = config.name or _generate_name()
     try:
@@ -605,10 +671,14 @@ def connect_transport(machine_id: str, conn: Optional[ConnectOptions] = None) ->
             return LocalTransport(native.Machine.connect(machine_id))
         except Exception as e:  # noqa: BLE001
             raise wrap_native_error(e) from e
+    # As in make_transport: the CLI-login fallback applies only once the cloud
+    # target is already selected.
+    api_key = api_key or _cli_config_api_key()
     if not api_key:
         raise InvalidConfigError(
-            "connect requires an api_key — pass ConnectOptions(api_key=...) "
-            "or set SMOL_CLOUD_TOKEN (run `smol login`)."
+            "connect requires an api_key — pass ConnectOptions(api_key=...), "
+            "set SMOL_CLOUD_TOKEN, or run `smol login` (the SDK reads the CLI's "
+            "config at ~/.config/smolvm/config.toml)."
         )
     base_url = (conn.base_url or os.environ.get("SMOL_CLOUD_URL") or DEFAULT_CLOUD_URL).rstrip("/")
     # Resolve like the CLI does: try the id path first, and when that 404s,
