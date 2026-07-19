@@ -163,6 +163,30 @@ impl UpCmd {
             record.ssh_agent = ssh_agent;
             record.dns_filter_hosts = dns_filter_hosts.clone();
 
+            // Runtime toggles from the Smolfile that would otherwise be silently
+            // dropped: Rosetta x86 emulation, CUDA, and exposing the Docker socket
+            // all have record fields the engine's own Smolfile path wires — mirror
+            // it here so `file up` honors them.
+            record.rosetta = sf.rosetta;
+            record.cuda = sf.cuda.unwrap_or(false);
+            record.docker_socket = sf.docker_socket.unwrap_or(false);
+
+            // Wire [restart] policy into record.
+            if let Some(ref r) = sf.restart {
+                if let Some(ref policy) = r.policy {
+                    record.restart.policy = policy
+                        .parse()
+                        .map_err(|e| anyhow::anyhow!("Smolfile [restart] policy: {e}"))?;
+                }
+                if let Some(mr) = r.max_retries {
+                    record.restart.max_retries = mr;
+                }
+                if let Some(secs) = r.max_backoff.as_deref().and_then(smolfile::parse_duration_secs)
+                {
+                    record.restart.max_backoff_secs = secs;
+                }
+            }
+
             // Wire [health] into record
             if let Some(ref h) = sf.health {
                 if !h.exec.is_empty() {
