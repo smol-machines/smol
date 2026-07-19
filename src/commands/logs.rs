@@ -26,6 +26,11 @@ pub struct LogsCmd {
     /// Force a local machine. Equivalent to a `local/` prefix.
     #[arg(long, conflicts_with = "cloud")]
     pub local: bool,
+
+    /// Show control-plane lifecycle events (created/started/stopped) instead of
+    /// the machine's console output. Cloud only.
+    #[arg(long)]
+    pub events: bool,
 }
 
 impl LogsCmd {
@@ -104,6 +109,51 @@ impl LogsCmd {
     }
 
     fn run_cloud(self) -> anyhow::Result<()> {
+        if self.events {
+            return self.run_cloud_events();
+        }
+        let follow = self.follow;
+        let tail = self.tail;
+        super::cloud::run_cloud_command(self.name, |http, endpoint, id| async move {
+            // The machine's console (agent tracing + the workload's stdout/stderr)
+            // — the same source the web console shows, and what `smol machine logs`
+            // is expected to surface. `--events` switches to the control-plane
+            // lifecycle feed instead.
+            let resp = http
+                .get(format!("{}/v1/machines/{}/logs", endpoint, id))
+                .query(&[
+                    ("follow", follow.to_string()),
+                    ("tail", tail.to_string()),
+                ])
+                .send()
+                .await?;
+
+            match resp.status().as_u16() {
+                200 => {
+                    use futures_util::StreamExt;
+                    let mut stream = resp.bytes_stream();
+                    let mut buf: Vec<u8> = Vec::new();
+                    while let Some(chunk) = stream.next().await {
+                        buf.extend_from_slice(&chunk?);
+                        while let Some(nl) = buf.iter().position(|&b| b == b'\n') {
+                            let line: Vec<u8> = buf.drain(..=nl).collect();
+                            print_console_line(&String::from_utf8_lossy(&line));
+                        }
+                    }
+                    if !buf.is_empty() {
+                        print_console_line(&String::from_utf8_lossy(&buf));
+                    }
+                }
+                404 => anyhow::bail!("machine '{}' not found", id),
+                _ => {
+                    super::cloud::check_response(resp, "stream logs").await?;
+                }
+            }
+            Ok(())
+        })
+    }
+
+    fn run_cloud_events(self) -> anyhow::Result<()> {
         super::cloud::run_cloud_command(self.name, |http, endpoint, id| async move {
             let resp = http
                 .get(format!("{}/v1/machines/{}/events", endpoint, id))
@@ -132,4 +182,34 @@ impl LogsCmd {
             Ok(())
         })
     }
+}
+
+/// Render one console log line. The node streams the guest's `agent-console.log`
+/// as SSE `data: <json>` frames where the JSON is a tracing record; unwrap the
+/// frame and print a compact `timestamp [LEVEL] message`, falling back to the
+/// raw text for any line that isn't the expected shape (so nothing is dropped).
+fn print_console_line(raw: &str) {
+    let line = raw.trim_end_matches(['\n', '\r']);
+    if line.is_empty() {
+        return;
+    }
+    let payload = line.strip_prefix("data: ").unwrap_or(line);
+    if let Ok(v) = serde_json::from_str::<serde_json::Value>(payload) {
+        // `message` is either top-level or nested under tracing's `fields`.
+        let msg = v
+            .get("message")
+            .and_then(|m| m.as_str())
+            .or_else(|| v.get("fields").and_then(|f| f.get("message")).and_then(|m| m.as_str()));
+        if let Some(msg) = msg {
+            let ts = v.get("timestamp").and_then(|t| t.as_str());
+            let level = v.get("level").and_then(|l| l.as_str()).unwrap_or("INFO");
+            match ts {
+                Some(ts) => println!("{ts} [{level}] {msg}"),
+                None => println!("[{level}] {msg}"),
+            }
+            return;
+        }
+    }
+    // Not a recognized JSON record — echo verbatim.
+    println!("{payload}");
 }
