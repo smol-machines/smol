@@ -110,8 +110,8 @@ impl UpCmd {
             network_backend: None,
             gpu,
             gpu_vram_mib,
-            rosetta: false,
-            cuda: false,
+            rosetta: sf.rosetta.unwrap_or(false),
+            cuda: sf.cuda.unwrap_or(false),
             dns: None,
         };
 
@@ -218,6 +218,8 @@ impl UpCmd {
         let features = LaunchFeatures {
             ssh_agent_socket,
             dns_filter_hosts,
+            cuda: sf.cuda.unwrap_or(false),
+            expose_docker: sf.docker_socket.unwrap_or(false),
             ..Default::default()
         };
 
