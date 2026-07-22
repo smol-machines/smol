@@ -69,6 +69,7 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(200, json.dumps({
                 "stdout": "hello\n", "stderr": "", "exitCode": 0,
                 "durationMs": 12, "machineId": MACHINE_ID,
+                "stdoutTruncated": True, "stderrTruncated": False,
             }).encode())
         if self.path == f"/v1/machines/{MACHINE_ID}/stop":
             return self._send(200, json.dumps({"id": MACHINE_ID, "state": "stopped"}).encode())
@@ -124,7 +125,8 @@ def main() -> int:
 
     try:
         m = Machine.create(
-            MachineConfig(image="alpine:3.20", forkable=True, resources=ResourceSpec(cpus=2, memory_mb=1024, network=True)),
+            MachineConfig(image="alpine:3.20", forkable=True, env={"FOO": "bar"}, workdir="/app",
+                          resources=ResourceSpec(cpus=2, memory_mb=1024, network=True)),
             ConnectOptions(target="cloud", base_url=base, api_key="smk_testkey"),
         )
         cb = captured["create_body"]
@@ -134,6 +136,8 @@ def main() -> int:
         check("resources nested camelCase", cb["resources"].get("cpus") == 2 and cb["resources"].get("memoryMb") == 1024,
               str(cb.get("resources")))
         check("network mode open", cb.get("network") == {"mode": "open"}, str(cb.get("network")))
+        check("create sends env as a plain map", cb.get("env") == {"FOO": "bar"}, str(cb.get("env")))
+        check("create sends workdir", cb.get("workdir") == "/app", str(cb.get("workdir")))
         check("waited for ready (GET machine)", any(h.startswith(f"GET /v1/machines/{MACHINE_ID}") for h in captured["hits"]))
         check("name from response", m.name == "auto", m.name)
         check("forkable start passes ?forkable=true", "forkable=true" in captured.get("start_path", ""),
@@ -155,6 +159,9 @@ def main() -> int:
         check("exec command sent as argv array", captured["exec_body"]["command"] == ["echo", "hello"],
               str(captured["exec_body"].get("command")))
         check("exec result maps camelCase", r.exit_code == 0 and r.stdout == "hello\n" and r.success is True)
+        check("exec surfaces truncation flags",
+              r.stdout_truncated is True and r.stderr_truncated is False,
+              f"{r.stdout_truncated}/{r.stderr_truncated}")
 
         m.write_file("/tmp/a b.txt", "payload")
         back = m.read_file("/tmp/a b.txt")
@@ -184,6 +191,9 @@ def main() -> int:
         check("cloud create publishes ports (guest port only; hostPort allocated)",
               captured["create_body"].get("ports") == [{"port": 80}],
               str(captured["create_body"].get("ports")))
+        check("env/workdir omitted from the body when unset",
+              "env" not in captured["create_body"] and "workdir" not in captured["create_body"],
+              str(captured["create_body"]))
 
         m.stop()
         check("stop hit POST /stop", f"POST /v1/machines/{MACHINE_ID}/stop" in captured["hits"])

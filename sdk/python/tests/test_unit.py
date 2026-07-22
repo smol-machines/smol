@@ -6,7 +6,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "python"))
 
 from smol.errors import ExecutionError, SmolError, wrap_native_error  # noqa: E402
-from smol.transport import _encode_path, _native_config  # noqa: E402
+from smol.transport import _cli_config_api_key, _encode_path, _native_config  # noqa: E402
 from smol.types import ExecResult, MachineConfig, ResourceSpec  # noqa: E402
 
 
@@ -58,6 +58,46 @@ def test_exec_result_helpers():
     except ExecutionError as e:
         assert e.exit_code == 7
         assert e.stderr == "nope"
+
+
+def test_exec_result_truncation_defaults_false():
+    r = ExecResult(exit_code=0, stdout="", stderr="")
+    assert r.stdout_truncated is False
+    assert r.stderr_truncated is False
+
+
+def test_cli_config_api_key_fallback():
+    import os
+    import tempfile
+
+    old = os.environ.get("XDG_CONFIG_HOME")
+    try:
+        with tempfile.TemporaryDirectory() as d:
+            os.environ["XDG_CONFIG_HOME"] = d
+            # No config file at all → no key.
+            assert _cli_config_api_key() is None
+            cfg = Path(d) / "smolvm"
+            cfg.mkdir()
+            (cfg / "config.toml").write_text(
+                '[images]\ndefault_registry = "docker.io"\n\n'
+                '[cloud]\nendpoint = "https://api.example"\napi_key = "smk_from_cli"\n'
+            )
+            assert _cli_config_api_key() == "smk_from_cli"
+            # An api_key OUTSIDE the [cloud] section must not match.
+            (cfg / "config.toml").write_text('[other]\napi_key = "smk_wrong"\n')
+            assert _cli_config_api_key() is None
+            # An empty key counts as absent.
+            (cfg / "config.toml").write_text('[cloud]\napi_key = ""\n')
+            assert _cli_config_api_key() is None
+            # Malformed TOML elsewhere falls back to the line parse (also the
+            # 3.9/3.10 path, where tomllib is unavailable).
+            (cfg / "config.toml").write_text('[cloud]\napi_key = "smk_line"\n[broken\n')
+            assert _cli_config_api_key() == "smk_line"
+    finally:
+        if old is None:
+            os.environ.pop("XDG_CONFIG_HOME", None)
+        else:
+            os.environ["XDG_CONFIG_HOME"] = old
 
 
 def test_native_config_forwards_gpu():

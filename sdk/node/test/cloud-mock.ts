@@ -72,7 +72,13 @@ const server = createServer(async (req, res) => {
     return json(200, { id: "m2", state: "running" });
   if (method === "POST" && url === "/v1/machines/m1/exec") {
     seen.execBody = JSON.parse((await readBody(req)).toString() || "{}");
-    return json(200, { exitCode: 0, stdout: "cloud-exec-ok\n", stderr: "" });
+    return json(200, {
+      exitCode: 0,
+      stdout: "cloud-exec-ok\n",
+      stderr: "",
+      stdoutTruncated: true,
+      stderrTruncated: false,
+    });
   }
   if (method === "PUT" && url.startsWith("/v1/machines/m1/files/")) {
     files.set(url, await readBody(req));
@@ -105,10 +111,22 @@ async function main(): Promise<void> {
   const baseUrl = `http://127.0.0.1:${port}`;
 
   const m = await Machine.create(
-    { image: "alpine", forkable: true, resources: { cpus: 2, memoryMb: 1024 } },
+    {
+      image: "alpine",
+      forkable: true,
+      env: { FOO: "bar" },
+      workdir: "/app",
+      resources: { cpus: 2, memoryMb: 1024 },
+    },
     { target: "cloud", baseUrl, apiKey: "smk_test123" },
   );
   check("created via cloud (name from API)", m.name === "cloud-test", m.name);
+  check(
+    "create sends env as a plain map + workdir",
+    JSON.stringify(seen.createBody?.env) === JSON.stringify({ FOO: "bar" }) &&
+      seen.createBody?.workdir === "/app",
+    JSON.stringify({ env: seen.createBody?.env, workdir: seen.createBody?.workdir }),
+  );
   check(
     "sent Bearer auth",
     seen.auth === "Bearer smk_test123",
@@ -123,6 +141,11 @@ async function main(): Promise<void> {
 
   const r = await m.exec(["echo", "hi"], { env: { A: "b" }, timeout: 5 });
   check("exec stdout mapped", r.stdout.trim() === "cloud-exec-ok");
+  check(
+    "exec surfaces truncation flags",
+    r.stdoutTruncated === true && r.stderrTruncated === false,
+    `${r.stdoutTruncated}/${r.stderrTruncated}`,
+  );
   check(
     "exec sent command array",
     JSON.stringify(seen.execBody?.command) === JSON.stringify(["echo", "hi"]),
@@ -169,6 +192,11 @@ async function main(): Promise<void> {
     "cloud create publishes ports (guest port only; hostPort allocated)",
     JSON.stringify(seen.createBody?.ports) === JSON.stringify([{ port: 80 }]),
     JSON.stringify(seen.createBody?.ports),
+  );
+  check(
+    "env/workdir omitted from the body when unset",
+    !("env" in (seen.createBody ?? {})) && !("workdir" in (seen.createBody ?? {})),
+    JSON.stringify(seen.createBody),
   );
 
   // --- fork: live-RAM RL clone over the cloud ---

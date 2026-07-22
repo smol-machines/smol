@@ -24,7 +24,12 @@ pub struct ExecCmd {
     pub name: Option<String>,
 
     /// Command to execute
-    #[arg(trailing_var_arg = true, required = true, value_name = "COMMAND")]
+    ///
+    /// `last = true` requires the `--` separator so an old-style positional
+    /// machine name (`smol machine exec myvm -- cmd`) fails loudly instead of
+    /// being captured as the command and silently targeting "default" — the
+    /// machine name is the `-n/--name` flag. Matches the engine CLI convention.
+    #[arg(last = true, required = true, value_name = "COMMAND")]
     pub command: Vec<String>,
 
     /// Keep stdin open

@@ -47,6 +47,9 @@ export interface RawExec {
   exitCode: number;
   stdout: string;
   stderr: string;
+  /** Cloud only: output was capped at 1 MiB. Absent on the local target. */
+  stdoutTruncated?: boolean;
+  stderrTruncated?: boolean;
 }
 
 export interface Transport {
@@ -72,6 +75,33 @@ export interface Transport {
 function generateName(): string {
   const rand = Math.random().toString(36).slice(2, 8);
   return `smol-${Date.now().toString(36)}-${rand}`;
+}
+
+/** API key from the smol CLI's stored login — `smol login` writes `api_key`
+ *  under `[cloud]` in `<config-dir>/smolvm/config.toml` (`$XDG_CONFIG_HOME`,
+ *  defaulting to `~/.config`). Tiny line parse so the SDK stays
+ *  dependency-free; returns undefined when the file or key is absent. */
+export function cliConfigApiKey(): string | undefined {
+  const base =
+    process.env.XDG_CONFIG_HOME || join(homedir(), ".config");
+  let text: string;
+  try {
+    text = readFileSync(join(base, "smolvm", "config.toml"), "utf8");
+  } catch {
+    return undefined;
+  }
+  let inCloud = false;
+  for (const raw of text.split(/\r?\n/)) {
+    const line = raw.trim();
+    if (line.startsWith("[")) {
+      inCloud = line === "[cloud]";
+      continue;
+    }
+    if (!inCloud) continue;
+    const m = /^api_key\s*=\s*(?:"([^"]*)"|'([^']*)')/.exec(line);
+    if (m) return m[1] || m[2] || undefined;
+  }
+  return undefined;
 }
 
 function toNativeExecOptions(
@@ -483,6 +513,10 @@ class CloudTransport implements Transport {
       exitCode: r.exitCode ?? 0,
       stdout: r.stdout ?? "",
       stderr: r.stderr ?? "",
+      // The cloud caps captured output at 1 MiB and flags the cut (camelCase
+      // per smolfleet's MachineExecResponse).
+      stdoutTruncated: r.stdoutTruncated ?? false,
+      stderrTruncated: r.stderrTruncated ?? false,
     };
   }
 
@@ -745,7 +779,11 @@ export async function makeTransport(
     conn.target === "cloud" || (conn.target !== "local" && Boolean(apiKey));
 
   if (useCloud) {
-    if (!apiKey) {
+    // Fall back to the CLI's stored login only AFTER the cloud target is
+    // selected, so a `smol login` on the machine never silently flips the
+    // SDK's default target away from local.
+    const key = apiKey ?? cliConfigApiKey();
+    if (!key) {
       throw new InvalidConfigError(
         `cloud target requires an API key — ${NO_KEY_HINT}.`,
       );
@@ -773,7 +811,7 @@ export async function makeTransport(
       cliUrl ??
       DEFAULT_CLOUD_URL
     ).replace(/\/+$/, "");
-    const cloudConn: CloudConn = { baseUrl, apiKey };
+    const cloudConn: CloudConn = { baseUrl, apiKey: key };
 
     // smolfleet CreateMachineRequest (camelCase): source (tagged), nested
     // resources, network {mode}, autoStopSeconds, ttlSeconds. Optional numeric
@@ -809,8 +847,20 @@ export async function makeTransport(
       ...(config.ports?.length
         ? { ports: config.ports.map((p) => ({ port: p.guest })) }
         : {}),
+      // Machine-level workload env/workdir (the same shape the CLI's deploy
+      // sends: env as a plain map). Omitted entirely when unset so the server
+      // applies its own defaults.
+      ...(config.env && Object.keys(config.env).length
+        ? { env: config.env }
+        : {}),
+      ...(config.workdir !== undefined ? { workdir: config.workdir } : {}),
       autoStopSeconds: config.autoStopSeconds ?? null,
       ttlSeconds: config.ttlSeconds ?? null,
+      // Forkable is a CREATE-time property: the control plane persists it and the
+      // fork endpoint checks the stored flag, so it MUST be sent here. (The
+      // `?forkable=true` start param only affects the boot; without this field the
+      // golden is stored non-forkable and every fork() 409s.)
+      ...(config.forkable ? { forkable: true } : {}),
     };
     const created = await cloudFetch<MachineInfo>(
       cloudConn,
@@ -845,6 +895,16 @@ export async function makeTransport(
   }
 
   // Local embedded engine.
+  // Machine-level env/workdir configure the machine's WORKLOAD (init commands
+  // and the image entrypoint) — a cloud concept; the embedded engine runs no
+  // workload at create, and its create spec has no field for them. Reject
+  // rather than silently drop (mirrors the mounts-on-cloud gate above).
+  if ((config.env && Object.keys(config.env).length) || config.workdir !== undefined) {
+    throw new NotSupportedError(
+      "machine-level env/workdir apply to the machine's workload and are cloud-only; " +
+        "on the local target pass { env, workdir } per exec instead.",
+    );
+  }
   const name = config.name ?? generateName();
   try {
     const inner = new (getNapiMachine())(toNativeConfig(name, config));
@@ -883,7 +943,10 @@ export async function connectTransport(
       throw wrapNativeError(e);
     }
   }
-  if (!apiKey) {
+  // As in makeTransport: the CLI-login fallback applies only once the cloud
+  // target is already selected.
+  const key = apiKey ?? cliConfigApiKey();
+  if (!key) {
     throw new InvalidConfigError(
       `connect requires an API key — ${NO_KEY_HINT}.`,
     );
@@ -894,7 +957,7 @@ export async function connectTransport(
     cliUrl ??
     DEFAULT_CLOUD_URL
   ).replace(/\/+$/, "");
-  const cloudConn: CloudConn = { baseUrl, apiKey };
+  const cloudConn: CloudConn = { baseUrl, apiKey: key };
   // Resolve like the CLI does: try the id path first, and when that 404s,
   // list machines and match by NAME. `machine.name` returns the human name,
   // so `Machine.connect(other.name)` — the natural composition of this API —

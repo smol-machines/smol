@@ -31,6 +31,10 @@ function makeExecResult(r: RawExec): ExecResult {
     exitCode: r.exitCode,
     stdout: r.stdout,
     stderr: r.stderr,
+    // Cloud-only truncation flags (output capped at 1 MiB); the local engine
+    // streams unbounded, so absent means false.
+    stdoutTruncated: r.stdoutTruncated ?? false,
+    stderrTruncated: r.stderrTruncated ?? false,
     success,
     output: r.stdout + r.stderr,
     assertSuccess() {

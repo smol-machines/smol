@@ -1,8 +1,11 @@
 /** Pure-unit tests — no VM boot, no network. Covers the error-parsing seam and
  *  cloud path encoding, the two places most likely to silently regress. */
 import assert from 'node:assert';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { wrapNativeError, SmolError } from '../errors';
-import { encodePath, toNativeConfig } from '../transport';
+import { cliConfigApiKey, encodePath, toNativeConfig } from '../transport';
 
 let passed = 0;
 let failed = 0;
@@ -77,6 +80,47 @@ check('forwards cuda to native resources', () => {
 check('omits cuda when unset (engine default applies)', () => {
   const cfg = toNativeConfig('m', { resources: { cpus: 2 } });
   assert.strictEqual(cfg.resources?.cuda, undefined);
+});
+
+// --- cliConfigApiKey: read the smol CLI's stored login from config.toml ---
+const withXdg = (fn: (dir: string) => void) => {
+  const dir = mkdtempSync(join(tmpdir(), 'smol-sdk-unit-'));
+  const prev = process.env.XDG_CONFIG_HOME;
+  process.env.XDG_CONFIG_HOME = dir;
+  try {
+    fn(dir);
+  } finally {
+    if (prev === undefined) delete process.env.XDG_CONFIG_HOME;
+    else process.env.XDG_CONFIG_HOME = prev;
+    rmSync(dir, { recursive: true, force: true });
+  }
+};
+check('cliConfigApiKey: undefined when no config file exists', () => {
+  withXdg(() => assert.strictEqual(cliConfigApiKey(), undefined));
+});
+check('cliConfigApiKey: reads api_key from the [cloud] section', () => {
+  withXdg((dir) => {
+    mkdirSync(join(dir, 'smolvm'));
+    writeFileSync(
+      join(dir, 'smolvm', 'config.toml'),
+      '[images]\ndefault_registry = "docker.io"\n\n[cloud]\nendpoint = "https://api.example"\napi_key = "smk_from_cli"\n',
+    );
+    assert.strictEqual(cliConfigApiKey(), 'smk_from_cli');
+  });
+});
+check('cliConfigApiKey: ignores api_key outside [cloud]', () => {
+  withXdg((dir) => {
+    mkdirSync(join(dir, 'smolvm'));
+    writeFileSync(join(dir, 'smolvm', 'config.toml'), '[other]\napi_key = "smk_wrong"\n');
+    assert.strictEqual(cliConfigApiKey(), undefined);
+  });
+});
+check('cliConfigApiKey: empty api_key counts as absent', () => {
+  withXdg((dir) => {
+    mkdirSync(join(dir, 'smolvm'));
+    writeFileSync(join(dir, 'smolvm', 'config.toml'), '[cloud]\napi_key = ""\n');
+    assert.strictEqual(cliConfigApiKey(), undefined);
+  });
 });
 
 console.log(`\n${passed} passed, ${failed} failed`);
