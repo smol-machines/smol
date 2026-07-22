@@ -14,8 +14,11 @@ import json
 import sys
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 
-from smol import AsyncMachine, ConnectOptions, MachineConfig, PortSpec
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "python"))
+
+from smol import AsyncMachine, ConnectOptions, MachineConfig, PortSpec  # noqa: E402
 
 # Each machine's GET returns not-ready for the first BOOT_DELAY_S, then ready.
 BOOT_DELAY_S = 0.4
