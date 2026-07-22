@@ -80,6 +80,12 @@ export interface MachineConfig {
   /** Start as a live-RAM fork base (cloud) so the machine can be cloned with
    *  `Machine.fork`. The golden and its clones are pinned to one node. */
   forkable?: boolean;
+  /** Environment variables for the machine's workload (init commands and the
+   *  entrypoint), set at create. (cloud) */
+  env?: Record<string, string>;
+  /** Working directory for the machine's workload, set at create. Overrides
+   *  the image's own workdir. (cloud) */
+  workdir?: string;
 }
 
 /** Per-call execution options. */
@@ -102,6 +108,12 @@ export interface ExecResult {
    */
   stdout: string;
   stderr: string;
+  /** True when the cloud capped stdout (1 MiB); fetch big output via
+   *  `execStream` or `readFile`. Always false on the local target (the
+   *  embedded engine streams unbounded). */
+  stdoutTruncated: boolean;
+  /** True when the cloud capped stderr (1 MiB); see `stdoutTruncated`. */
+  stderrTruncated: boolean;
   /** True when exitCode === 0. */
   success: boolean;
   /** stdout + stderr, concatenated. */

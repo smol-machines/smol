@@ -93,6 +93,12 @@ class MachineConfig:
     forkable: bool = False
     """Start as a live-RAM fork base (cloud) so the machine can be cloned with
     :meth:`Machine.fork`. The golden and its clones are pinned to one node."""
+    env: Optional[dict[str, str]] = None
+    """Environment variables for the machine's workload (init commands and the
+    entrypoint), set at create. Cloud target only."""
+    workdir: Optional[str] = None
+    """Working directory for the machine's workload, set at create. Overrides
+    the image's own workdir. Cloud target only."""
 
 
 @dataclass
@@ -111,6 +117,12 @@ class ExecResult:
     read it back with ``read_file()`` instead — this conversion is lossy. Very
     large output (>~20 MB) is rejected; use ``exec_stream`` for that."""
     stderr: str
+    stdout_truncated: bool = False
+    """True when the cloud capped stdout (1 MiB); fetch big output via
+    ``exec_stream`` or ``read_file``. Always False on the local target
+    (the embedded engine streams unbounded)."""
+    stderr_truncated: bool = False
+    """True when the cloud capped stderr (1 MiB); see :attr:`stdout_truncated`."""
 
     @property
     def success(self) -> bool:
