@@ -5,7 +5,7 @@
 
 [package]
 name = "smol-node"
-version = "1.6.4"
+version = "1.6.13"
 edition = "2021"
 description = "Native NAPI core for the smol SDK — embed microVMs directly in Node.js"
 license = "Apache-2.0"
