@@ -793,6 +793,11 @@ export async function makeTransport(
       ...(config.workdir !== undefined ? { workdir: config.workdir } : {}),
       autoStopSeconds: config.autoStopSeconds ?? null,
       ttlSeconds: config.ttlSeconds ?? null,
+      // Forkable is a CREATE-time property: the control plane persists it and the
+      // fork endpoint checks the stored flag, so it MUST be sent here. (The
+      // `?forkable=true` start param only affects the boot; without this field the
+      // golden is stored non-forkable and every fork() 409s.)
+      ...(config.forkable ? { forkable: true } : {}),
     };
     const created = await cloudFetch<MachineInfo>(
       cloudConn,

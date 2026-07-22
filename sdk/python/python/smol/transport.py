@@ -582,6 +582,11 @@ def make_transport(config: MachineConfig, conn: Optional[ConnectOptions] = None)
             "resources": resources,
             "autoStopSeconds": config.auto_stop_seconds,
             "ttlSeconds": config.ttl_seconds,
+            # Forkable is a CREATE-time property: the control plane persists it and
+            # the fork endpoint checks the stored flag, so it MUST be sent here.
+            # (The `?forkable=true` start param only affects the boot; without this
+            # field the golden is stored non-forkable and every fork() 409s.)
+            "forkable": config.forkable,
         }
         if r and (r.allow_cidrs or r.allow_hosts):
             body["network"] = {
