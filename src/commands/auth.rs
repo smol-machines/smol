@@ -53,7 +53,7 @@ const CLIENT_ID: &str = "Df3M6TXvVVMmTTzfyo0mjaLl9rhaI7nZ";
 /// the `scope` claim when RBAC isn't injecting `permissions`).
 const SCOPES: &str = "openid offline_access \
     machine:read machine:create machine:exec machine:delete machine:files \
-    usage:read billing:read app:write \
+    usage:read billing:read billing:write app:write \
     volume:read volume:create volume:delete ops:read";
 
 /// OAuth audience — the platform-wide API identifier registered in Auth0.
