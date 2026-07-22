@@ -39,6 +39,9 @@ const server = createServer(async (req, res) => {
   const url = req.url ?? "";
   const method = req.method ?? "GET";
   seen.auth = req.headers["authorization"] ?? seen.auth;
+  // The real control plane sets x-request-id on every response; mirror it so the
+  // SDK's error-message surfacing can be asserted.
+  res.setHeader("x-request-id", "req-test-abc");
   const json = (code: number, obj: unknown) => {
     res.writeHead(code, { "content-type": "application/json" });
     res.end(JSON.stringify(obj));
@@ -270,6 +273,20 @@ async function main(): Promise<void> {
     "fork returns running clone handle",
     clone.name === "rollout-1" && (await clone.state()) === "running",
     clone.name,
+  );
+
+  // Errors surface the server's x-request-id so support can correlate the call
+  // (clients see the error body but not response headers).
+  let ridErrMsg = "";
+  try {
+    await m.readFile("/does-not-exist");
+  } catch (e) {
+    ridErrMsg = String((e as Error).message);
+  }
+  check(
+    "error message surfaces x-request-id",
+    ridErrMsg.includes("[request id: req-test-abc]"),
+    ridErrMsg,
   );
 
   await m.stop();

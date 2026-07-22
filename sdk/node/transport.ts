@@ -431,13 +431,17 @@ async function cloudFetch<T = unknown>(
   }
   if (!res.ok) {
     const text = await res.text().catch(() => "");
+    // Surface the server's correlation id (every response carries `x-request-id`)
+    // in the error message — clients see the error body but not headers, so
+    // without this the id is invisible and support can't correlate the call.
+    const rid = res.headers.get("x-request-id");
     throw new SmolError(
       res.status === 404
         ? "NOT_FOUND"
         : res.status === 401
           ? "UNAUTHORIZED"
           : "SMOLVM_ERROR",
-      `cloud ${method} ${path} → ${res.status}${text ? `: ${text}` : ""}`,
+      `cloud ${method} ${path} → ${res.status}${text ? `: ${text}` : ""}${rid ? ` [request id: ${rid}]` : ""}`,
     );
   }
   if (opts.accept === "bytes") return Buffer.from(await res.arrayBuffer()) as T;
@@ -654,13 +658,14 @@ class CloudTransport implements Transport {
     }
     if (!res.ok) {
       const text = await res.text().catch(() => "");
+      const rid = res.headers.get("x-request-id");
       throw new SmolError(
         res.status === 404
           ? "NOT_FOUND"
           : res.status === 401
             ? "UNAUTHORIZED"
             : "SMOLVM_ERROR",
-        `cloud POST /v1/machines/${this.id}/exec/stream → ${res.status}${text ? `: ${text}` : ""}`,
+        `cloud POST /v1/machines/${this.id}/exec/stream → ${res.status}${text ? `: ${text}` : ""}${rid ? ` [request id: ${rid}]` : ""}`,
       );
     }
     if (!res.body)
