@@ -162,6 +162,11 @@ impl UpCmd {
             record.overlay_gb = sf.overlay;
             record.ssh_agent = ssh_agent;
             record.dns_filter_hosts = dns_filter_hosts.clone();
+            // Persist the Smolfile's [secrets] so they are resolved and injected
+            // into the machine's execs (matching the engine's Smolfile path).
+            // Without this the declared secrets are parsed then silently dropped,
+            // and the workload runs without the credentials it asked for.
+            record.secret_refs = sf.secrets.clone();
 
             // Wire [health] into record
             if let Some(ref h) = sf.health {
