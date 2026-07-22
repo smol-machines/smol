@@ -1,7 +1,7 @@
 //! smol file up — start a machine from a Smolfile.
 
 use clap::Args;
-use smolvm::agent::{AgentManager, LaunchFeatures, VmResources};
+use smolvm::agent::{AgentManager, LaunchFeatures, RunConfig, VmResources};
 use smolvm::config::{RecordState, SmolvmConfig, VmRecord};
 use smolvm::data::network::PortMapping;
 use smolvm::data::storage::HostMount;
@@ -148,6 +148,20 @@ impl UpCmd {
                 )
             })
             .collect();
+        // Virtiofs binding form (tag, guest_target, read_only) for running init
+        // inside the image container — computed before `mounts` is consumed by
+        // `ensure_running_with_full_config` below.
+        let mount_bindings: Vec<(String, String, bool)> = mounts
+            .iter()
+            .enumerate()
+            .map(|(i, m)| {
+                (
+                    HostMount::mount_tag(i),
+                    m.target.to_string_lossy().into_owned(),
+                    m.read_only,
+                )
+            })
+            .collect();
 
         if config.get_vm(&name).is_none() {
             let mut record =
@@ -206,14 +220,38 @@ impl UpCmd {
 
         let pid = manager.child_pid();
 
-        // Run init commands
+        // Pull the image BEFORE running init: init for an image machine must run
+        // inside the image's container (see below), so the layers have to be in
+        // place first. (Previously init ran before the pull and in the bare agent
+        // rootfs, so `apk add`/`pip install` etc. either had no image or landed in
+        // a filesystem `machine exec` never sees.)
+        if let Some(ref image) = sf.image {
+            let mut client = smolvm::AgentClient::connect_with_retry(manager.vsock_socket())?;
+            print!("Pulling {}...", image);
+            let _ = std::io::Write::flush(&mut std::io::stdout());
+            client.pull_with_registry_config(image)?;
+            println!(" done.");
+        }
+
+        // Run init commands. For an image machine, run them INSIDE the image's
+        // persistent overlay (keyed by the machine name) — the same container a
+        // later `machine exec` joins — so package installs and file writes made by
+        // init are visible to exec. Without an image, fall back to the bare agent.
         if !init_cmds.is_empty() {
             println!("Running {} init command(s)...", init_cmds.len());
             let mut client = smolvm::AgentClient::connect_with_retry(manager.vsock_socket())?;
             for (i, cmd) in init_cmds.iter().enumerate() {
                 let argv = vec!["sh".into(), "-c".into(), cmd.clone()];
-                let (exit_code, _stdout, stderr) =
-                    client.vm_exec(argv, env.clone(), workdir.clone(), None, None)?;
+                let (exit_code, _stdout, stderr) = if let Some(ref image) = sf.image {
+                    let config = RunConfig::new(image, argv)
+                        .with_env(env.clone())
+                        .with_workdir(workdir.clone())
+                        .with_mounts(mount_bindings.clone())
+                        .with_persistent_overlay(Some(name.clone()));
+                    client.run_non_interactive(config)?
+                } else {
+                    client.vm_exec(argv, env.clone(), workdir.clone(), None, None)?
+                };
                 if exit_code != 0 {
                     if let Err(e) = manager.stop() {
                         eprintln!("Warning: failed to stop machine after init failure: {}", e);
@@ -228,22 +266,17 @@ impl UpCmd {
             }
         }
 
-        // Pull image if specified
-        if let Some(ref image) = sf.image {
-            let mut client = smolvm::AgentClient::connect_with_retry(manager.vsock_socket())?;
-            print!("Pulling {}...", image);
-            let _ = std::io::Write::flush(&mut std::io::stdout());
-            client.pull_with_registry_config(image)?;
-            println!(" done.");
-        }
-
-        // Update DB state
+        // Update DB state. Mark init as completed so a later start doesn't re-run
+        // it (init effects now persist in the overlay).
         let pid_start_time = pid.and_then(smolvm::process::process_start_time);
         if let Ok(db) = smolvm::db::SmolvmDb::open() {
             if let Err(e) = db.update_vm(&name, |r| {
                 r.state = RecordState::Running;
                 r.pid = pid;
                 r.pid_start_time = pid_start_time;
+                if !init_cmds.is_empty() {
+                    r.init_completed = true;
+                }
             }) {
                 eprintln!("Warning: failed to persist VM state: {}", e);
             }
