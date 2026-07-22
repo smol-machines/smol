@@ -30,4 +30,6 @@ export type {
   ImageInfo,
   ExecEvent,
   ConnectOptions,
+  WaitReadyOptions,
+  PortEndpoint,
 } from './types';

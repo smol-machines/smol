@@ -66,6 +66,8 @@ jobs:
         run: python tests/test_unit.py
       - name: Cloud-transport tests (mock /v1 server; pure Python)
         run: python tests/test_cloud_mock.py
+      - name: Async-transport tests (AsyncMachine vs mock /v1; pure Python)
+        run: python tests/test_async_mock.py
 
   # --------------------------------------------------------------------------
   # Native build + microVM end-to-end. Requires a runner WITH libkrun + a

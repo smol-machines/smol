@@ -24,7 +24,15 @@ from typing import Any, Optional, Protocol
 from urllib.parse import quote
 
 from .errors import InvalidConfigError, NotSupportedError, SmolError, wrap_native_error
-from .types import ConnectOptions, ExecOptions, ExecResult, ImageInfo, MachineConfig, PortSpec
+from .types import (
+    ConnectOptions,
+    ExecOptions,
+    ExecResult,
+    ImageInfo,
+    MachineConfig,
+    PortEndpoint,
+    PortSpec,
+)
 
 DEFAULT_CLOUD_URL = "https://api.smolmachines.com"
 CLOUD_TIMEOUT_S = 30.0
@@ -38,6 +46,18 @@ class Transport(Protocol):
     @property
     def name(self) -> str: ...
     def state(self) -> str: ...
+    def ready(self) -> bool: ...
+    def ready_at(self) -> Optional[str]: ...
+    def wait_until_ready(self, timeout_s: float = 120.0, interval_s: float = 1.0) -> None: ...
+    def endpoint(self, port: int, path: Optional[str] = None) -> PortEndpoint: ...
+    def request(
+        self,
+        port: int,
+        path: Optional[str] = None,
+        method: str = "GET",
+        data: Optional[bytes] = None,
+        timeout_s: float = CLOUD_TIMEOUT_S,
+    ) -> bytes: ...
     def url(self) -> Optional[str]: ...
     def exec(self, command: list[str], opts: Optional[ExecOptions] = None) -> ExecResult: ...
     def run(self, image: str, command: list[str], opts: Optional[ExecOptions] = None) -> ExecResult: ...
@@ -169,6 +189,37 @@ class LocalTransport:
     def state(self) -> str:
         return str(self._inner.state())
 
+    def ready(self) -> bool:
+        # A local machine is created already started; "running" means usable.
+        return str(self._inner.state()) == "running"
+
+    def ready_at(self) -> Optional[str]:
+        # No readiness timestamp for the embedded engine.
+        return None
+
+    def wait_until_ready(self, timeout_s: float = 120.0, interval_s: float = 1.0) -> None:
+        # Local create()/start() blocks on the boot, so it is already ready.
+        return None
+
+    def endpoint(self, port: int, path: Optional[str] = None) -> PortEndpoint:
+        raise NotSupportedError(
+            "endpoint() is a cloud connect-bridge feature; the local target has "
+            "no control plane. Publish a port and reach it on the host directly."
+        )
+
+    def request(
+        self,
+        port: int,
+        path: Optional[str] = None,
+        method: str = "GET",
+        data: Optional[bytes] = None,
+        timeout_s: float = CLOUD_TIMEOUT_S,
+    ) -> bytes:
+        raise NotSupportedError(
+            "request() is a cloud connect-bridge feature; the local target has "
+            "no control plane. Publish a port and reach it on the host directly."
+        )
+
     def url(self) -> Optional[str]:
         # Local machines have no public ingress URL — that's a cloud feature.
         return None
@@ -263,6 +314,50 @@ class CloudTransport:
     def state(self) -> str:
         m = _cloud_fetch(self._base, self._key, "GET", f"/v1/machines/{self._id}")
         return str((m or {}).get("state", "unknown"))
+
+    def ready(self) -> bool:
+        m = _cloud_fetch(self._base, self._key, "GET", f"/v1/machines/{self._id}")
+        return bool((m or {}).get("ready") is True)
+
+    def ready_at(self) -> Optional[str]:
+        m = _cloud_fetch(self._base, self._key, "GET", f"/v1/machines/{self._id}")
+        return (m or {}).get("readyAt")
+
+    def wait_until_ready(self, timeout_s: float = 120.0, interval_s: float = 1.0) -> None:
+        _wait_for_ready(self._base, self._key, self._id, timeout_s, interval_s)
+
+    def endpoint(self, port: int, path: Optional[str] = None) -> PortEndpoint:
+        # Reach a PUBLISHED guest port through the control plane's authenticated
+        # connect bridge — no tunnel, no public exposure. The server maps the
+        # guest port to its node host-port (404 if the port isn't published, 503
+        # if the machine isn't started) and forwards WebSocket upgrades or HTTP.
+        rel = f"/v1/machines/{self._id}/connect/{port}"
+        if path:
+            rel = f"{rel}/{path.lstrip('/')}"
+        ws_base = self._base
+        if ws_base.startswith("http"):
+            ws_base = "ws" + ws_base[len("http"):]
+        return PortEndpoint(
+            http_url=f"{self._base}{rel}",
+            ws_url=f"{ws_base}{rel}",
+            headers={"authorization": f"Bearer {self._key}"},
+        )
+
+    def request(
+        self,
+        port: int,
+        path: Optional[str] = None,
+        method: str = "GET",
+        data: Optional[bytes] = None,
+        timeout_s: float = CLOUD_TIMEOUT_S,
+    ) -> bytes:
+        """Convenience: an authenticated HTTP request to a published guest port
+        via the connect bridge. Returns the raw response body bytes."""
+        ep = self.endpoint(port, path)
+        rel = ep.http_url[len(self._base):]
+        return _cloud_fetch(
+            self._base, self._key, method, rel, raw_body=data, accept="bytes", timeout=timeout_s
+        )
 
     def url(self) -> Optional[str]:
         # Public ingress URL for the first published port; None until the machine
@@ -516,22 +611,48 @@ def _cli_config_api_key() -> Optional[str]:
     return None
 
 
-def _wait_for_ready(base_url: str, api_key: str, machine_id: str, timeout_s: float = 120.0) -> None:
+def _wait_for_ready(
+    base_url: str,
+    api_key: str,
+    machine_id: str,
+    timeout_s: float = 120.0,
+    interval_s: float = 1.0,
+) -> None:
+    """Poll until the machine is READY to do work; raise on error/terminal state
+    or timeout. Auth/not-found errors are fatal; others are transient booting.
+
+    Readiness is the machine's ``ready`` flag — true only once the guest agent
+    is reachable (and any published port accepts). Reaching state ``started`` is
+    NOT enough: the guest is still booting, and acting then is the classic
+    teardown race (works on a slow cold start, times out on a warm one). Older
+    control planes omit ``ready``; there we fall back to the coarse
+    ``started``/``running`` state so this never hangs against them."""
     deadline = time.monotonic() + timeout_s
     while True:
-        state = None
+        m: Optional[dict] = None
         try:
             m = _cloud_fetch(base_url, api_key, "GET", f"/v1/machines/{machine_id}")
-            state = (m or {}).get("state")
-        except SmolError:
-            pass  # transient while booting
-        if state in ("started", "running"):
+        except SmolError as e:
+            if e.code in ("UNAUTHORIZED", "NOT_FOUND"):
+                raise
+            # transient while booting
+        m = m or {}
+        state = m.get("state")
+        # Prefer the unambiguous readiness signal.
+        if m.get("ready") is True:
             return
         if state == "error":
             raise SmolError("SMOLVM_ERROR", f"machine {machine_id} entered error state while starting")
+        if state in ("stopped", "deleted"):
+            raise SmolError(
+                "SMOLVM_ERROR", f"machine {machine_id} entered {state} before becoming ready"
+            )
+        # Back-compat: `ready` absent entirely → old server, gate on state.
+        if "ready" not in m and state in ("started", "running"):
+            return
         if time.monotonic() >= deadline:
             raise SmolError("TIMEOUT", f"machine {machine_id} not ready after {timeout_s}s (state={state})")
-        time.sleep(1.0)
+        time.sleep(interval_s)
 
 
 # ---------------------------------------------------------------------------

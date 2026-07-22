@@ -15,7 +15,15 @@ from __future__ import annotations
 from typing import Optional
 
 from .transport import Transport, connect_transport, make_transport
-from .types import ConnectOptions, ExecOptions, ExecResult, ImageInfo, MachineConfig, PortSpec
+from .types import (
+    ConnectOptions,
+    ExecOptions,
+    ExecResult,
+    ImageInfo,
+    MachineConfig,
+    PortEndpoint,
+    PortSpec,
+)
 
 __all__ = ["Machine"]
 
@@ -69,6 +77,47 @@ class Machine:
     def state(self) -> str:
         """Current state, e.g. ``"running"`` / ``"stopped"``."""
         return self._t.state()
+
+    def ready(self) -> bool:
+        """Whether the machine is READY to do work. :meth:`state` becoming
+        ``"started"`` means only that the VM process launched — the guest is
+        still booting and is NOT yet usable. ``ready`` becomes true once the
+        in-VM agent is reachable (an ``exec``/``connect`` will succeed) and any
+        published port accepts connections. Gate on this, not ``state``, before
+        driving the machine. (cloud; local reports ready once running.)"""
+        return self._t.ready()
+
+    def ready_at(self) -> Optional[str]:
+        """When the machine first became ready (RFC3339), or ``None`` if not yet."""
+        return self._t.ready_at()
+
+    def wait_until_ready(self, timeout_s: float = 120.0, interval_s: float = 1.0) -> None:
+        """Block until the machine is ``ready`` (or raise on a failed/stopped
+        state or timeout). :meth:`create` already waits for readiness, so this is
+        for machines attached via :meth:`connect`, or to re-assert readiness."""
+        self._t.wait_until_ready(timeout_s, interval_s)
+
+    def endpoint(self, port: int, path: Optional[str] = None) -> PortEndpoint:
+        """An authenticated endpoint (URL + headers) to reach a PUBLISHED guest
+        port through the control plane's connect bridge — no Cloudflare/
+        localhost.run tunnel, no public exposure, no egress allow-list. Have the
+        in-VM worker LISTEN on the port and connect *inbound*: plug ``ws_url``
+        into a WebSocket client (passing ``headers``) or ``http_url`` into an
+        HTTP client. The machine must publish the port
+        (``ports=[PortSpec(...)]`` at create). (cloud)"""
+        return self._t.endpoint(port, path)
+
+    def request(
+        self,
+        port: int,
+        path: Optional[str] = None,
+        method: str = "GET",
+        data: Optional[bytes] = None,
+        timeout_s: float = 30.0,
+    ) -> bytes:
+        """Convenience: an authenticated HTTP request to a published guest port
+        via the connect bridge; returns the raw response body bytes. (cloud)"""
+        return self._t.request(port, path, method, data, timeout_s)
 
     def url(self) -> Optional[str]:
         """Public ingress URL for the machine's first published port (cloud).

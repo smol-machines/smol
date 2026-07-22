@@ -15,6 +15,7 @@ __all__ = [
     "ImageInfo",
     "ConnectOptions",
     "MachineState",
+    "PortEndpoint",
 ]
 
 MachineState = str  # "created" | "running" | "stopped"
@@ -160,3 +161,18 @@ class ConnectOptions:
     target: Optional[Literal["local", "cloud"]] = None
     base_url: Optional[str] = None
     api_key: Optional[str] = None
+
+
+@dataclass
+class PortEndpoint:
+    """An authenticated way to reach a PUBLISHED guest port through the control
+    plane's connect bridge — no tunnel, no public exposure. Returned by
+    :meth:`Machine.endpoint`. Plug ``ws_url`` into a WebSocket client or
+    ``http_url`` into an HTTP client, sending ``headers`` so it authenticates."""
+
+    http_url: str
+    """``https://…/v1/machines/:id/connect/:port[/path]`` — for HTTP requests."""
+    ws_url: str
+    """``wss://…/v1/machines/:id/connect/:port[/path]`` — for WebSocket upgrades."""
+    headers: dict
+    """Headers to send (the tenant Bearer token)."""

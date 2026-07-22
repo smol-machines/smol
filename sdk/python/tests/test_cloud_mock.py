@@ -80,9 +80,17 @@ class Handler(BaseHTTPRequestHandler):
         if not self._auth_ok():
             return self._send(401, b"bad token")
         if self.path == f"/v1/machines/{MACHINE_ID}":
-            return self._send(200, json.dumps({"id": MACHINE_ID, "state": "started"}).encode())
+            return self._send(200, json.dumps({
+                "id": MACHINE_ID, "state": "started",
+                "ready": True, "readyAt": "2026-07-22T20:01:41.152Z",
+            }).encode())
         if self.path == f"/v1/machines/{CLONE_ID}":
-            return self._send(200, json.dumps({"id": CLONE_ID, "state": "started"}).encode())
+            return self._send(200, json.dumps({"id": CLONE_ID, "state": "started", "ready": True}).encode())
+        # The connect bridge: GET /v1/machines/:id/connect/:port[/rest]. Echo the
+        # path + auth so the SDK's endpoint()/request() wiring can be asserted.
+        if self.path.startswith(f"/v1/machines/{MACHINE_ID}/connect/"):
+            captured["connect_path"] = self.path
+            return self._send(200, json.dumps({"ok": True, "path": self.path}).encode())
         if self.path.startswith(f"/v1/machines/{MACHINE_ID}/files/"):
             return self._send(200, captured.get("file") or b"", "application/octet-stream")
         return self._send(404, b"no route")
@@ -142,6 +150,30 @@ def main() -> int:
         check("name from response", m.name == "auto", m.name)
         check("forkable start passes ?forkable=true", "forkable=true" in captured.get("start_path", ""),
               captured.get("start_path"))
+
+        # --- readiness: `started` but the unambiguous ready flag is separate ---
+        check("state() over REST", m.state() == "started", m.state())
+        check("ready() reads the readiness flag", m.ready() is True)
+        check("ready_at() reads the readiness timestamp",
+              m.ready_at() == "2026-07-22T20:01:41.152Z", str(m.ready_at()))
+        m.wait_until_ready(timeout_s=2, interval_s=0.05)
+        check("wait_until_ready() resolves on ready", True)
+
+        # --- connect bridge: authed endpoint URL + request to a published port ---
+        ep = m.endpoint(80)
+        check("endpoint() builds the connect-bridge http_url",
+              ep.http_url == f"{base}/v1/machines/{MACHINE_ID}/connect/80", ep.http_url)
+        check("endpoint() derives a ws url",
+              ep.ws_url == f"{base.replace('http', 'ws', 1)}/v1/machines/{MACHINE_ID}/connect/80", ep.ws_url)
+        check("endpoint() carries Bearer auth", ep.headers.get("authorization") == "Bearer smk_testkey",
+              str(ep.headers))
+        check("endpoint(port, path) appends the sub-path",
+              m.endpoint(80, "/healthz").http_url == f"{base}/v1/machines/{MACHINE_ID}/connect/80/healthz",
+              m.endpoint(80, "/healthz").http_url)
+        body = json.loads(m.request(80, "healthz").decode())
+        check("request() reaches the guest port through the authed bridge",
+              body.get("ok") is True and captured.get("connect_path") == f"/v1/machines/{MACHINE_ID}/connect/80/healthz",
+              str(captured.get("connect_path")))
 
         # --- fork: live-RAM RL clone over the cloud ---
         clone = m.fork("rollout-1", ports=[PortSpec(host=18080, guest=80)])
