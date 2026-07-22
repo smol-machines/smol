@@ -38,7 +38,15 @@ impl InspectCmd {
             &settings.cloud,
         )?;
 
-        let repo = parsed.repository();
+        // Scope a bare repo under the caller's tenant on the smolmachines
+        // registry, matching `pack push`/`pack pull` — otherwise a short ref
+        // pushed as `tenants/<tenant>/<name>` resolves to the bare registry
+        // root and 401s on inspect.
+        let repo = super::common::namespaced_repo(
+            &parsed.registry,
+            &parsed.repository(),
+            &settings.machines,
+        );
         let tag_or_digest = parsed
             .digest
             .as_deref()
