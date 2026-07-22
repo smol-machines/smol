@@ -59,9 +59,30 @@ export interface RawExec {
   exitCode: number;
   stdout: string;
   stderr: string;
-  /** Cloud only: output was capped at 1 MiB. Absent on the local target. */
+  /** Cloud only: the text field was capped at 1 MiB. Absent on the local target. */
   stdoutTruncated?: boolean;
   stderrTruncated?: boolean;
+  /** Cloud only: byte-exact, untruncated output decoded from the base64 fields.
+   *  Absent on the local target (machine.ts fills it from the text there). */
+  stdoutBytes?: Uint8Array;
+  stderrBytes?: Uint8Array;
+}
+
+/** Byte-exact exec output from a cloud response: prefer the base64 field
+ *  (binary-safe, untruncated), fall back to the UTF-8 bytes of the lossy text
+ *  when a control predates it or the value is malformed. */
+function decodeExecBytes(
+  b64: unknown,
+  text: string,
+): Uint8Array {
+  if (typeof b64 === "string") {
+    try {
+      return new Uint8Array(Buffer.from(b64, "base64"));
+    } catch {
+      // fall through to the text fallback
+    }
+  }
+  return new TextEncoder().encode(text);
 }
 
 export interface Transport {
@@ -600,14 +621,21 @@ class CloudTransport implements Transport {
         timeoutMs,
       },
     );
+    const stdout = r.stdout ?? "";
+    const stderr = r.stderr ?? "";
+    // `stdoutB64`/`stderrB64` are byte-exact and untruncated; the generated
+    // schema type may lag the server, so read them off the raw object.
+    const raw = r as Record<string, unknown>;
     return {
       exitCode: r.exitCode ?? 0,
-      stdout: r.stdout ?? "",
-      stderr: r.stderr ?? "",
-      // The cloud caps captured output at 1 MiB and flags the cut (camelCase
+      stdout,
+      stderr,
+      // The cloud caps the text fields at 1 MiB and flags the cut (camelCase
       // per smolfleet's MachineExecResponse).
       stdoutTruncated: r.stdoutTruncated ?? false,
       stderrTruncated: r.stderrTruncated ?? false,
+      stdoutBytes: decodeExecBytes(raw.stdoutB64, stdout),
+      stderrBytes: decodeExecBytes(raw.stderrB64, stderr),
     };
   }
 

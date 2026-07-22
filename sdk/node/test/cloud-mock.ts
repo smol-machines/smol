@@ -89,6 +89,9 @@ const server = createServer(async (req, res) => {
       stderr: "",
       stdoutTruncated: true,
       stderrTruncated: false,
+      // Byte-exact output includes a non-UTF-8 byte (0xFF) that the lossy text
+      // field can't represent — proves the SDK decodes b64, not the text.
+      stdoutB64: Buffer.from([0x68, 0x69, 0xff]).toString("base64"),
     });
   }
   if (method === "PUT" && url.startsWith("/v1/machines/m1/files/")) {
@@ -199,6 +202,11 @@ async function main(): Promise<void> {
     "exec surfaces truncation flags",
     r.stdoutTruncated === true && r.stderrTruncated === false,
     `${r.stdoutTruncated}/${r.stderrTruncated}`,
+  );
+  check(
+    "exec exposes byte-exact stdoutBytes from base64",
+    Buffer.from(r.stdoutBytes).equals(Buffer.from([0x68, 0x69, 0xff])),
+    Buffer.from(r.stdoutBytes).toString("hex"),
   );
   check(
     "exec sent command array",

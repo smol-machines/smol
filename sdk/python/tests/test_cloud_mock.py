@@ -5,6 +5,7 @@ Mirrors the Node ``test/cloud-mock.ts``: verifies the wire shapes the SDK sends
 exec response) and the routes/verbs, plus NotSupported gating.
 """
 
+import base64
 import json
 import sys
 import threading
@@ -70,6 +71,9 @@ class Handler(BaseHTTPRequestHandler):
                 "stdout": "hello\n", "stderr": "", "exitCode": 0,
                 "durationMs": 12, "machineId": MACHINE_ID,
                 "stdoutTruncated": True, "stderrTruncated": False,
+                # Byte-exact output includes a non-UTF-8 byte (0xFF) the lossy text
+                # can't hold — proves the SDK decodes b64, not the text.
+                "stdoutB64": base64.b64encode(bytes([0x68, 0x69, 0xFF])).decode(),
             }).encode())
         if self.path == f"/v1/machines/{MACHINE_ID}/stop":
             return self._send(200, json.dumps({"id": MACHINE_ID, "state": "stopped"}).encode())
@@ -194,6 +198,9 @@ def main() -> int:
         check("exec surfaces truncation flags",
               r.stdout_truncated is True and r.stderr_truncated is False,
               f"{r.stdout_truncated}/{r.stderr_truncated}")
+        check("exec exposes byte-exact stdout_bytes from base64",
+              r.stdout_bytes == bytes([0x68, 0x69, 0xFF]),
+              r.stdout_bytes.hex())
 
         m.write_file("/tmp/a b.txt", "payload")
         back = m.read_file("/tmp/a b.txt")
