@@ -102,18 +102,26 @@ export interface ExecOptions {
 export interface ExecResult {
   exitCode: number;
   /**
-   * Captured stdout as text (UTF-8; invalid bytes are replaced). For BINARY
-   * output, read it back with `readFile()` instead — the string conversion is
-   * lossy. Very large output (>~20 MB) is rejected; use `execStream` for that.
+   * Captured stdout as text (UTF-8; invalid bytes are replaced), truncated to
+   * ~1 MiB on the cloud target (see `stdoutTruncated`). This conversion is lossy
+   * for binary output — use `stdoutBytes` for byte-exact, untruncated output, or
+   * `execStream` to stream very large output.
    */
   stdout: string;
   stderr: string;
-  /** True when the cloud capped stdout (1 MiB); fetch big output via
-   *  `execStream` or `readFile`. Always false on the local target (the
-   *  embedded engine streams unbounded). */
+  /** True when the cloud capped the text `stdout` (1 MiB); `stdoutBytes` is still
+   *  complete, or fetch big output via `execStream` / `readFile`. Always false on
+   *  the local target (the embedded engine streams unbounded). */
   stdoutTruncated: boolean;
-  /** True when the cloud capped stderr (1 MiB); see `stdoutTruncated`. */
+  /** True when the cloud capped the text `stderr` (1 MiB); see `stdoutTruncated`. */
   stderrTruncated: boolean;
+  /** Byte-exact, untruncated stdout. Populated from the cloud's base64 output
+   *  when the control provides it (older controls fall back to the UTF-8 bytes of
+   *  the lossy `stdout`); on the local target it is the UTF-8 encoding of `stdout`.
+   *  Prefer this over `stdout` for binary or >1 MiB output. */
+  stdoutBytes: Uint8Array;
+  /** Byte-exact, untruncated stderr; see `stdoutBytes`. */
+  stderrBytes: Uint8Array;
   /** True when exitCode === 0. */
   success: boolean;
   /** stdout + stderr, concatenated. */

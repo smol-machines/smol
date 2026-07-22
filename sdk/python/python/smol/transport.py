@@ -14,6 +14,7 @@ third-party dependencies.
 from __future__ import annotations
 
 import atexit
+import base64
 import json
 import os
 import time
@@ -40,6 +41,19 @@ CLOUD_TIMEOUT_S = 30.0
 # read timeout, covering network round-trip and server-side overhead so the
 # client never aborts before the server has had a chance to finish the command.
 CLOUD_EXEC_TIMEOUT_HEADROOM_S = 30.0
+
+
+def _decode_exec_bytes(raw: dict[str, Any], b64_key: str, text: str) -> bytes:
+    """Byte-exact exec output from a cloud response. Prefers the base64 field
+    (binary-safe, untruncated); falls back to the UTF-8 bytes of the lossy text
+    when a control predates it or the field is malformed."""
+    b64 = raw.get(b64_key)
+    if isinstance(b64, str):
+        try:
+            return base64.b64decode(b64, validate=True)
+        except Exception:  # noqa: BLE001 - any decode failure → fall back to text
+            pass
+    return text.encode("utf-8", "replace")
 
 
 class Transport(Protocol):
@@ -229,14 +243,26 @@ class LocalTransport:
             r = self._inner.exec(command, _native_exec_options(opts))
         except Exception as e:  # noqa: BLE001 - re-typed below
             raise wrap_native_error(e) from e
-        return ExecResult(exit_code=r.exit_code, stdout=r.stdout, stderr=r.stderr)
+        return ExecResult(
+            exit_code=r.exit_code,
+            stdout=r.stdout,
+            stderr=r.stderr,
+            stdout_bytes=r.stdout.encode("utf-8", "replace"),
+            stderr_bytes=r.stderr.encode("utf-8", "replace"),
+        )
 
     def run(self, image: str, command: list[str], opts: Optional[ExecOptions] = None) -> ExecResult:
         try:
             r = self._inner.run(image, command, _native_exec_options(opts))
         except Exception as e:  # noqa: BLE001
             raise wrap_native_error(e) from e
-        return ExecResult(exit_code=r.exit_code, stdout=r.stdout, stderr=r.stderr)
+        return ExecResult(
+            exit_code=r.exit_code,
+            stdout=r.stdout,
+            stderr=r.stderr,
+            stdout_bytes=r.stdout.encode("utf-8", "replace"),
+            stderr_bytes=r.stderr.encode("utf-8", "replace"),
+        )
 
     def exec_stream(self, command: list[str], opts: Optional[ExecOptions] = None):
         try:
@@ -384,14 +410,19 @@ class CloudTransport:
             self._base, self._key, "POST", f"/v1/machines/{self._id}/exec", json_body=body, timeout=http_timeout
         )
         r = r or {}
+        stdout = str(r.get("stdout", ""))
+        stderr = str(r.get("stderr", ""))
         return ExecResult(
             exit_code=int(r.get("exitCode", 0)),
-            stdout=str(r.get("stdout", "")),
-            stderr=str(r.get("stderr", "")),
-            # The cloud caps captured output at 1 MiB and flags the cut
+            stdout=stdout,
+            stderr=stderr,
+            # The cloud caps the text fields at 1 MiB and flags the cut
             # (camelCase per smolfleet's MachineExecResponse).
             stdout_truncated=bool(r.get("stdoutTruncated", False)),
             stderr_truncated=bool(r.get("stderrTruncated", False)),
+            # Byte-exact, untruncated output from the base64 fields when present.
+            stdout_bytes=_decode_exec_bytes(r, "stdoutB64", stdout),
+            stderr_bytes=_decode_exec_bytes(r, "stderrB64", stderr),
         )
 
     def run(self, image: str, command: list[str], opts: Optional[ExecOptions] = None) -> ExecResult:

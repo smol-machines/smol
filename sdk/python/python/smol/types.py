@@ -114,16 +114,24 @@ class ExecOptions:
 class ExecResult:
     exit_code: int
     stdout: str
-    """Captured stdout as text (UTF-8; invalid bytes replaced). For BINARY output,
-    read it back with ``read_file()`` instead — this conversion is lossy. Very
-    large output (>~20 MB) is rejected; use ``exec_stream`` for that."""
+    """Captured stdout as text (UTF-8; invalid bytes replaced), truncated to ~1 MiB
+    on the cloud target (see :attr:`stdout_truncated`). This conversion is lossy for
+    binary output — use :attr:`stdout_bytes` for byte-exact, untruncated output, or
+    ``exec_stream`` to stream very large output."""
     stderr: str
     stdout_truncated: bool = False
-    """True when the cloud capped stdout (1 MiB); fetch big output via
-    ``exec_stream`` or ``read_file``. Always False on the local target
-    (the embedded engine streams unbounded)."""
+    """True when the cloud capped the text :attr:`stdout` (1 MiB). :attr:`stdout_bytes`
+    is still complete; or fetch big output via ``exec_stream`` / ``read_file``. Always
+    False on the local target (the embedded engine streams unbounded)."""
     stderr_truncated: bool = False
-    """True when the cloud capped stderr (1 MiB); see :attr:`stdout_truncated`."""
+    """True when the cloud capped the text :attr:`stderr` (1 MiB); see :attr:`stdout_truncated`."""
+    stdout_bytes: bytes = b""
+    """Byte-exact, untruncated stdout. Populated from the cloud's base64 output when
+    the control provides it (older controls fall back to the UTF-8 bytes of the lossy
+    :attr:`stdout`); on the local target it is the UTF-8 encoding of :attr:`stdout`.
+    Prefer this over :attr:`stdout` for binary or >1 MiB output."""
+    stderr_bytes: bytes = b""
+    """Byte-exact, untruncated stderr; see :attr:`stdout_bytes`."""
 
     @property
     def success(self) -> bool:

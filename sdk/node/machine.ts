@@ -37,6 +37,10 @@ function makeExecResult(r: RawExec): ExecResult {
     // streams unbounded, so absent means false.
     stdoutTruncated: r.stdoutTruncated ?? false,
     stderrTruncated: r.stderrTruncated ?? false,
+    // Byte-exact output. The cloud transport decodes it from base64; the local
+    // transport has no bytes, so fall back to the UTF-8 encoding of the text.
+    stdoutBytes: r.stdoutBytes ?? new TextEncoder().encode(r.stdout),
+    stderrBytes: r.stderrBytes ?? new TextEncoder().encode(r.stderr),
     success,
     output: r.stdout + r.stderr,
     assertSuccess() {
