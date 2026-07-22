@@ -10,7 +10,6 @@
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-
 import {
   getNapiMachine,
   type NapiMachine as NapiInstance,
@@ -707,11 +706,75 @@ class CloudTransport implements Transport {
 // ---------------------------------------------------------------------------
 
 /** Build and start the right transport for the requested target. */
+// --- CLI session reuse -----------------------------------------------------
+// The `smol` CLI persists its login to `~/.config/smolvm/config.toml` (the same
+// path on every platform — home/.config/smolvm, not XDG or ~/Library). Reading
+// its `[cloud]` table lets an SDK process inherit a `smol auth login` session
+// without re-specifying credentials, matching how the CLI authenticates.
+interface CliSession {
+  apiKey?: string;
+  endpoint?: string;
+}
+
+function readCliCloudTable(): Record<string, string> {
+  let text: string;
+  try {
+    text = readFileSync(
+      join(homedir(), ".config", "smolvm", "config.toml"),
+      "utf8",
+    );
+  } catch {
+    return {};
+  }
+  // Minimal, dependency-free scan of the flat, tool-written `[cloud]` table.
+  const out: Record<string, string> = {};
+  let inCloud = false;
+  for (const raw of text.split(/\r?\n/)) {
+    const s = raw.trim();
+    if (s.startsWith("[") && s.endsWith("]")) {
+      inCloud = s === "[cloud]";
+      continue;
+    }
+    if (!inCloud || s.startsWith("#") || !s.includes("=")) continue;
+    const i = s.indexOf("=");
+    out[s.slice(0, i).trim()] = s
+      .slice(i + 1)
+      .trim()
+      .replace(/^["']|["']$/g, "");
+  }
+  return out;
+}
+
+function tokenIsExpired(expiresAt: string | undefined): boolean {
+  // Conservative: expired only when it parses cleanly AND is in the past, so a
+  // valid key is never blocked over a formatting quirk.
+  if (!expiresAt) return false;
+  const ms = Date.parse(expiresAt);
+  return !Number.isNaN(ms) && ms <= Date.now();
+}
+
+function cliSession(target: string | undefined): CliSession {
+  if (target === "local") return {};
+  const cloud = readCliCloudTable();
+  const apiKey = cloud.api_key;
+  if (!apiKey || tokenIsExpired(cloud.token_expires_at)) return {};
+  const session: CliSession = { apiKey };
+  if (cloud.endpoint) session.endpoint = cloud.endpoint;
+  return session;
+}
+
+// Accurate guidance for the missing-credential errors. The old text said "run
+// 'smol login'" — a command that doesn't exist (it's `smol auth login`) and
+// that writes to config.toml, which the SDK now reads. Point at the real path.
+const NO_KEY_HINT =
+  "pass { apiKey }, set SMOL_CLOUD_TOKEN, or run `smol auth login` to create a CLI session the SDK reuses";
+
 export async function makeTransport(
   config: MachineConfig,
   conn: ConnectOptions,
 ): Promise<Transport> {
-  const apiKey = conn.apiKey ?? process.env.SMOL_CLOUD_TOKEN;
+  const { apiKey: cliKey, endpoint: cliUrl } = cliSession(conn.target);
+  const apiKey = conn.apiKey ?? process.env.SMOL_CLOUD_TOKEN ?? cliKey;
   const useCloud =
     conn.target === "cloud" || (conn.target !== "local" && Boolean(apiKey));
 
@@ -722,8 +785,7 @@ export async function makeTransport(
     const key = apiKey ?? cliConfigApiKey();
     if (!key) {
       throw new InvalidConfigError(
-        "cloud target requires an API key — pass { apiKey }, set SMOL_CLOUD_TOKEN, " +
-          "or run 'smol login' (the SDK reads the CLI's config at ~/.config/smolvm/config.toml).",
+        `cloud target requires an API key — ${NO_KEY_HINT}.`,
       );
     }
     if (!config.image) {
@@ -746,6 +808,7 @@ export async function makeTransport(
     const baseUrl = (
       conn.baseUrl ??
       process.env.SMOL_CLOUD_URL ??
+      cliUrl ??
       DEFAULT_CLOUD_URL
     ).replace(/\/+$/, "");
     const cloudConn: CloudConn = { baseUrl, apiKey: key };
@@ -868,7 +931,8 @@ export async function connectTransport(
   id: string,
   conn: ConnectOptions,
 ): Promise<Transport> {
-  const apiKey = conn.apiKey ?? process.env.SMOL_CLOUD_TOKEN;
+  const { apiKey: cliKey, endpoint: cliUrl } = cliSession(conn.target);
+  const apiKey = conn.apiKey ?? process.env.SMOL_CLOUD_TOKEN ?? cliKey;
   const useCloud =
     conn.target === "cloud" || (conn.target !== "local" && !!apiKey);
   if (!useCloud) {
@@ -884,13 +948,13 @@ export async function connectTransport(
   const key = apiKey ?? cliConfigApiKey();
   if (!key) {
     throw new InvalidConfigError(
-      "connect requires an API key — pass { apiKey }, set SMOL_CLOUD_TOKEN, " +
-        "or run 'smol login' (the SDK reads the CLI's config at ~/.config/smolvm/config.toml).",
+      `connect requires an API key — ${NO_KEY_HINT}.`,
     );
   }
   const baseUrl = (
     conn.baseUrl ??
     process.env.SMOL_CLOUD_URL ??
+    cliUrl ??
     DEFAULT_CLOUD_URL
   ).replace(/\/+$/, "");
   const cloudConn: CloudConn = { baseUrl, apiKey: key };

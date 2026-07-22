@@ -537,9 +537,94 @@ def _wait_for_ready(base_url: str, api_key: str, machine_id: str, timeout_s: flo
 # ---------------------------------------------------------------------------
 # Factory
 # ---------------------------------------------------------------------------
+def _cli_config_path() -> str:
+    """Path the `smol` CLI persists its config to — `~/.config/smolvm/config.toml`
+    on every platform (the CLI uses `home/.config/smolvm`, not XDG or ~/Library)."""
+    return os.path.join(os.path.expanduser("~"), ".config", "smolvm", "config.toml")
+
+
+def _read_cli_cloud_table() -> dict[str, Any]:
+    """Best-effort read of the `[cloud]` table the CLI writes on `smol auth login`,
+    so an SDK process inherits that session without re-specifying credentials.
+    Returns {} on any problem (missing file, no TOML parser, malformed)."""
+    try:
+        with open(_cli_config_path(), "rb") as f:
+            raw = f.read()
+    except OSError:
+        return {}
+    text = raw.decode("utf-8", "replace")
+    for mod_name in ("tomllib", "tomli"):  # tomllib is stdlib on 3.11+
+        try:
+            mod = __import__(mod_name)
+        except ModuleNotFoundError:
+            continue
+        try:
+            return mod.loads(text).get("cloud", {}) or {}
+        except Exception:  # noqa: BLE001 — malformed file, fall through
+            return {}
+    # No TOML parser available (Python <3.11 without `tomli`): scan the flat,
+    # tool-written `[cloud]` table for the two string keys we need.
+    return _scan_cloud_table(text)
+
+
+def _scan_cloud_table(text: str) -> dict[str, Any]:
+    out: dict[str, Any] = {}
+    in_cloud = False
+    for line in text.splitlines():
+        s = line.strip()
+        if s.startswith("[") and s.endswith("]"):
+            in_cloud = s == "[cloud]"
+            continue
+        if not in_cloud or "=" not in s or s.startswith("#"):
+            continue
+        key, _, val = s.partition("=")
+        out[key.strip()] = val.strip().strip('"').strip("'")
+    return out
+
+
+def _token_is_expired(expires_at: Any) -> bool:
+    """True only when `token_expires_at` parses cleanly AND is in the past.
+    Conservative: any parse failure returns False so a valid key is never
+    blocked over a formatting quirk."""
+    if not expires_at or not isinstance(expires_at, str):
+        return False
+    try:
+        import datetime
+
+        ts = expires_at.replace("Z", "+00:00")
+        dt = datetime.datetime.fromisoformat(ts)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=datetime.timezone.utc)
+        return dt <= datetime.datetime.now(datetime.timezone.utc)
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _cli_session() -> tuple[Optional[str], Optional[str]]:
+    """`(api_key, endpoint)` from the CLI's login session, or `(None, None)`.
+    An expired access token is treated as absent so the caller surfaces an
+    honest "run `smol auth login`" message rather than a raw 401 later."""
+    cloud = _read_cli_cloud_table()
+    key = cloud.get("api_key")
+    if not key or _token_is_expired(cloud.get("token_expires_at")):
+        return (None, None)
+    return (key, cloud.get("endpoint") or None)
+
+
+# Shared, accurate guidance for the missing-credential errors below. The old
+# text said "run `smol login`" — but that command doesn't exist (it's
+# `smol auth login`) and it writes the token to config.toml, which the SDK now
+# reads. Point users at the real, working path.
+_NO_KEY_HINT = (
+    "pass ConnectOptions(api_key=...), set SMOL_CLOUD_TOKEN, or run "
+    "`smol auth login` to create a CLI session the SDK reuses"
+)
+
+
 def make_transport(config: MachineConfig, conn: Optional[ConnectOptions] = None) -> Transport:
     conn = conn or ConnectOptions()
-    api_key = conn.api_key or os.environ.get("SMOL_CLOUD_TOKEN")
+    cli_key, cli_url = _cli_session() if conn.target != "local" else (None, None)
+    api_key = conn.api_key or os.environ.get("SMOL_CLOUD_TOKEN") or cli_key
     use_cloud = conn.target == "cloud" or (conn.target != "local" and bool(api_key))
 
     if use_cloud:
@@ -548,11 +633,7 @@ def make_transport(config: MachineConfig, conn: Optional[ConnectOptions] = None)
         # SDK's default target away from local.
         api_key = api_key or _cli_config_api_key()
         if not api_key:
-            raise InvalidConfigError(
-                "cloud target requires an api_key — pass ConnectOptions(api_key=...), "
-                "set SMOL_CLOUD_TOKEN, or run `smol login` (the SDK reads the CLI's "
-                "config at ~/.config/smolvm/config.toml)."
-            )
+            raise InvalidConfigError(f"cloud target requires an api_key — {_NO_KEY_HINT}.")
         if not config.image:
             raise InvalidConfigError(
                 "cloud target requires an image — pass MachineConfig(image=...)."
@@ -568,7 +649,7 @@ def make_transport(config: MachineConfig, conn: Optional[ConnectOptions] = None)
                 "host mounts are local-only and are not applied on the cloud target; "
                 "use cloud volumes for persistent storage instead."
             )
-        base_url = (conn.base_url or os.environ.get("SMOL_CLOUD_URL") or DEFAULT_CLOUD_URL).rstrip("/")
+        base_url = (conn.base_url or os.environ.get("SMOL_CLOUD_URL") or cli_url or DEFAULT_CLOUD_URL).rstrip("/")
 
         r = config.resources
         resources: dict[str, Any] = {"diskGb": r.storage_gb if r else None}
@@ -667,7 +748,8 @@ def connect_transport(machine_id: str, conn: Optional[ConnectOptions] = None) ->
     * cloud: looks up the machine by id (raises NOT_FOUND otherwise).
     """
     conn = conn or ConnectOptions()
-    api_key = conn.api_key or os.environ.get("SMOL_CLOUD_TOKEN")
+    cli_key, cli_url = _cli_session() if conn.target != "local" else (None, None)
+    api_key = conn.api_key or os.environ.get("SMOL_CLOUD_TOKEN") or cli_key
     use_cloud = conn.target == "cloud" or (conn.target != "local" and bool(api_key))
     if not use_cloud:
         # Local: start-or-reconnect to the named machine via the native engine.
@@ -680,12 +762,8 @@ def connect_transport(machine_id: str, conn: Optional[ConnectOptions] = None) ->
     # target is already selected.
     api_key = api_key or _cli_config_api_key()
     if not api_key:
-        raise InvalidConfigError(
-            "connect requires an api_key — pass ConnectOptions(api_key=...), "
-            "set SMOL_CLOUD_TOKEN, or run `smol login` (the SDK reads the CLI's "
-            "config at ~/.config/smolvm/config.toml)."
-        )
-    base_url = (conn.base_url or os.environ.get("SMOL_CLOUD_URL") or DEFAULT_CLOUD_URL).rstrip("/")
+        raise InvalidConfigError(f"connect requires an api_key — {_NO_KEY_HINT}.")
+    base_url = (conn.base_url or os.environ.get("SMOL_CLOUD_URL") or cli_url or DEFAULT_CLOUD_URL).rstrip("/")
     # Resolve like the CLI does: try the id path first, and when that 404s,
     # list machines and match by NAME. `machine.name` returns the human name,
     # so `Machine.connect(other.name)` — the natural composition of this API —
