@@ -22,7 +22,9 @@ import type {
   ExecResult,
   ImageInfo,
   MachineConfig,
+  PortEndpoint,
   PortSpec,
+  WaitReadyOptions,
 } from "./types";
 
 function makeExecResult(r: RawExec): ExecResult {
@@ -85,6 +87,56 @@ export class Machine {
   /** Current state (e.g. "running" | "stopped"). */
   state(): Promise<string> {
     return this.transport.state();
+  }
+
+  /** Whether the machine is READY to do work. `state()` becoming "started"
+   *  means only that the VM process launched — the guest is still booting and
+   *  is NOT yet usable. `ready` becomes true once the in-VM agent is reachable
+   *  (an `exec`/`connect` will succeed) and any published port accepts
+   *  connections. Gate on this, not `state`, before driving the machine.
+   *  (cloud; the local target reports ready once running.) */
+  ready(): Promise<boolean> {
+    return this.transport.ready();
+  }
+
+  /** When the machine first became ready (RFC3339), or `null` if not yet ready. */
+  readyAt(): Promise<string | null> {
+    return this.transport.readyAt();
+  }
+
+  /** Block until the machine is `ready` (or throw on a failed/stopped state or
+   *  timeout). `create()` already waits for readiness, so this is for machines
+   *  attached via `Machine.connect(...)`, or to re-assert readiness before use.
+   *  Poll ceiling and interval are configurable (defaults: 120s / 1s). */
+  waitUntilReady(opts?: WaitReadyOptions): Promise<void> {
+    return this.transport.waitUntilReady(opts);
+  }
+
+  /** An authenticated endpoint (URL + headers) to reach a PUBLISHED guest port
+   *  through the control plane's connect bridge — no Cloudflare/localhost.run
+   *  tunnel, no public exposure, no egress allow-list. Have the in-VM worker
+   *  LISTEN on the port and connect *inbound*: plug `wsUrl` into a WebSocket
+   *  client (passing `headers`) or `httpUrl` into `fetch`. The machine must
+   *  publish the port (`ports: [{ guest }]` at create). (cloud) */
+  endpoint(port: number, path?: string): PortEndpoint {
+    return this.transport.endpoint(port, path);
+  }
+
+  /** Convenience: an authenticated HTTP request to a published guest port via
+   *  the connect bridge. Returns the raw `fetch` `Response`. (cloud)
+   *
+   *  @param port  a published GUEST port the in-VM service listens on
+   *  @param path  optional path on that service (e.g. `"healthz"`)
+   *  @param init  standard `fetch` init; its headers merge over the auth header */
+  fetch(port: number, path?: string, init?: RequestInit): Promise<Response> {
+    const e = this.transport.endpoint(port, path);
+    return fetch(e.httpUrl, {
+      ...init,
+      headers: {
+        ...e.headers,
+        ...((init?.headers as Record<string, string> | undefined) ?? {}),
+      },
+    });
   }
 
   /** Public ingress URL for the machine's first published port (cloud).

@@ -26,6 +26,37 @@ const res = await cloud.exec(['python', '-c', 'print(40 + 2)']);
 Cloud-only gaps (`run`, `execStream`, `pullImage`, `listImages`) throw `NotSupportedError`;
 the common surface (create/exec/files/state/stop/delete) is identical on both.
 
+### Disposable workers: wait for `ready`, then connect (cloud)
+
+Launching a machine as a **disposable agent runtime** has two easy-to-miss steps;
+both are first-class here.
+
+`Machine.create()` already waits for the machine to be **ready** — not merely
+`started`. `state === "started"` means the VM process launched; the guest is
+still booting and is **not** usable yet. Acting on `started` is the classic
+teardown race (works on a slow cold start, times out on a warm one). Gate on the
+unambiguous signal:
+
+```ts
+const m = await Machine.create({ image, ports: [{ host: 8080, guest: 8080 }] },
+                               { target: 'cloud' });
+await m.waitUntilReady();          // create() already waited; re-assert if reconnecting
+console.log(await m.ready(), await m.readyAt());
+```
+
+To reach a service **inside** the VM, use the authenticated connect bridge —
+**no Cloudflare/localhost.run tunnel, no public exposure, no egress allow-list.**
+Have the worker LISTEN on a published port and connect *inbound*:
+
+```ts
+// HTTP to a published guest port:
+const res = await m.fetch(8080, '/healthz');
+
+// Or a WebSocket, using your own ws client with the authed endpoint:
+const { wsUrl, headers } = m.endpoint(8080, '/socket');
+const ws = new WebSocket(wsUrl, { headers });   // e.g. the `ws` package
+```
+
 ## Install
 
 ```bash

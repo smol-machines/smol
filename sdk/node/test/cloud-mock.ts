@@ -67,7 +67,18 @@ const server = createServer(async (req, res) => {
     });
   }
   if (method === "GET" && url === "/v1/machines/m1")
-    return json(200, { id: "m1", state: "running" });
+    return json(200, {
+      id: "m1",
+      state: "started",
+      ready: true,
+      readyAt: "2026-07-22T20:01:41.152Z",
+    });
+  // The connect bridge: GET /v1/machines/:id/connect/:port[/rest]. Echo the
+  // path + auth so the SDK's endpoint()/fetch() wiring can be asserted.
+  if (method === "GET" && url.startsWith("/v1/machines/m1/connect/")) {
+    seen.connectUrl = url;
+    return json(200, { ok: true, path: url });
+  }
   if (method === "GET" && url === "/v1/machines/m2")
     return json(200, { id: "m2", state: "running" });
   if (method === "POST" && url === "/v1/machines/m1/exec") {
@@ -132,11 +143,54 @@ async function main(): Promise<void> {
     seen.auth === "Bearer smk_test123",
     String(seen.auth),
   );
-  check("state() over REST", (await m.state()) === "running");
+  check("state() over REST", (await m.state()) === "started");
+  // Readiness: the machine can be `started` yet report `ready` separately — the
+  // SDK surfaces the unambiguous signal (gate on this, not state).
+  check("ready() reads the readiness flag", (await m.ready()) === true);
+  check(
+    "readyAt() reads the readiness timestamp",
+    (await m.readyAt()) === "2026-07-22T20:01:41.152Z",
+    String(await m.readyAt()),
+  );
+  await m.waitUntilReady({ timeoutMs: 2000, intervalMs: 50 });
+  check("waitUntilReady() resolves on ready", true);
   check(
     "forkable start passes ?forkable=true",
     String(seen.startUrl ?? "").includes("forkable=true"),
     String(seen.startUrl),
+  );
+
+  // --- connect bridge: authed endpoint URL + fetch to a published guest port ---
+  const ep = m.endpoint(80);
+  check(
+    "endpoint() builds the connect-bridge httpUrl",
+    ep.httpUrl === `${baseUrl}/v1/machines/m1/connect/80`,
+    ep.httpUrl,
+  );
+  check(
+    "endpoint() derives a wss/ws URL from the base",
+    ep.wsUrl === `${baseUrl.replace(/^http/, "ws")}/v1/machines/m1/connect/80`,
+    ep.wsUrl,
+  );
+  check(
+    "endpoint() carries the Bearer auth header",
+    ep.headers.authorization === "Bearer smk_test123",
+    ep.headers.authorization,
+  );
+  check(
+    "endpoint(port, path) appends the sub-path",
+    m.endpoint(80, "/healthz").httpUrl ===
+      `${baseUrl}/v1/machines/m1/connect/80/healthz`,
+    m.endpoint(80, "/healthz").httpUrl,
+  );
+  const bridged = await m.fetch(80, "healthz");
+  const bridgedBody = (await bridged.json()) as { ok?: boolean; path?: string };
+  check(
+    "fetch() reaches the guest port through the authed bridge",
+    bridged.ok &&
+      bridgedBody.ok === true &&
+      seen.connectUrl === "/v1/machines/m1/connect/80/healthz",
+    String(seen.connectUrl),
   );
 
   const r = await m.exec(["echo", "hi"], { env: { A: "b" }, timeout: 5 });

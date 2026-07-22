@@ -30,6 +30,37 @@ with Machine.create(
     print(m.exec(["echo", "hi"]).stdout)
 ```
 
+### Async: `AsyncMachine` (non-blocking)
+
+`Machine` is synchronous — each call blocks the calling thread. When you're
+driving many machines from one event loop (a fleet of disposable workers), use
+`AsyncMachine`: the **same API**, but every I/O method is a coroutine that runs
+off the loop, so launches and calls overlap instead of serializing.
+
+```python
+import asyncio
+from smol import AsyncMachine, MachineConfig, ConnectOptions, PortSpec
+
+async def main():
+    cfg = MachineConfig(image="alpine:3.20", ports=[PortSpec(host=8080, guest=8080)])
+    conn = ConnectOptions(target="cloud")  # or SMOL_CLOUD_TOKEN
+    # Launch a fleet concurrently — none blocks the loop.
+    machines = await asyncio.gather(*(AsyncMachine.create(cfg, conn) for _ in range(8)))
+    try:
+        await asyncio.gather(*(m.wait_until_ready() for m in machines))
+        # Reach a service inside a vm via the authed connect bridge (no tunnel):
+        health = await machines[0].request(8080, "healthz")
+    finally:
+        await asyncio.gather(*(m.delete() for m in machines))
+
+asyncio.run(main())
+```
+
+Every `Machine` method has an `await`able counterpart on `AsyncMachine`
+(`create`/`connect`/`exec`/`wait_until_ready`/`request`/`fork`/…), plus
+`async with` for auto-delete. `endpoint(port)` stays synchronous — it only builds
+a URL and does no I/O.
+
 ## Architecture
 - **Pure-Python layer** (`python/smol`): `Machine`, transports, types, errors —
   zero third-party deps (the cloud transport uses only `urllib`).
@@ -39,10 +70,40 @@ with Machine.create(
 - **Cloud transport**: a REST client to smolfleet `/v1` whose request/response
   shapes match smolfleet's OpenAPI contract (Bearer `smk_…`).
 
+### Disposable workers: wait for `ready`, then connect (cloud)
+
+Launching a machine as a **disposable agent runtime** has two easy-to-miss steps;
+both are first-class here.
+
+`Machine.create()` already waits for the machine to be **ready** — not merely
+`started`. `state == "started"` means the VM process launched; the guest is
+still booting and is **not** usable yet. Acting on `started` is the classic
+teardown race (works on a slow cold start, times out on a warm one). Gate on the
+unambiguous signal:
+
+```python
+with Machine.create(
+    MachineConfig(image="alpine:3.20", ports=[PortSpec(host=8080, guest=8080)]),
+    ConnectOptions(target="cloud"),
+) as m:
+    m.wait_until_ready()           # create() already waited; re-assert if reconnecting
+    print(m.ready(), m.ready_at())
+
+    # Reach a service INSIDE the vm through the authenticated connect bridge —
+    # no Cloudflare/localhost.run tunnel, no public exposure, no egress allow-list.
+    # Have the worker LISTEN on a published port and connect *inbound*:
+    print(m.request(8080, "healthz").decode())     # authed HTTP to the guest port
+    ep = m.endpoint(8080, "/socket")               # or build a ws:// url for your ws client
+    # websocket.connect(ep.ws_url, additional_headers=ep.headers)
+```
+
 ## API
+- `Machine` (sync) / `AsyncMachine` (awaitable, non-blocking) — identical surface; see the async example above.
 - `Machine.create(config=None, conn=None)` — create and start a machine.
 - `machine.exec(command, opts=None)` / `machine.run(image, command, opts=None)` → `ExecResult`
 - `machine.read_file(path)` → `bytes` / `machine.write_file(path, data, mode=None)`
+- `machine.ready()` / `machine.ready_at()` / `machine.wait_until_ready(timeout_s=120, interval_s=1)`  *(cloud)*
+- `machine.endpoint(port, path=None)` → `PortEndpoint` / `machine.request(port, path=None, method="GET", data=None)` → `bytes`  *(cloud connect bridge)*
 - `machine.pull_image(image)` / `machine.list_images()`  *(local)*
 - `machine.stop()` / `machine.delete()` / `machine.state()`
 - Use it as a context manager to auto-`delete()` on exit.
@@ -79,6 +140,7 @@ On Linux the host needs `/dev/kvm`.
 ```bash
 python tests/test_unit.py        # error parsing + path encoding (no VM/network)
 python tests/test_cloud_mock.py  # cloud transport vs a mock /v1 (no VM/network)
+python tests/test_async_mock.py  # AsyncMachine vs a mock /v1 (concurrency, no VM/network)
 # Local VM boot (needs the native build + the env above):
 SMOLVM_BOOT_BINARY=… SMOLVM_LIB_DIR=… .venv/bin/python tests/test_local_e2e.py
 ```

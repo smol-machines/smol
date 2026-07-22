@@ -139,6 +139,27 @@ export type ExecEvent =
   | { kind: "exit"; exitCode: number }
   | { kind: "error"; message: string };
 
+/** Options for `Machine.waitUntilReady`. */
+export interface WaitReadyOptions {
+  /** Give up after this many milliseconds (default: 120000). */
+  timeoutMs?: number;
+  /** Delay between readiness polls, in milliseconds (default: 1000). */
+  intervalMs?: number;
+}
+
+/** An authenticated way to reach a PUBLISHED guest port through the control
+ *  plane's connect bridge — no tunnel, no public exposure. Returned by
+ *  `Machine.endpoint(port)`. Plug `wsUrl` into a WebSocket client or `httpUrl`
+ *  into `fetch`, passing `headers` so the request authenticates. */
+export interface PortEndpoint {
+  /** `https://…/v1/machines/:id/connect/:port[/path]` — for HTTP requests. */
+  httpUrl: string;
+  /** `wss://…/v1/machines/:id/connect/:port[/path]` — for WebSocket upgrades. */
+  wsUrl: string;
+  /** Headers to send (the tenant Bearer token). */
+  headers: Record<string, string>;
+}
+
 /** Selects and configures the backend. Local (embedded) is the default. */
 export interface ConnectOptions {
   /** 'local' = embedded engine (default). 'cloud' = remote (not yet implemented). */

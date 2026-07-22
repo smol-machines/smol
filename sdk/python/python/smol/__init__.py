@@ -45,6 +45,7 @@ from .errors import (
     SmolError,
     wrap_native_error,
 )
+from .async_machine import AsyncMachine
 from .machine import Machine
 from .types import (
     ConnectOptions,
@@ -53,6 +54,7 @@ from .types import (
     ImageInfo,
     MachineConfig,
     MountSpec,
+    PortEndpoint,
     PortSpec,
     ResourceSpec,
 )
@@ -61,10 +63,12 @@ __version__ = "1.6.4"
 
 __all__ = [
     "Machine",
+    "AsyncMachine",
     "MachineConfig",
     "ResourceSpec",
     "MountSpec",
     "PortSpec",
+    "PortEndpoint",
     "ExecOptions",
     "ExecResult",
     "ImageInfo",

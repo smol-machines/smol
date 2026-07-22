@@ -28,7 +28,9 @@ import type {
   ExecOptions,
   ImageInfo,
   MachineConfig,
+  PortEndpoint,
   PortSpec,
+  WaitReadyOptions,
 } from "./types";
 // Cloud wire shapes are generated from smolfleet's OpenAPI document (npm run
 // gen:openapi → generated/smolfleet.ts), itself derived from the shared
@@ -38,9 +40,19 @@ import type { components } from "./generated/smolfleet";
 
 type Schemas = components["schemas"];
 type CreateMachineRequest = Schemas["CreateMachineRequest"];
-type MachineInfo = Schemas["MachineInfo"];
 type MachineCommandRequest = Schemas["MachineCommandRequest"];
 type MachineExecResponse = Schemas["MachineExecResponse"];
+
+// The server carries an unambiguous readiness signal (`ready`/`readyAt`) that the
+// generated OpenAPI snapshot doesn't yet include; extend the type locally. `url`
+// is likewise widened where read (see `url()`). `ready` is absent (undefined) on
+// older control planes — distinguished from `false` so we can fall back to the
+// coarse state gate rather than hanging.
+type MachineInfo = Schemas["MachineInfo"] & {
+  ready?: boolean;
+  readyAt?: string | null;
+  url?: string | null;
+};
 
 /** Raw exec result (the ergonomic wrapper is added in machine.ts). */
 export interface RawExec {
@@ -55,6 +67,10 @@ export interface RawExec {
 export interface Transport {
   readonly name: string;
   state(): Promise<string>;
+  ready(): Promise<boolean>;
+  readyAt(): Promise<string | null>;
+  waitUntilReady(opts?: WaitReadyOptions): Promise<void>;
+  endpoint(port: number, path?: string): PortEndpoint;
   url(): Promise<string | null>;
   exec(command: string[], opts?: ExecOptions): Promise<RawExec>;
   run(image: string, command: string[], opts?: ExecOptions): Promise<RawExec>;
@@ -191,6 +207,27 @@ class LocalTransport implements Transport {
 
   async state(): Promise<string> {
     return this.inner.state();
+  }
+
+  async ready(): Promise<boolean> {
+    // A local machine is created already started; "running" means usable.
+    return (await this.inner.state()) === "running";
+  }
+
+  async readyAt(): Promise<string | null> {
+    // No readiness timestamp for the embedded engine.
+    return null;
+  }
+
+  async waitUntilReady(_opts?: WaitReadyOptions): Promise<void> {
+    // Local create()/start() awaits the boot, so the machine is already ready.
+  }
+
+  endpoint(_port: number, _path?: string): PortEndpoint {
+    throw new NotSupportedError(
+      "endpoint() is a cloud connect-bridge feature; the local target has no " +
+        "control plane. Publish a port and reach it on the host directly.",
+    );
   }
 
   async url(): Promise<string | null> {
@@ -409,24 +446,27 @@ async function cloudFetch<T = unknown>(
   return (ct.includes("application/json") ? await res.json() : undefined) as T;
 }
 
-/** Poll a cloud machine until it is started/running; throw on error state or
+/** Poll a cloud machine until it is READY to do work; throw on error state or
  *  timeout. Mirrors the Python SDK's `_wait_for_ready`. Auth/not-found errors are
- *  fatal (re-thrown immediately); other errors are treated as transient booting. */
+ *  fatal (re-thrown immediately); other errors are treated as transient booting.
+ *
+ *  Readiness is the machine's `ready` flag — true only once the guest agent is
+ *  reachable (and any published port accepts). A machine reaching state
+ *  `started` is NOT yet usable: the guest is still booting, and acting then is
+ *  the classic teardown race (works on a slow cold start, times out on a warm
+ *  one). Older control planes omit `ready`; there we fall back to the coarse
+ *  `started`/`running` state so this never hangs against them. */
 async function waitForReady(
   conn: CloudConn,
   id: string,
   timeoutMs = 120_000,
+  intervalMs = 1_000,
 ): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   for (;;) {
-    let state: string | undefined;
+    let m: MachineInfo | undefined;
     try {
-      const m = await cloudFetch<MachineInfo>(
-        conn,
-        "GET",
-        `/v1/machines/${id}`,
-      );
-      state = m?.state ?? undefined;
+      m = await cloudFetch<MachineInfo>(conn, "GET", `/v1/machines/${id}`);
     } catch (e) {
       if (
         e instanceof SmolError &&
@@ -435,20 +475,33 @@ async function waitForReady(
         throw e;
       // transient while booting — keep polling
     }
-    if (state === "started" || state === "running") return;
+    const state = m?.state ?? undefined;
+    // Prefer the unambiguous readiness signal.
+    if (m?.ready === true) return;
     if (state === "error") {
       throw new SmolError(
         "SMOLVM_ERROR",
         `machine ${id} entered error state while starting`,
       );
     }
+    // A machine that reached a definitively-terminal non-ready state won't
+    // become ready by waiting.
+    if (state === "stopped" || state === "deleted") {
+      throw new SmolError(
+        "SMOLVM_ERROR",
+        `machine ${id} entered ${state} before becoming ready`,
+      );
+    }
+    // Back-compat: `ready` absent entirely → old server, gate on state.
+    if (m && m.ready === undefined && (state === "started" || state === "running"))
+      return;
     if (Date.now() >= deadline) {
       throw new SmolError(
         "TIMEOUT",
         `machine ${id} not ready after ${timeoutMs}ms (state=${state ?? "unknown"})`,
       );
     }
-    await new Promise((r) => setTimeout(r, 1000));
+    await new Promise((r) => setTimeout(r, intervalMs));
   }
 }
 
@@ -466,6 +519,44 @@ class CloudTransport implements Transport {
       `/v1/machines/${this.id}`,
     );
     return m?.state ?? "unknown";
+  }
+
+  async ready(): Promise<boolean> {
+    const m = await cloudFetch<MachineInfo>(
+      this.conn,
+      "GET",
+      `/v1/machines/${this.id}`,
+    );
+    return m?.ready === true;
+  }
+
+  async readyAt(): Promise<string | null> {
+    const m = await cloudFetch<MachineInfo>(
+      this.conn,
+      "GET",
+      `/v1/machines/${this.id}`,
+    );
+    return m?.readyAt ?? null;
+  }
+
+  async waitUntilReady(opts?: WaitReadyOptions): Promise<void> {
+    await waitForReady(this.conn, this.id, opts?.timeoutMs, opts?.intervalMs);
+  }
+
+  endpoint(port: number, path = ""): PortEndpoint {
+    // Reach a PUBLISHED guest port through the control plane's authenticated
+    // connect bridge — no tunnel, no public exposure. The server maps the guest
+    // port to its node host-port (404 if the port isn't published, 503 if the
+    // machine isn't started) and forwards WebSocket upgrades or plain HTTP.
+    const rel = path
+      ? `/v1/machines/${this.id}/connect/${port}/${path.replace(/^\/+/, "")}`
+      : `/v1/machines/${this.id}/connect/${port}`;
+    return {
+      httpUrl: `${this.conn.baseUrl}${rel}`,
+      // https → wss, http → ws (local dev endpoints).
+      wsUrl: `${this.conn.baseUrl.replace(/^http/, "ws")}${rel}`,
+      headers: { authorization: `Bearer ${this.conn.apiKey}` },
+    };
   }
 
   async url(): Promise<string | null> {
