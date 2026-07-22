@@ -459,7 +459,9 @@ class CloudTransport:
             except Exception:  # noqa: BLE001
                 pass
             code = "NOT_FOUND" if e.code == 404 else "UNAUTHORIZED" if e.code == 401 else "SMOLVM_ERROR"
-            raise SmolError(code, f"cloud POST exec/stream → {e.code}{(': ' + text) if text else ''}") from e
+            rid = e.headers.get("x-request-id") if e.headers else None
+            suffix = f" [request id: {rid}]" if rid else ""
+            raise SmolError(code, f"cloud POST exec/stream → {e.code}{(': ' + text) if text else ''}{suffix}") from e
         except urllib.error.URLError as e:
             raise SmolError("CONNECTION", f"cloud exec/stream failed: {getattr(e, 'reason', e)}") from e
 
@@ -594,7 +596,12 @@ def _cloud_fetch(
         except Exception:  # noqa: BLE001
             pass
         code = "NOT_FOUND" if e.code == 404 else "UNAUTHORIZED" if e.code == 401 else "SMOLVM_ERROR"
-        raise SmolError(code, f"cloud {method} {path} → {e.code}{(': ' + text) if text else ''}") from e
+        # Surface the server's `x-request-id` correlation id — the error body is
+        # visible to callers but the response headers aren't, so without this the
+        # id is invisible and support can't correlate the failed call.
+        rid = e.headers.get("x-request-id") if e.headers else None
+        suffix = f" [request id: {rid}]" if rid else ""
+        raise SmolError(code, f"cloud {method} {path} → {e.code}{(': ' + text) if text else ''}{suffix}") from e
     except urllib.error.URLError as e:
         reason = getattr(e, "reason", e)
         raise SmolError("CONNECTION", f"cloud request failed: {reason}") from e

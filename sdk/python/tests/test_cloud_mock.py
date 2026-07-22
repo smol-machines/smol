@@ -14,7 +14,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "python"))
 
-from smol import ConnectOptions, Machine, MachineConfig, MountSpec, NotSupportedError, PortSpec, ResourceSpec  # noqa: E402
+from smol import ConnectOptions, Machine, MachineConfig, MountSpec, NotSupportedError, PortSpec, ResourceSpec, SmolError  # noqa: E402
+from smol.transport import _cloud_fetch  # noqa: E402  (internal — asserts request-id surfacing)
 
 MACHINE_ID = "mach-test123"
 CLONE_ID = "mach-clone456"
@@ -30,6 +31,9 @@ class Handler(BaseHTTPRequestHandler):
 
     def _send(self, code: int, body: bytes = b"", ctype: str = "application/json"):
         self.send_response(code)
+        # The real control plane sets x-request-id on every response; mirror it
+        # so the SDK's error-message surfacing can be asserted.
+        self.send_header("x-request-id", "req-test-xyz")
         if body:
             self.send_header("content-type", ctype)
         self.end_headers()
@@ -233,6 +237,15 @@ def main() -> int:
         check("env/workdir omitted from the body when unset",
               "env" not in captured["create_body"] and "workdir" not in captured["create_body"],
               str(captured["create_body"]))
+
+        # Errors surface the server's x-request-id so support can correlate the
+        # call (clients see the error body but not response headers).
+        rid_msg = ""
+        try:
+            _cloud_fetch(base, "smk_testkey", "GET", "/v1/does-not-exist")
+        except SmolError as e:
+            rid_msg = str(e)
+        check("error surfaces x-request-id", "[request id: req-test-xyz]" in rid_msg, rid_msg)
 
         m.stop()
         check("stop hit POST /stop", f"POST /v1/machines/{MACHINE_ID}/stop" in captured["hits"])
