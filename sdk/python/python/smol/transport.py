@@ -358,8 +358,12 @@ class CloudTransport:
         # guest port to its node host-port (404 if the port isn't published, 503
         # if the machine isn't started) and forwards WebSocket upgrades or HTTP.
         rel = f"/v1/machines/{self._id}/connect/{port}"
-        if path:
-            rel = f"{rel}/{path.lstrip('/')}"
+        # Only append a sub-path when there's a non-empty segment: a bare "/"
+        # (or "") must stay `connect/<port>` (no trailing slash), which the
+        # control routes; `connect/<port>/` matches no route and 404s.
+        sub = path.lstrip("/") if path else ""
+        if sub:
+            rel = f"{rel}/{sub}"
         ws_base = self._base
         if ws_base.startswith("http"):
             ws_base = "ws" + ws_base[len("http"):]
