@@ -90,10 +90,13 @@ impl ExecCmd {
 
         match location {
             Location::Cloud => {
-                // An interactive/TTY session needs the PTY WebSocket; a plain
+                // An interactive/TTY session needs the PTY WebSocket; `--stream`
+                // uses the SSE exec endpoint (real-time, no output cap); a plain
                 // command uses the buffered HTTP exec.
                 if self.interactive || self.tty {
                     self.run_cloud_interactive()
+                } else if self.stream {
+                    self.run_cloud_streaming()
                 } else {
                     self.run_cloud()
                 }
@@ -331,6 +334,101 @@ impl ExecCmd {
                 let mut err = std::io::stderr();
                 let _ = err.write_all(&stderr_bytes);
                 let _ = err.flush();
+            }
+            std::process::exit(exit_code);
+        })
+    }
+
+    /// Stream a cloud command's output in real time over the SSE exec endpoint
+    /// (`POST /v1/machines/{id}/exec/stream`). Unlike the buffered `run_cloud`,
+    /// output is written as it arrives and is not capped — the right path for
+    /// large or long-running output (`--stream`). The server frames output as
+    /// `event: stdout|stderr|error|exit` + `data:` lines (SSE); the `exit`
+    /// event's data is JSON `{ "exitCode": N }`.
+    fn run_cloud_streaming(self) -> anyhow::Result<()> {
+        let command = strip_separator(&self.command);
+        if command.is_empty() {
+            anyhow::bail!(
+                "no command specified.\nUse: smol machine exec --cloud --stream --name <NAME> -- <command>"
+            );
+        }
+        let env: std::collections::HashMap<String, String> =
+            smolvm::util::parse_env_list(&self.env)
+                .into_iter()
+                .collect();
+        let workdir = self.workdir.clone();
+        let timeout = self.timeout;
+        let name = self.name.clone();
+        if name.is_none() {
+            anyhow::bail!("machine name or ID required for --cloud.\nUse: smol machine exec --cloud --stream --name <NAME> -- <command>");
+        }
+
+        super::cloud::run_cloud_command(name, |http, endpoint, id| async move {
+            use futures_util::StreamExt;
+            use std::io::Write as _;
+
+            let body = serde_json::json!({
+                "command": command,
+                "env": env,
+                "cwd": workdir,
+                "timeoutSeconds": timeout.unwrap_or(600),
+            });
+            let resp = http
+                .post(format!("{}/v1/machines/{}/exec/stream", endpoint, id))
+                .json(&body)
+                .timeout(std::time::Duration::from_secs(timeout.unwrap_or(600) + 10))
+                .send()
+                .await?;
+            let resp = super::cloud::check_response(resp, "exec stream").await?;
+
+            let mut stream = resp.bytes_stream();
+            let mut buf: Vec<u8> = Vec::new();
+            let mut event = String::new();
+            let mut data_lines: Vec<String> = Vec::new();
+            let mut exit_code: i32 = 0;
+            let mut out = std::io::stdout();
+            let mut err = std::io::stderr();
+
+            while let Some(chunk) = stream.next().await {
+                buf.extend_from_slice(&chunk?);
+                // Process complete lines; an empty line terminates one SSE frame.
+                while let Some(nl) = buf.iter().position(|&b| b == b'\n') {
+                    let raw: Vec<u8> = buf.drain(..=nl).collect();
+                    let mut line = String::from_utf8_lossy(&raw[..raw.len() - 1]).into_owned();
+                    if line.ends_with('\r') {
+                        line.pop();
+                    }
+                    if line.is_empty() {
+                        let payload = data_lines.join("\n");
+                        match event.as_str() {
+                            "stdout" => {
+                                let _ = out.write_all(payload.as_bytes());
+                                let _ = out.flush();
+                            }
+                            "stderr" => {
+                                let _ = err.write_all(payload.as_bytes());
+                                let _ = err.flush();
+                            }
+                            "error" => {
+                                eprintln!("error: {payload}");
+                                exit_code = 1;
+                            }
+                            "exit" => {
+                                exit_code = serde_json::from_str::<serde_json::Value>(&payload)
+                                    .ok()
+                                    .and_then(|v| v.get("exitCode").and_then(|c| c.as_i64()))
+                                    .unwrap_or(0) as i32;
+                            }
+                            _ => {}
+                        }
+                        event.clear();
+                        data_lines.clear();
+                    } else if let Some(rest) = line.strip_prefix("event:") {
+                        event = rest.trim().to_string();
+                    } else if let Some(rest) = line.strip_prefix("data:") {
+                        data_lines.push(rest.strip_prefix(' ').unwrap_or(rest).to_string());
+                    }
+                }
             }
             std::process::exit(exit_code);
         })
