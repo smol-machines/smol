@@ -859,12 +859,21 @@ def make_transport(config: MachineConfig, conn: Optional[ConnectOptions] = None)
         start_path = f"/v1/machines/{machine_id}/start"
         if config.forkable:
             start_path += "?forkable=true"
+        start_error: Optional[str] = None
         try:
             try:
                 _cloud_fetch(base_url, api_key, "POST", start_path)
-            except SmolError:
-                pass  # best-effort; _wait_for_ready is the gate
-            _wait_for_ready(base_url, api_key, machine_id)
+            except SmolError as e:
+                # Best-effort; _wait_for_ready is the gate. Remember the reason so
+                # a subsequent readiness failure can surface WHY start failed — the
+                # machine record carries no error detail of its own.
+                start_error = str(e)
+            try:
+                _wait_for_ready(base_url, api_key, machine_id)
+            except SmolError as e:
+                if start_error is not None:
+                    raise SmolError(e.code, f"{e} (start failed: {start_error})") from e
+                raise
         except BaseException:
             try:
                 _cloud_fetch(base_url, api_key, "DELETE", f"/v1/machines/{machine_id}")
