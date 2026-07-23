@@ -66,6 +66,8 @@ jobs:
         run: python tests/test_unit.py
       - name: Cloud-transport tests (mock /v1 server; pure Python)
         run: python tests/test_cloud_mock.py
+      - name: Cloud start-failure surfacing (mock /v1 server; pure Python)
+        run: python tests/test_cloud_start_error.py
       - name: Async-transport tests (AsyncMachine vs mock /v1; pure Python)
         run: python tests/test_async_mock.py
 

@@ -998,6 +998,7 @@ export async function makeTransport(
     const name: string = created.name ?? config.name ?? id;
     // The machine now exists on the cloud. If start/readiness fails, delete it
     // before propagating — otherwise it leaks (and bills) as an orphan.
+    let startError: string | undefined;
     try {
       // Best-effort start (cloud may auto-start; waitForReady is the gate).
       // A forkable golden boots with cloneable guest RAM (memfd) so it can later
@@ -1005,10 +1006,19 @@ export async function makeTransport(
       const startPath = `/v1/machines/${id}/start${config.forkable ? "?forkable=true" : ""}`;
       try {
         await cloudFetch(cloudConn, "POST", startPath);
-      } catch {
-        /* auto-start backends 4xx here — waitForReady decides readiness */
+      } catch (e) {
+        // waitForReady decides readiness; remember why start failed so a
+        // subsequent readiness failure can surface it (the machine record
+        // carries no error detail of its own).
+        startError = e instanceof Error ? e.message : String(e);
       }
-      await waitForReady(cloudConn, id);
+      try {
+        await waitForReady(cloudConn, id);
+      } catch (e) {
+        if (startError !== undefined && e instanceof SmolError)
+          throw new SmolError(e.code, `${e.message} (start failed: ${startError})`);
+        throw e;
+      }
     } catch (e) {
       await cloudFetch(cloudConn, "DELETE", `/v1/machines/${id}`).catch(
         () => {},
