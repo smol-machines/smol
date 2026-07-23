@@ -573,8 +573,12 @@ class CloudTransport implements Transport {
     // connect bridge — no tunnel, no public exposure. The server maps the guest
     // port to its node host-port (404 if the port isn't published, 503 if the
     // machine isn't started) and forwards WebSocket upgrades or plain HTTP.
-    const rel = path
-      ? `/v1/machines/${this.id}/connect/${port}/${path.replace(/^\/+/, "")}`
+    // Only append a sub-path when there's a non-empty segment: a bare "/" (or
+    // "") must stay `connect/<port>` (no trailing slash), which the control
+    // routes; `connect/<port>/` matches no route and 404s.
+    const sub = path.replace(/^\/+/, "");
+    const rel = sub
+      ? `/v1/machines/${this.id}/connect/${port}/${sub}`
       : `/v1/machines/${this.id}/connect/${port}`;
     return {
       httpUrl: `${this.conn.baseUrl}${rel}`,
