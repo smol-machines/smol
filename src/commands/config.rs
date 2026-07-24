@@ -66,7 +66,23 @@ fn validate_cloud_endpoint(value: &str) -> anyhow::Result<()> {
         return Ok(());
     }
     if let Some(rest) = lower.strip_prefix("http://") {
-        let host = rest.split(['/', ':']).next().unwrap_or("");
+        // Extract the host. A bracketed IPv6 literal (`[::1]`) must be pulled out
+        // whole: a plain split on ':' would shatter it, so the `[::1]`/`::1`
+        // arms below would never match and IPv6 loopback dev endpoints would be
+        // wrongly rejected. A malformed bracket (e.g. `[::1].evil.com`) falls
+        // through to the raw string, which matches no allowed host and is refused.
+        let host = if let Some(after) = rest.strip_prefix('[') {
+            match after.split_once(']') {
+                Some((inner, tail))
+                    if tail.is_empty() || tail.starts_with(':') || tail.starts_with('/') =>
+                {
+                    format!("[{inner}]")
+                }
+                _ => rest.to_string(),
+            }
+        } else {
+            rest.split(['/', ':']).next().unwrap_or("").to_string()
+        };
         if host == "localhost" || host == "127.0.0.1" || host == "[::1]" || host == "::1" {
             return Ok(());
         }
@@ -152,5 +168,23 @@ mod tests {
     fn missing_or_unknown_scheme_is_rejected() {
         assert!(validate_cloud_endpoint("api.example.com").is_err());
         assert!(validate_cloud_endpoint("ftp://example.com").is_err());
+    }
+
+    #[test]
+    fn http_ipv6_loopback_is_allowed_for_dev() {
+        // Bracketed IPv6 loopback must be accepted (was wrongly rejected when the
+        // host was extracted with a plain ':' split).
+        assert!(validate_cloud_endpoint("http://[::1]").is_ok());
+        assert!(validate_cloud_endpoint("http://[::1]:9090").is_ok());
+        assert!(validate_cloud_endpoint("http://[::1]/path").is_ok());
+    }
+
+    #[test]
+    fn http_ipv6_bracket_bypasses_are_rejected() {
+        // Non-loopback IPv6 and bracket-lookalikes must not be treated as loopback.
+        assert!(validate_cloud_endpoint("http://[dead::beef]").is_err());
+        assert!(validate_cloud_endpoint("http://[dead::beef]:9090").is_err());
+        assert!(validate_cloud_endpoint("http://[::1].evil.com").is_err());
+        assert!(validate_cloud_endpoint("http://[::1]@evil.com").is_err());
     }
 }
