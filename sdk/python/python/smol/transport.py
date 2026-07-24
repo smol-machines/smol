@@ -653,6 +653,26 @@ def _cli_config_api_key() -> Optional[str]:
     return None
 
 
+def _agent_reachable(base_url: str, api_key: str, machine_id: str) -> bool:
+    """Best-effort readiness probe: a trivial in-guest exec that only succeeds
+    once the agent is up. Used for machines with no published port, where the
+    ``ready`` flag never flips on control planes that gate readiness on a port
+    accepting a connection. Any failure (agent not up yet, transient) → not
+    ready; the caller keeps polling until this passes or the deadline hits."""
+    try:
+        _cloud_fetch(
+            base_url,
+            api_key,
+            "POST",
+            f"/v1/machines/{machine_id}/exec",
+            json_body={"command": ["sh", "-c", "true"]},
+            timeout=15.0,
+        )
+        return True
+    except SmolError:
+        return False
+
+
 def _wait_for_ready(
     base_url: str,
     api_key: str,
@@ -692,6 +712,14 @@ def _wait_for_ready(
         # Back-compat: `ready` absent entirely → old server, gate on state.
         if "ready" not in m and state in ("started", "running"):
             return
+        # A machine with NO published port never flips `ready` on control planes
+        # whose readiness gates on a port accepting a connection — it would hang
+        # the full timeout on the most basic create (a compute sandbox you only
+        # exec into). Confirm the guest agent is reachable directly (a trivial
+        # exec) and treat that as ready.
+        if state in ("started", "running") and not m.get("ports"):
+            if _agent_reachable(base_url, api_key, machine_id):
+                return
         if time.monotonic() >= deadline:
             raise SmolError("TIMEOUT", f"machine {machine_id} not ready after {timeout_s}s (state={state})")
         time.sleep(interval_s)

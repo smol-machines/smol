@@ -52,6 +52,7 @@ type MachineInfo = Schemas["MachineInfo"] & {
   ready?: boolean;
   readyAt?: string | null;
   url?: string | null;
+  ports?: { port: number; hostPort?: number | null }[] | null;
 };
 
 /** Raw exec result (the ergonomic wrapper is added in machine.ts). */
@@ -471,6 +472,23 @@ async function cloudFetch<T = unknown>(
   return (ct.includes("application/json") ? await res.json() : undefined) as T;
 }
 
+/** Best-effort readiness probe: a trivial in-guest exec that only succeeds once
+ *  the agent is up. Used for machines with no published port, where `ready`
+ *  never flips on control planes that gate readiness on a port accepting a
+ *  connection. Any failure (agent not up yet, transient) → not ready; the
+ *  caller keeps polling until this passes or the deadline hits. */
+async function agentReachable(conn: CloudConn, id: string): Promise<boolean> {
+  try {
+    await cloudFetch(conn, "POST", `/v1/machines/${id}/exec`, {
+      json: { command: ["sh", "-c", "true"] },
+      timeoutMs: 15_000,
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /** Poll a cloud machine until it is READY to do work; throw on error state or
  *  timeout. Mirrors the Python SDK's `_wait_for_ready`. Auth/not-found errors are
  *  fatal (re-thrown immediately); other errors are treated as transient booting.
@@ -519,6 +537,17 @@ async function waitForReady(
     }
     // Back-compat: `ready` absent entirely → old server, gate on state.
     if (m && m.ready === undefined && (state === "started" || state === "running"))
+      return;
+    // A machine with NO published port never flips `ready` on control planes
+    // whose readiness gates on a port accepting a connection — it would hang the
+    // full timeout on the most basic create (a compute sandbox you only exec
+    // into). Confirm the guest agent is reachable directly (a trivial exec) and
+    // treat that as ready.
+    if (
+      (state === "started" || state === "running") &&
+      !m?.ports?.length &&
+      (await agentReachable(conn, id))
+    )
       return;
     if (Date.now() >= deadline) {
       throw new SmolError(
