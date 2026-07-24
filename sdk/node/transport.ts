@@ -387,6 +387,10 @@ const DEFAULT_CLOUD_URL = "https://api.smolmachines.com";
 
 /** Default per-request timeout for cloud calls (ms). Override via opts.timeoutMs. */
 const CLOUD_TIMEOUT_MS = 30_000;
+// Grace before falling back to the guest-agent probe for a machine with no
+// published port: give `ready` time to flip first, so the probe stays a last
+// resort and never preempts a machine legitimately about to become ready.
+const NO_PORT_READY_PROBE_GRACE_MS = 2_000;
 
 /** Extra slack added on top of a command's own timeout when sizing the exec
  *  request timeout (ms), covering network round-trip and server-side overhead so
@@ -505,7 +509,8 @@ async function waitForReady(
   timeoutMs = 120_000,
   intervalMs = 1_000,
 ): Promise<void> {
-  const deadline = Date.now() + timeoutMs;
+  const start = Date.now();
+  const deadline = start + timeoutMs;
   for (;;) {
     let m: MachineInfo | undefined;
     try {
@@ -541,11 +546,13 @@ async function waitForReady(
     // A machine with NO published port never flips `ready` on control planes
     // whose readiness gates on a port accepting a connection — it would hang the
     // full timeout on the most basic create (a compute sandbox you only exec
-    // into). Confirm the guest agent is reachable directly (a trivial exec) and
-    // treat that as ready.
+    // into). After a grace (so `ready` can flip first and this never preempts a
+    // machine legitimately about to become ready), confirm the guest agent is
+    // reachable directly (a trivial exec) and treat that as ready.
     if (
       (state === "started" || state === "running") &&
       !m?.ports?.length &&
+      Date.now() - start >= NO_PORT_READY_PROBE_GRACE_MS &&
       (await agentReachable(conn, id))
     )
       return;

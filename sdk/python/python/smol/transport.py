@@ -37,6 +37,11 @@ from .types import (
 
 DEFAULT_CLOUD_URL = "https://api.smolmachines.com"
 CLOUD_TIMEOUT_S = 30.0
+# Grace before falling back to the guest-agent probe for a machine with no
+# published port: give the `ready` flag time to flip first, so the probe stays a
+# last resort and never preempts a machine that is legitimately about to become
+# ready (e.g. a published port that is still coming up).
+_NO_PORT_READY_PROBE_GRACE_S = 2.0
 # Extra slack added on top of a command's own timeout when sizing the exec HTTP
 # read timeout, covering network round-trip and server-side overhead so the
 # client never aborts before the server has had a chance to finish the command.
@@ -689,7 +694,8 @@ def _wait_for_ready(
     teardown race (works on a slow cold start, times out on a warm one). Older
     control planes omit ``ready``; there we fall back to the coarse
     ``started``/``running`` state so this never hangs against them."""
-    deadline = time.monotonic() + timeout_s
+    start = time.monotonic()
+    deadline = start + timeout_s
     while True:
         m: Optional[dict] = None
         try:
@@ -717,9 +723,13 @@ def _wait_for_ready(
         # the full timeout on the most basic create (a compute sandbox you only
         # exec into). Confirm the guest agent is reachable directly (a trivial
         # exec) and treat that as ready.
-        if state in ("started", "running") and not m.get("ports"):
-            if _agent_reachable(base_url, api_key, machine_id):
-                return
+        if (
+            state in ("started", "running")
+            and not m.get("ports")
+            and time.monotonic() - start >= _NO_PORT_READY_PROBE_GRACE_S
+            and _agent_reachable(base_url, api_key, machine_id)
+        ):
+            return
         if time.monotonic() >= deadline:
             raise SmolError("TIMEOUT", f"machine {machine_id} not ready after {timeout_s}s (state={state})")
         time.sleep(interval_s)
