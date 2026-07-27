@@ -70,7 +70,10 @@ class AsyncMachine:
         machine_id: str,
         conn: Optional[ConnectOptions] = None,
     ) -> "AsyncMachine":
-        """Attach to an EXISTING machine without creating a new one."""
+        """Attach to an EXISTING machine without creating a new one.
+
+        This does not wait for cloud readiness; await :meth:`wait_until_ready`
+        before doing work."""
         m = await asyncio.to_thread(Machine.connect, machine_id, conn)
         return cls(m)
 
@@ -80,7 +83,8 @@ class AsyncMachine:
         return self._m.name
 
     async def state(self) -> str:
-        """Current state, e.g. ``"running"`` / ``"stopped"``."""
+        """Current lifecycle state. Cloud ``"started"`` means the VM process
+        launched, not that it is ready for work."""
         return await asyncio.to_thread(self._m.state)
 
     async def ready(self) -> bool:

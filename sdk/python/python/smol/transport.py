@@ -37,6 +37,11 @@ from .types import (
 
 DEFAULT_CLOUD_URL = "https://api.smolmachines.com"
 CLOUD_TIMEOUT_S = 30.0
+# Grace before falling back to the guest-agent probe for a machine with no
+# published port: give the `ready` flag time to flip first, so the probe stays a
+# last resort and never preempts a machine that is legitimately about to become
+# ready (e.g. a published port that is still coming up).
+_NO_PORT_READY_PROBE_GRACE_S = 2.0
 # Extra slack added on top of a command's own timeout when sizing the exec HTTP
 # read timeout, covering network round-trip and server-side overhead so the
 # client never aborts before the server has had a chance to finish the command.
@@ -358,8 +363,12 @@ class CloudTransport:
         # guest port to its node host-port (404 if the port isn't published, 503
         # if the machine isn't started) and forwards WebSocket upgrades or HTTP.
         rel = f"/v1/machines/{self._id}/connect/{port}"
-        if path:
-            rel = f"{rel}/{path.lstrip('/')}"
+        # Only append a sub-path when there's a non-empty segment: a bare "/"
+        # (or "") must stay `connect/<port>` (no trailing slash), which the
+        # control routes; `connect/<port>/` matches no route and 404s.
+        sub = path.lstrip("/") if path else ""
+        if sub:
+            rel = f"{rel}/{sub}"
         ws_base = self._base
         if ws_base.startswith("http"):
             ws_base = "ws" + ws_base[len("http"):]
@@ -649,6 +658,26 @@ def _cli_config_api_key() -> Optional[str]:
     return None
 
 
+def _agent_reachable(base_url: str, api_key: str, machine_id: str) -> bool:
+    """Best-effort readiness probe: a trivial in-guest exec that only succeeds
+    once the agent is up. Used for machines with no published port, where the
+    ``ready`` flag never flips on control planes that gate readiness on a port
+    accepting a connection. Any failure (agent not up yet, transient) → not
+    ready; the caller keeps polling until this passes or the deadline hits."""
+    try:
+        _cloud_fetch(
+            base_url,
+            api_key,
+            "POST",
+            f"/v1/machines/{machine_id}/exec",
+            json_body={"command": ["sh", "-c", "true"]},
+            timeout=15.0,
+        )
+        return True
+    except SmolError:
+        return False
+
+
 def _wait_for_ready(
     base_url: str,
     api_key: str,
@@ -665,7 +694,8 @@ def _wait_for_ready(
     teardown race (works on a slow cold start, times out on a warm one). Older
     control planes omit ``ready``; there we fall back to the coarse
     ``started``/``running`` state so this never hangs against them."""
-    deadline = time.monotonic() + timeout_s
+    start = time.monotonic()
+    deadline = start + timeout_s
     while True:
         m: Optional[dict] = None
         try:
@@ -687,6 +717,18 @@ def _wait_for_ready(
             )
         # Back-compat: `ready` absent entirely → old server, gate on state.
         if "ready" not in m and state in ("started", "running"):
+            return
+        # A machine with NO published port never flips `ready` on control planes
+        # whose readiness gates on a port accepting a connection — it would hang
+        # the full timeout on the most basic create (a compute sandbox you only
+        # exec into). Confirm the guest agent is reachable directly (a trivial
+        # exec) and treat that as ready.
+        if (
+            state in ("started", "running")
+            and not m.get("ports")
+            and time.monotonic() - start >= _NO_PORT_READY_PROBE_GRACE_S
+            and _agent_reachable(base_url, api_key, machine_id)
+        ):
             return
         if time.monotonic() >= deadline:
             raise SmolError("TIMEOUT", f"machine {machine_id} not ready after {timeout_s}s (state={state})")

@@ -291,18 +291,28 @@ impl DeployCmd {
         }
 
         let started: cloud::CloudMachine = start_resp.json().await?;
-        eprintln!(
-            "Deployed: {} (id: {}, state: {})",
-            machine.name.as_deref().unwrap_or("-"),
-            machine.id,
-            started.state
-        );
-        // The app URL appears once the node reports the service port, typically
-        // a few seconds after start — poll for it briefly instead of telling the
-        // user to go look for it themselves.
+        if started.state == "started" {
+            eprintln!(
+                "VM launched: {} (id: {}, state: started)",
+                machine.name.as_deref().unwrap_or("-"),
+                machine.id,
+            );
+        } else {
+            eprintln!(
+                "Start accepted: {} (id: {}, state: {})",
+                machine.name.as_deref().unwrap_or("-"),
+                machine.id,
+                started.state
+            );
+        }
+        // `started` only confirms that the VM process launched. Poll the
+        // control plane's readiness signal; for this deployment's published
+        // port, ready also means the port is accepting connections.
+        let mut ready = started.ready == Some(true);
         let mut url = started.url.clone();
-        if url.is_none() {
-            eprintln!("Waiting for the app URL...");
+        let mut last_state = started.state.clone();
+        if !ready || url.is_none() {
+            eprintln!("Waiting until ready (guest agent and published port)...");
             for _ in 0..15 {
                 tokio::time::sleep(std::time::Duration::from_secs(2)).await;
                 let Ok(resp) = http
@@ -313,12 +323,28 @@ impl DeployCmd {
                     continue;
                 };
                 if let Ok(m) = resp.json::<cloud::CloudMachine>().await {
+                    last_state = m.state;
+                    ready = m.ready == Some(true);
                     if m.url.is_some() {
                         url = m.url;
+                    }
+                    if ready && url.is_some() {
+                        break;
+                    }
+                    if matches!(last_state.as_str(), "error" | "stopped" | "deleted") {
                         break;
                     }
                 }
             }
+        }
+        if ready {
+            eprintln!("Ready for work.");
+        } else {
+            eprintln!(
+                "VM launched, but readiness was not confirmed (state: {}). \
+                 Wait for ready=true before exec, connect, or expecting the app to respond.",
+                last_state
+            );
         }
         match url.as_deref() {
             Some(url) => {
@@ -339,8 +365,9 @@ impl DeployCmd {
             None => {
                 let who = machine.name.as_deref().unwrap_or(&machine.id);
                 eprintln!(
-                    "No URL yet (the port may still be starting) — check `smol machine ls`, or reach it now with \
-                     `smol machine exec --cloud --name {who}` / `smol machine shell --cloud --name {who}`."
+                    "No URL yet (the port may still be starting) — check `smol machine ls`. \
+                     After ready=true, use `smol machine exec --cloud --name {who}` / \
+                     `smol machine shell --cloud --name {who}`."
                 );
             }
         }

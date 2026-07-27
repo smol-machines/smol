@@ -265,7 +265,27 @@ impl StartCmd {
             match resp.status().as_u16() {
                 200 => {
                     let machine: super::cloud::CloudMachine = resp.json().await?;
-                    eprintln!("Machine {}: {}", id, machine.state);
+                    match machine.ready {
+                        Some(true) => {
+                            eprintln!("Machine {}: ready for work", id);
+                        }
+                        Some(false) if machine.state == "started" => {
+                            eprintln!(
+                                "Machine {}: VM launched (state: started); not ready for work yet",
+                                id
+                            );
+                            eprintln!(
+                                "  The guest agent is still starting; wait for ready=true before exec or connect."
+                            );
+                        }
+                        _ if machine.state == "started" => {
+                            eprintln!(
+                                "Machine {}: VM launched (state: started); readiness not reported",
+                                id
+                            );
+                        }
+                        _ => eprintln!("Machine {}: {}", id, machine.state),
+                    }
                     if let Some(url) = machine.url.as_deref() {
                         println!("{url}");
                     }

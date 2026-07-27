@@ -79,6 +79,12 @@ Global behavior:
 Cloud machines are also reachable through `smol machine …` with `--cloud` (or a
 `cloud/<name>` prefix); this group holds the cloud-only operations.
 
+For cloud machines, `state: "started"` means only that the VM process launched.
+It is **ready for work** only when `ready: true`: the guest agent is reachable
+and, when a port is published, that port is accepting connections. Cloud start
+and deploy output distinguishes these conditions; do not treat “VM launched” as
+permission to exec, connect, or expect the workload to respond.
+
 | Command | Description |
 |---------|-------------|
 | `smol cloud deploy --image <ref>` | Create + start a machine on the cloud cluster. Scope egress with `--allow-host`/`--allow-cidr`. |

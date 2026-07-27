@@ -20,6 +20,18 @@ from smol.transport import _cloud_fetch  # noqa: E402  (internal — asserts req
 MACHINE_ID = "mach-test123"
 CLONE_ID = "mach-clone456"
 captured: dict = {"hits": [], "create_body": None, "exec_body": None, "file": None}
+readiness_gets: dict[str, int] = {}
+
+
+def readiness_response(machine_id: str, ready_after: int, state: str = "started") -> dict:
+    readiness_gets[machine_id] = readiness_gets.get(machine_id, 0) + 1
+    ready = readiness_gets[machine_id] >= ready_after
+    return {
+        "id": machine_id,
+        "state": state,
+        "ready": ready,
+        "readyAt": "2026-07-22T20:01:41.152Z" if ready else None,
+    }
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -88,10 +100,16 @@ class Handler(BaseHTTPRequestHandler):
         if not self._auth_ok():
             return self._send(401, b"bad token")
         if self.path == f"/v1/machines/{MACHINE_ID}":
-            return self._send(200, json.dumps({
-                "id": MACHINE_ID, "state": "started",
-                "ready": True, "readyAt": "2026-07-22T20:01:41.152Z",
-            }).encode())
+            return self._send(200, json.dumps(readiness_response(MACHINE_ID, 2)).encode())
+        if self.path == "/v1/machines/mach-wait":
+            return self._send(200, json.dumps(readiness_response("mach-wait", 5)).encode())
+        if self.path == "/v1/machines/mach-timeout":
+            return self._send(200, json.dumps(readiness_response("mach-timeout", sys.maxsize)).encode())
+        if self.path == "/v1/machines/mach-stopped":
+            return self._send(
+                200,
+                json.dumps(readiness_response("mach-stopped", sys.maxsize, "stopped")).encode(),
+            )
         if self.path == f"/v1/machines/{CLONE_ID}":
             return self._send(200, json.dumps({"id": CLONE_ID, "state": "started", "ready": True}).encode())
         # The connect bridge: GET /v1/machines/:id/connect/:port[/rest]. Echo the
@@ -155,6 +173,8 @@ def main() -> int:
         check("create sends env as a plain map", cb.get("env") == {"FOO": "bar"}, str(cb.get("env")))
         check("create sends workdir", cb.get("workdir") == "/app", str(cb.get("workdir")))
         check("waited for ready (GET machine)", any(h.startswith(f"GET /v1/machines/{MACHINE_ID}") for h in captured["hits"]))
+        check("Machine.create() waited past started/ready=false",
+              readiness_gets.get(MACHINE_ID, 0) >= 2, str(readiness_gets.get(MACHINE_ID, 0)))
         check("name from response", m.name == "auto", m.name)
         check("forkable start passes ?forkable=true", "forkable=true" in captured.get("start_path", ""),
               captured.get("start_path"))
@@ -166,6 +186,51 @@ def main() -> int:
               m.ready_at() == "2026-07-22T20:01:41.152Z", str(m.ready_at()))
         m.wait_until_ready(timeout_s=2, interval_s=0.05)
         check("wait_until_ready() resolves on ready", True)
+
+        # connect() only attaches. A caller must explicitly wait, and "started"
+        # must not short-circuit the control plane's ready=False signal.
+        connected = Machine.connect(
+            "mach-wait", ConnectOptions(target="cloud", base_url=base, api_key="smk_testkey")
+        )
+        check("connected started machine is not yet usable",
+              connected.state() == "started" and connected.ready() is False)
+        before_wait = readiness_gets["mach-wait"]
+        connected.wait_until_ready(timeout_s=0.5, interval_s=0.01)
+        check("wait_until_ready() polls through started/ready=false",
+              readiness_gets["mach-wait"] - before_wait >= 2,
+              str(readiness_gets["mach-wait"] - before_wait))
+
+        never_ready = Machine.connect(
+            "mach-timeout", ConnectOptions(target="cloud", base_url=base, api_key="smk_testkey")
+        )
+        timeout_error = None
+        try:
+            never_ready.wait_until_ready(timeout_s=0.025, interval_s=0.005)
+        except SmolError as e:
+            timeout_error = e
+        timeout_message = str(timeout_error)
+        check("readiness timeout reports machine, state, and duration",
+              timeout_error is not None
+              and timeout_error.code == "TIMEOUT"
+              and "mach-timeout" in timeout_message
+              and "0.025s" in timeout_message
+              and "state=started" in timeout_message,
+              timeout_message)
+
+        stopped = Machine.connect(
+            "mach-stopped", ConnectOptions(target="cloud", base_url=base, api_key="smk_testkey")
+        )
+        terminal_error = None
+        try:
+            stopped.wait_until_ready(timeout_s=0.1, interval_s=0.005)
+        except SmolError as e:
+            terminal_error = e
+        terminal_message = str(terminal_error)
+        check("terminal state fails readiness with a useful error",
+              terminal_error is not None
+              and "mach-stopped" in terminal_message
+              and "stopped before becoming ready" in terminal_message,
+              terminal_message)
 
         # --- connect bridge: authed endpoint URL + request to a published port ---
         ep = m.endpoint(80)

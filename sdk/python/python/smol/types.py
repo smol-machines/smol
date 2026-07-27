@@ -18,7 +18,9 @@ __all__ = [
     "PortEndpoint",
 ]
 
-MachineState = str  # "created" | "running" | "stopped"
+# Lifecycle state. Cloud "started" means the VM process launched, not that the
+# guest agent or workload is ready; use ready()/wait_until_ready() before work.
+MachineState = str  # "created" | "started" | "running" | "stopped"
 
 
 @dataclass
@@ -70,6 +72,9 @@ class MountSpec:
 
 @dataclass
 class PortSpec:
+    """Host/guest port mapping. On cloud, readiness includes the published
+    guest port accepting connections."""
+
     host: int
     guest: int
 

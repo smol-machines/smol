@@ -21,13 +21,16 @@ with Machine.create(MachineConfig(resources=ResourceSpec(cpus=2, memory_mb=1024,
     m.write_file("/tmp/in.txt", "hi")
     print(m.read_file("/tmp/in.txt").decode())
 
-# Cloud (smolfleet) — same API, just point at the cloud.
+# Cloud (smolfleet) — create() waits until it is ready for work.
 from smol import ConnectOptions
-with Machine.create(
+m = Machine.create(
     MachineConfig(image="alpine:3.20"),
-    ConnectOptions(target="cloud", api_key="smk_…"),  # or set SMOL_CLOUD_TOKEN
-) as m:
-    print(m.exec(["echo", "hi"]).stdout)
+    ConnectOptions(target="cloud"),  # uses SMOL_CLOUD_TOKEN
+)
+try:
+    print(m.exec(["echo", "ready for work"]).stdout)
+finally:
+    m.delete()
 ```
 
 ### Async: `AsyncMachine` (non-blocking)
@@ -82,24 +85,33 @@ teardown race (works on a slow cold start, times out on a warm one). Gate on the
 unambiguous signal:
 
 ```python
-with Machine.create(
+m = Machine.create(
     MachineConfig(image="alpine:3.20", ports=[PortSpec(host=8080, guest=8080)]),
     ConnectOptions(target="cloud"),
-) as m:
-    m.wait_until_ready()           # create() already waited; re-assert if reconnecting
-    print(m.ready(), m.ready_at())
-
+)
+try:
+    # create() already waited: the guest agent is reachable and the published
+    # port is accepting connections.
     # Reach a service INSIDE the vm through the authenticated connect bridge —
     # no Cloudflare/localhost.run tunnel, no public exposure, no egress allow-list.
     # Have the worker LISTEN on a published port and connect *inbound*:
     print(m.request(8080, "healthz").decode())     # authed HTTP to the guest port
     ep = m.endpoint(8080, "/socket")               # or build a ws:// url for your ws client
     # websocket.connect(ep.ws_url, additional_headers=ep.headers)
+finally:
+    m.delete()
+
+# Machine.connect() intentionally does not wait for readiness:
+existing = Machine.connect(machine_id, ConnectOptions(target="cloud"))
+existing.wait_until_ready()
 ```
 
 ## API
 - `Machine` (sync) / `AsyncMachine` (awaitable, non-blocking) — identical surface; see the async example above.
-- `Machine.create(config=None, conn=None)` — create and start a machine.
+- `Machine.create(config=None, conn=None)` — create and start a machine; cloud
+  waits for `ready is True` before returning.
+- `Machine.connect(machine_id, conn=None)` — attach without waiting; call
+  `wait_until_ready()` before use.
 - `machine.exec(command, opts=None)` / `machine.run(image, command, opts=None)` → `ExecResult`
 - `machine.read_file(path)` → `bytes` / `machine.write_file(path, data, mode=None)`
 - `machine.ready()` / `machine.ready_at()` / `machine.wait_until_ready(timeout_s=120, interval_s=1)`  *(cloud)*

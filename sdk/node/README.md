@@ -15,12 +15,18 @@ the backend is chosen by `ConnectOptions`:
 // Local (embedded, default) — no server, no config:
 const local = await Machine.create({ resources: { cpus: 2, memoryMb: 1024 } });
 
-// Cloud (smolfleet) — pass an API key, or set SMOL_CLOUD_TOKEN (e.g. via `smol login`):
+// Cloud (smolfleet) — pass an API key, or set SMOL_CLOUD_TOKEN.
 const cloud = await Machine.create(
   { image: 'python:3.12' },
-  { target: 'cloud', apiKey: process.env.SMOL_CLOUD_TOKEN },
+  { target: 'cloud' }, // uses SMOL_CLOUD_TOKEN
 );
-const res = await cloud.exec(['python', '-c', 'print(40 + 2)']);
+try {
+  // create() returned only after the guest agent became reachable.
+  const res = await cloud.exec(['python', '-c', 'print(40 + 2)']);
+  console.log(res.stdout);
+} finally {
+  await cloud.delete();
+}
 ```
 
 Cloud-only gaps (`run`, `execStream`, `pullImage`, `listImages`) throw `NotSupportedError`;
@@ -38,10 +44,18 @@ teardown race (works on a slow cold start, times out on a warm one). Gate on the
 unambiguous signal:
 
 ```ts
-const m = await Machine.create({ image, ports: [{ host: 8080, guest: 8080 }] },
-                               { target: 'cloud' });
-await m.waitUntilReady();          // create() already waited; re-assert if reconnecting
-console.log(await m.ready(), await m.readyAt());
+const m = await Machine.create(
+  { image, ports: [{ host: 8080, guest: 8080 }] },
+  { target: 'cloud' },
+);
+try {
+  // create() has already waited: the guest agent is reachable and the
+  // published port is accepting connections.
+  const res = await m.fetch(8080, '/healthz');
+  console.log(await res.text());
+} finally {
+  await m.delete();
+}
 ```
 
 To reach a service **inside** the VM, use the authenticated connect bridge —
@@ -49,11 +63,12 @@ To reach a service **inside** the VM, use the authenticated connect bridge —
 Have the worker LISTEN on a published port and connect *inbound*:
 
 ```ts
-// HTTP to a published guest port:
-const res = await m.fetch(8080, '/healthz');
+// Machine.connect() does not wait. Explicitly gate a pre-existing machine:
+const existing = await Machine.connect(machineId, { target: 'cloud' });
+await existing.waitUntilReady();
 
 // Or a WebSocket, using your own ws client with the authed endpoint:
-const { wsUrl, headers } = m.endpoint(8080, '/socket');
+const { wsUrl, headers } = existing.endpoint(8080, '/socket');
 const ws = new WebSocket(wsUrl, { headers });   // e.g. the `ws` package
 ```
 
@@ -89,12 +104,18 @@ try {
 
 ## API
 
-- `Machine.create(config?, conn?)` — create and start a machine.
+- `Machine.create(config?, conn?)` — create and start a machine; cloud waits for
+  `ready === true` before returning.
+- `Machine.connect(id, conn?)` — attach to an existing machine without waiting;
+  call `waitUntilReady()` before use.
+- `machine.ready()` / `machine.readyAt()` /
+  `machine.waitUntilReady({ timeoutMs, intervalMs })` *(cloud)*.
 - `machine.exec(command, opts?)` / `machine.run(image, command, opts?)` → `ExecResult`.
 - `machine.execStream(command, opts?)` → `AsyncGenerator<ExecEvent>`.
 - `machine.readFile(path)` / `machine.writeFile(path, data, mode?)`.
 - `machine.pullImage(image)` / `machine.listImages()`.
-- `machine.stop()` / `machine.delete()` / `await machine.state()` → `"running" | "stopped"`.
+- `machine.stop()` / `machine.delete()` / `await machine.state()`. Cloud
+  `"started"` means VM launched, not ready for work.
 
 Errors are typed: `SmolError` (with `.code`), `ExecutionError`, `NotSupportedError`, `InvalidConfigError`.
 

@@ -20,7 +20,15 @@ pub struct CloudMachine {
     // A single null name must not break parsing the whole list.
     #[serde(default)]
     pub name: Option<String>,
+    /// Lifecycle state. In particular, `started` means the VM process launched;
+    /// it does not imply that the guest agent or workload is ready.
     pub state: String,
+    /// True once the guest agent is reachable and any published port accepts
+    /// connections. This, rather than `state == "started"`, means ready for work.
+    #[serde(default)]
+    pub ready: Option<bool>,
+    #[serde(default)]
+    pub ready_at: Option<String>,
     pub source: Option<CloudMachineSource>,
     pub resources: Option<CloudMachineResources>,
     pub network: Option<CloudMachineNetwork>,
@@ -297,6 +305,8 @@ mod tests {
             "id": "mach-xxx",
             "name": "test",
             "state": "started",
+            "ready": false,
+            "readyAt": null,
             "source": {"type": "image", "reference": "alpine"},
             "resources": {"cpus": 1, "memoryMb": 256, "diskGb": null},
             "network": {"mode": "blocked"},
@@ -309,6 +319,8 @@ mod tests {
         assert_eq!(m.id, "mach-xxx");
         assert_eq!(m.name.as_deref(), Some("test"));
         assert_eq!(m.state, "started");
+        assert_eq!(m.ready, Some(false));
+        assert_eq!(m.ready_at, None);
 
         let source = m.source.unwrap();
         assert_eq!(source.source_type, "image");
@@ -333,6 +345,7 @@ mod tests {
         assert_eq!(m.id, "mach-1");
         assert_eq!(m.name.as_deref(), Some("bare"));
         assert_eq!(m.state, "stopped");
+        assert_eq!(m.ready, None);
         assert!(m.source.is_none());
         assert!(m.resources.is_none());
         assert!(m.network.is_none());

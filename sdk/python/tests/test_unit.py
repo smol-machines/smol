@@ -43,6 +43,22 @@ def test_encode_path_escapes_unsafe():
     assert _encode_path("/a/100%done") == "/a/100%25done"
 
 
+def test_connect_bridge_root_path_has_no_trailing_slash():
+    from smol.transport import CloudTransport
+
+    c = CloudTransport("https://x", "smk_k", "mID", "n")
+    base = "https://x/v1/machines/mID/connect/8080"
+    # A bare root ("/", "", or no path) must NOT add a trailing slash — the
+    # control routes `connect/<port>` but `connect/<port>/` matches no route.
+    assert c.endpoint(8080).http_url == base
+    assert c.endpoint(8080, "/").http_url == base
+    assert c.endpoint(8080, "").http_url == base
+    # A real sub-path is appended (leading slashes stripped, no double slash).
+    assert c.endpoint(8080, "/index.html").http_url == base + "/index.html"
+    assert c.endpoint(8080, "index.html").http_url == base + "/index.html"
+    assert c.endpoint(8080, "//a/b").http_url == base + "/a/b"
+
+
 def test_exec_result_helpers():
     ok = ExecResult(exit_code=0, stdout="hi\n", stderr="")
     assert ok.success is True

@@ -52,6 +52,7 @@ type MachineInfo = Schemas["MachineInfo"] & {
   ready?: boolean;
   readyAt?: string | null;
   url?: string | null;
+  ports?: { port: number; hostPort?: number | null }[] | null;
 };
 
 /** Raw exec result (the ergonomic wrapper is added in machine.ts). */
@@ -386,6 +387,10 @@ const DEFAULT_CLOUD_URL = "https://api.smolmachines.com";
 
 /** Default per-request timeout for cloud calls (ms). Override via opts.timeoutMs. */
 const CLOUD_TIMEOUT_MS = 30_000;
+// Grace before falling back to the guest-agent probe for a machine with no
+// published port: give `ready` time to flip first, so the probe stays a last
+// resort and never preempts a machine legitimately about to become ready.
+const NO_PORT_READY_PROBE_GRACE_MS = 2_000;
 
 /** Extra slack added on top of a command's own timeout when sizing the exec
  *  request timeout (ms), covering network round-trip and server-side overhead so
@@ -471,6 +476,23 @@ async function cloudFetch<T = unknown>(
   return (ct.includes("application/json") ? await res.json() : undefined) as T;
 }
 
+/** Best-effort readiness probe: a trivial in-guest exec that only succeeds once
+ *  the agent is up. Used for machines with no published port, where `ready`
+ *  never flips on control planes that gate readiness on a port accepting a
+ *  connection. Any failure (agent not up yet, transient) → not ready; the
+ *  caller keeps polling until this passes or the deadline hits. */
+async function agentReachable(conn: CloudConn, id: string): Promise<boolean> {
+  try {
+    await cloudFetch(conn, "POST", `/v1/machines/${id}/exec`, {
+      json: { command: ["sh", "-c", "true"] },
+      timeoutMs: 15_000,
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /** Poll a cloud machine until it is READY to do work; throw on error state or
  *  timeout. Mirrors the Python SDK's `_wait_for_ready`. Auth/not-found errors are
  *  fatal (re-thrown immediately); other errors are treated as transient booting.
@@ -487,7 +509,8 @@ async function waitForReady(
   timeoutMs = 120_000,
   intervalMs = 1_000,
 ): Promise<void> {
-  const deadline = Date.now() + timeoutMs;
+  const start = Date.now();
+  const deadline = start + timeoutMs;
   for (;;) {
     let m: MachineInfo | undefined;
     try {
@@ -519,6 +542,19 @@ async function waitForReady(
     }
     // Back-compat: `ready` absent entirely → old server, gate on state.
     if (m && m.ready === undefined && (state === "started" || state === "running"))
+      return;
+    // A machine with NO published port never flips `ready` on control planes
+    // whose readiness gates on a port accepting a connection — it would hang the
+    // full timeout on the most basic create (a compute sandbox you only exec
+    // into). After a grace (so `ready` can flip first and this never preempts a
+    // machine legitimately about to become ready), confirm the guest agent is
+    // reachable directly (a trivial exec) and treat that as ready.
+    if (
+      (state === "started" || state === "running") &&
+      !m?.ports?.length &&
+      Date.now() - start >= NO_PORT_READY_PROBE_GRACE_MS &&
+      (await agentReachable(conn, id))
+    )
       return;
     if (Date.now() >= deadline) {
       throw new SmolError(
@@ -573,8 +609,12 @@ class CloudTransport implements Transport {
     // connect bridge — no tunnel, no public exposure. The server maps the guest
     // port to its node host-port (404 if the port isn't published, 503 if the
     // machine isn't started) and forwards WebSocket upgrades or plain HTTP.
-    const rel = path
-      ? `/v1/machines/${this.id}/connect/${port}/${path.replace(/^\/+/, "")}`
+    // Only append a sub-path when there's a non-empty segment: a bare "/" (or
+    // "") must stay `connect/<port>` (no trailing slash), which the control
+    // routes; `connect/<port>/` matches no route and 404s.
+    const sub = path.replace(/^\/+/, "");
+    const rel = sub
+      ? `/v1/machines/${this.id}/connect/${port}/${sub}`
       : `/v1/machines/${this.id}/connect/${port}`;
     return {
       httpUrl: `${this.conn.baseUrl}${rel}`,

@@ -83,8 +83,14 @@ try {
 // Cloud: same API, just point at smolfleet.
 const c = await Machine.create(
   { image: 'alpine:3.20' },
-  { target: 'cloud', apiKey: process.env.SMOL_CLOUD_TOKEN },
+  { target: 'cloud' }, // uses SMOL_CLOUD_TOKEN
 );
+try {
+  // create() waits for "ready"; cloud state "started" only means VM launched.
+  console.log((await c.exec(['echo', 'ready for work'])).stdout);
+} finally {
+  await c.delete();
+}
 ```
 
 ## Quickstart — Python
@@ -97,12 +103,16 @@ with Machine.create(MachineConfig(resources=ResourceSpec(cpus=2, memory_mb=1024,
     r = m.run("python:3.12", ["python", "-c", "print(2 ** 10)"]).assert_success()
     print(r.stdout)                  # 1024
 
-# Cloud — same API.
-with Machine.create(
+# Cloud — create() waits until the guest agent is reachable. A cloud state of
+# "started" means only that the VM launched, not that it is ready for work.
+m = Machine.create(
     MachineConfig(image="alpine:3.20"),
-    ConnectOptions(target="cloud", api_key="smk_…"),  # or set SMOL_CLOUD_TOKEN
-) as m:
-    print(m.exec(["echo", "hi"]).stdout)
+    ConnectOptions(target="cloud"),  # uses SMOL_CLOUD_TOKEN
+)
+try:
+    print(m.exec(["echo", "ready for work"]).stdout)
+finally:
+    m.delete()
 ```
 
 ## Quickstart — CLI

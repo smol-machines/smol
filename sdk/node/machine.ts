@@ -53,7 +53,10 @@ export class Machine {
   private constructor(private readonly transport: Transport) {}
 
   /**
-   * Create and start a machine.
+   * Create and start a machine. On the cloud target, this does not return until
+   * the machine is ready for work: the guest agent is reachable and any
+   * published port is accepting connections. A cloud state of `"started"`
+   * alone means only that the VM process launched.
    *
    * @param config  machine configuration (a name is generated if omitted; `image`
    *                is the base image — required for cloud, optional for local)
@@ -72,6 +75,8 @@ export class Machine {
    *  - local (default): re-opens a persisted machine by NAME, starting it if
    *    stopped — pairs with `Machine.create({ name, … }, …)` + `persistent`.
    *  - cloud: looks up the machine by id; throws if it doesn't exist.
+   *    This does not wait for readiness; call `waitUntilReady()` before `exec`,
+   *    using a connect endpoint, or expecting the workload to respond.
    *
    * @param id    local machine name, or cloud machine id (`mach-…`)
    * @param conn  backend selection (local by default; cloud via `{ target: 'cloud', apiKey }` or `SMOL_CLOUD_TOKEN`)
@@ -88,7 +93,9 @@ export class Machine {
     return this.transport.name;
   }
 
-  /** Current state (e.g. "running" | "stopped"). */
+  /** Current lifecycle state. On cloud, `"started"` means only that the VM
+   *  process launched; it does not mean the guest or workload is ready. Use
+   *  `ready()` or `waitUntilReady()` before doing work. */
   state(): Promise<string> {
     return this.transport.state();
   }

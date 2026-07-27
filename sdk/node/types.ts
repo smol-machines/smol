@@ -1,8 +1,10 @@
 /** Public types for the `smol` SDK. Backend-agnostic; mapped to the native
  *  addon (local) or, in a later phase, the cloud REST API. */
 
-/** Lifecycle state of a machine. */
-export type MachineState = "created" | "running" | "stopped";
+/** Lifecycle state of a machine. Cloud `"started"` means the VM process
+ * launched, not that the guest agent or workload is ready; use `ready()` or
+ * `waitUntilReady()` before doing work. */
+export type MachineState = "created" | "started" | "running" | "stopped";
 
 /** CPU / memory / disk / network allocation for a machine. */
 export interface ResourceSpec {
@@ -67,7 +69,9 @@ export interface MachineConfig {
   image?: string;
   /** Host directories to mount. (local) */
   mounts?: MountSpec[];
-  /** Port mappings. (local) */
+  /** Port mappings. On cloud, the guest port is published and the control plane
+   *  allocates the host port; readiness includes that published port accepting
+   *  connections. */
   ports?: PortSpec[];
   /** Resource allocation. */
   resources?: ResourceSpec;
@@ -170,7 +174,7 @@ export interface PortEndpoint {
 
 /** Selects and configures the backend. Local (embedded) is the default. */
 export interface ConnectOptions {
-  /** 'local' = embedded engine (default). 'cloud' = remote (not yet implemented). */
+  /** 'local' = embedded engine (default). 'cloud' = smolfleet remote. */
   target?: "local" | "cloud";
   /** Cloud base URL (cloud target only). */
   baseUrl?: string;

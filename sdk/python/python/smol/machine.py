@@ -43,6 +43,11 @@ class Machine:
     ) -> "Machine":
         """Create and start a machine.
 
+        On the cloud target, this does not return until the machine is ready for
+        work: the guest agent is reachable and any published port is accepting
+        connections. Cloud state ``"started"`` alone means only that the VM
+        process launched.
+
         :param config: machine configuration (a name is generated if omitted;
             ``image`` is required for the cloud target, optional for local).
         :param conn: backend selection (local embedded by default).
@@ -63,6 +68,10 @@ class Machine:
           persistent=True)``.
         * cloud: looks up the machine by id; raises if it doesn't exist.
 
+          This does not wait for readiness; call :meth:`wait_until_ready`
+          before ``exec``, using a connect endpoint, or expecting the workload
+          to respond.
+
         :param machine_id: local machine name, or cloud machine id (``mach-…``).
         :param conn: backend selection (local by default; cloud via
             ``ConnectOptions(target='cloud', api_key=…)`` or ``SMOL_CLOUD_TOKEN``).
@@ -75,7 +84,9 @@ class Machine:
         return self._t.name
 
     def state(self) -> str:
-        """Current state, e.g. ``"running"`` / ``"stopped"``."""
+        """Current lifecycle state. On cloud, ``"started"`` means only that the
+        VM process launched; use :meth:`ready` or :meth:`wait_until_ready`
+        before doing work."""
         return self._t.state()
 
     def ready(self) -> bool:

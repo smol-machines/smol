@@ -9,7 +9,7 @@
 
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
-import { Machine, NotSupportedError } from "../index";
+import { Machine, NotSupportedError, SmolError } from "../index";
 
 let passed = 0;
 let failed = 0;
@@ -26,6 +26,18 @@ const check = (label: string, ok: boolean, detail = "") => {
 // --- in-memory mock cloud ---
 const seen: any = { auth: null, execBody: null };
 const files = new Map<string, Buffer>();
+const readinessGets: Record<string, number> = {};
+
+function readinessResponse(id: string, readyAfter: number, state = "started") {
+  readinessGets[id] = (readinessGets[id] ?? 0) + 1;
+  return {
+    id,
+    state,
+    ready: readinessGets[id] >= readyAfter,
+    readyAt:
+      readinessGets[id] >= readyAfter ? "2026-07-22T20:01:41.152Z" : null,
+  };
+}
 
 function readBody(req: any): Promise<Buffer> {
   return new Promise((resolve) => {
@@ -53,7 +65,7 @@ const server = createServer(async (req, res) => {
   }
   if (method === "POST" && url.startsWith("/v1/machines/m1/start")) {
     seen.startUrl = url;
-    return json(200, { state: "running" });
+    return json(200, { state: "started", ready: false });
   }
   if (method === "POST" && url === "/v1/machines/m1/fork") {
     seen.forkBody = JSON.parse((await readBody(req)).toString() || "{}");
@@ -70,12 +82,13 @@ const server = createServer(async (req, res) => {
     });
   }
   if (method === "GET" && url === "/v1/machines/m1")
-    return json(200, {
-      id: "m1",
-      state: "started",
-      ready: true,
-      readyAt: "2026-07-22T20:01:41.152Z",
-    });
+    return json(200, readinessResponse("m1", 2));
+  if (method === "GET" && url === "/v1/machines/m-wait")
+    return json(200, readinessResponse("m-wait", 5));
+  if (method === "GET" && url === "/v1/machines/m-timeout")
+    return json(200, readinessResponse("m-timeout", Number.POSITIVE_INFINITY));
+  if (method === "GET" && url === "/v1/machines/m-stopped")
+    return json(200, readinessResponse("m-stopped", Number.POSITIVE_INFINITY, "stopped"));
   // The connect bridge: GET /v1/machines/:id/connect/:port[/rest]. Echo the
   // path + auth so the SDK's endpoint()/fetch() wiring can be asserted.
   if (method === "GET" && url.startsWith("/v1/machines/m1/connect/")) {
@@ -139,6 +152,11 @@ async function main(): Promise<void> {
   );
   check("created via cloud (name from API)", m.name === "cloud-test", m.name);
   check(
+    "Machine.create() waited past started/ready=false",
+    readinessGets.m1 >= 2,
+    `${readinessGets.m1} readiness GET(s)`,
+  );
+  check(
     "create sends env as a plain map + workdir",
     JSON.stringify(seen.createBody?.env) === JSON.stringify({ FOO: "bar" }) &&
       seen.createBody?.workdir === "/app",
@@ -164,6 +182,65 @@ async function main(): Promise<void> {
     "forkable start passes ?forkable=true",
     String(seen.startUrl ?? "").includes("forkable=true"),
     String(seen.startUrl),
+  );
+
+  // Machine.connect() only attaches. Its caller must explicitly wait, and a
+  // lifecycle state of "started" must not short-circuit ready=false.
+  const connected = await Machine.connect("m-wait", {
+    target: "cloud",
+    baseUrl,
+    apiKey: "smk_test123",
+  });
+  check(
+    "connected started machine is not yet usable",
+    (await connected.state()) === "started" && (await connected.ready()) === false,
+  );
+  const beforeWait = readinessGets["m-wait"];
+  await connected.waitUntilReady({ timeoutMs: 500, intervalMs: 10 });
+  check(
+    "waitUntilReady() polls through started/ready=false",
+    readinessGets["m-wait"] - beforeWait >= 2,
+    `${readinessGets["m-wait"] - beforeWait} readiness GET(s)`,
+  );
+
+  const neverReady = await Machine.connect("m-timeout", {
+    target: "cloud",
+    baseUrl,
+    apiKey: "smk_test123",
+  });
+  let timeoutError: unknown;
+  try {
+    await neverReady.waitUntilReady({ timeoutMs: 25, intervalMs: 5 });
+  } catch (e) {
+    timeoutError = e;
+  }
+  check(
+    "readiness timeout reports machine, state, and duration",
+    timeoutError instanceof SmolError &&
+      timeoutError.code === "TIMEOUT" &&
+      timeoutError.message.includes("m-timeout") &&
+      timeoutError.message.includes("25ms") &&
+      timeoutError.message.includes("state=started"),
+    String(timeoutError),
+  );
+
+  const stopped = await Machine.connect("m-stopped", {
+    target: "cloud",
+    baseUrl,
+    apiKey: "smk_test123",
+  });
+  let terminalError: unknown;
+  try {
+    await stopped.waitUntilReady({ timeoutMs: 100, intervalMs: 5 });
+  } catch (e) {
+    terminalError = e;
+  }
+  check(
+    "terminal state fails readiness with a useful error",
+    terminalError instanceof SmolError &&
+      terminalError.message.includes("m-stopped") &&
+      terminalError.message.includes("stopped before becoming ready"),
+    String(terminalError),
   );
 
   // --- connect bridge: authed endpoint URL + fetch to a published guest port ---
