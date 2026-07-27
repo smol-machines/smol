@@ -73,7 +73,8 @@ pub struct PackCreateCmd {
     #[arg(long = "oci-platform", value_name = "OS/ARCH")]
     pub oci_platform: Option<String>,
 
-    /// Override image entrypoint
+    /// Override the image entrypoint. A command string, shell-split into argv
+    /// (e.g. `--entrypoint "python3 -m http.server 8080"`).
     #[arg(long, value_name = "CMD")]
     pub entrypoint: Option<String>,
 
@@ -315,7 +316,7 @@ impl PackCreateCmd {
                     entrypoint: self
                         .entrypoint
                         .as_ref()
-                        .map(|e| vec![e.clone()])
+                        .map(|e| split_command(e))
                         .unwrap_or_default(),
                     cmd: vec![],
                     cpus: self.cpus,
@@ -332,7 +333,7 @@ impl PackCreateCmd {
         let image = self.image.clone().or(sf.image);
 
         let entrypoint = if let Some(ref ep) = self.entrypoint {
-            vec![ep.clone()]
+            split_command(ep)
         } else if !artifact.entrypoint.is_empty() {
             artifact.entrypoint
         } else {
@@ -573,6 +574,62 @@ struct PackConfig {
 }
 
 /// Apply Smolfile/CLI overrides to the pack manifest.
+/// Split a command string into argv tokens, honoring single/double quotes so a
+/// multi-word `--entrypoint "python3 -m http.server 8080"` is stored as a real
+/// argv vector (`["python3", "-m", "http.server", "8080"]`) instead of a single
+/// token the guest would try to exec as one binary name (which fails ENOENT and
+/// leaves the workload dead). A single-word value returns unchanged.
+fn split_command(s: &str) -> Vec<String> {
+    let mut args = Vec::new();
+    let mut cur = String::new();
+    let mut has_token = false;
+    let mut in_single = false;
+    let mut in_double = false;
+    let mut chars = s.chars().peekable();
+    while let Some(c) = chars.next() {
+        match c {
+            '\'' if !in_double => {
+                in_single = !in_single;
+                has_token = true;
+            }
+            '"' if !in_single => {
+                in_double = !in_double;
+                has_token = true;
+            }
+            '\\' if in_double => match chars.peek() {
+                Some('"') | Some('\\') => {
+                    cur.push(chars.next().unwrap());
+                    has_token = true;
+                }
+                _ => {
+                    cur.push('\\');
+                    has_token = true;
+                }
+            },
+            '\\' if !in_single => {
+                if let Some(next) = chars.next() {
+                    cur.push(next);
+                    has_token = true;
+                }
+            }
+            c if c.is_whitespace() && !in_single && !in_double => {
+                if has_token {
+                    args.push(std::mem::take(&mut cur));
+                    has_token = false;
+                }
+            }
+            c => {
+                cur.push(c);
+                has_token = true;
+            }
+        }
+    }
+    if has_token {
+        args.push(cur);
+    }
+    args
+}
+
 fn apply_pack_overrides(manifest: &mut PackManifest, config: &PackConfig) {
     // Layer env overrides (dedup by key)
     for e in &config.env {
@@ -639,5 +696,45 @@ fn export_layer(
                 anyhow::bail!("unexpected response type during layer export");
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod split_command_tests {
+    use super::split_command;
+
+    fn v(parts: &[&str]) -> Vec<String> {
+        parts.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn splits_multiword_entrypoint() {
+        assert_eq!(
+            split_command("python3 -m http.server 8080"),
+            v(&["python3", "-m", "http.server", "8080"])
+        );
+    }
+
+    #[test]
+    fn single_token_unchanged() {
+        assert_eq!(split_command("nginx"), v(&["nginx"]));
+    }
+
+    #[test]
+    fn honors_quotes() {
+        assert_eq!(
+            split_command("sh -c 'echo hi there'"),
+            v(&["sh", "-c", "echo hi there"])
+        );
+        assert_eq!(
+            split_command("sh -c \"echo hi there\""),
+            v(&["sh", "-c", "echo hi there"])
+        );
+    }
+
+    #[test]
+    fn collapses_whitespace_and_trims() {
+        assert_eq!(split_command("  a   b  "), v(&["a", "b"]));
+        assert!(split_command("").is_empty());
     }
 }
