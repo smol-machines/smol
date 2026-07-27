@@ -579,7 +579,7 @@ struct PackConfig {
 /// argv vector (`["python3", "-m", "http.server", "8080"]`) instead of a single
 /// token the guest would try to exec as one binary name (which fails ENOENT and
 /// leaves the workload dead). A single-word value returns unchanged.
-fn split_command(s: &str) -> Vec<String> {
+pub(crate) fn split_command(s: &str) -> Vec<String> {
     let mut args = Vec::new();
     let mut cur = String::new();
     let mut has_token = false;

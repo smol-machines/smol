@@ -1,6 +1,7 @@
 //! smol deploy — deploy a .smolmachine artifact to smolfleet.
 
 use super::cloud;
+use crate::commands::pack::split_command;
 use clap::Args;
 use std::path::PathBuf;
 
@@ -77,6 +78,12 @@ pub struct DeployCmd {
     /// host at deploy time (repeatable)
     #[arg(long = "secret-file", value_name = "GUEST_VAR=/abs/path")]
     pub secret_file: Vec<String>,
+
+    /// Command to run on start, overriding the source image's own entrypoint/cmd
+    /// so an off-the-shelf image can be told what to serve (e.g.
+    /// `--command "python3 -m http.server 8080"`). Shell-split into argv.
+    #[arg(long, value_name = "CMD")]
+    pub command: Option<String>,
 }
 
 /// Sync-resolved inputs for the push step. Resolved outside the runtime so
@@ -224,7 +231,7 @@ impl DeployCmd {
         )?);
         let env: std::collections::BTreeMap<String, String> = env_pairs.into_iter().collect();
 
-        let body = serde_json::json!({
+        let mut body = serde_json::json!({
             "name": name,
             "source": source,
             "resources": {
@@ -240,6 +247,11 @@ impl DeployCmd {
             "ports": [{ "port": self.port }],
             "public": self.public,
         });
+        // Optional command override, shell-split into argv. Omitted when unset so
+        // the machine runs the source image's/artifact's own entrypoint (default).
+        if let Some(cmd) = &self.command {
+            body["command"] = serde_json::json!(split_command(cmd));
+        }
 
         eprintln!("Deploying {} to {}...", reference, endpoint);
 
