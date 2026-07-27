@@ -34,10 +34,33 @@ impl ConfigCmd {
     }
 }
 
+/// Which setting a `config set <key>` writes.
+#[derive(Debug, PartialEq, Eq)]
+enum ConfigTarget {
+    Endpoint,
+    ApiKey,
+}
+
+/// Map a user-supplied key to the setting it writes.
+///
+/// The dotted spellings are the ones the tool itself shows: `config show` prints
+/// `cloud.endpoint` / `cloud.api_key`, and `auth status` instructs
+/// `smol config set cloud.api_key smk_…`. Accepting only the bare names made the
+/// tool's own printed command fail with "unknown config key".
+fn resolve_config_key(key: &str) -> Option<ConfigTarget> {
+    match key {
+        "cloud" | "cloud.endpoint" | "endpoint" => Some(ConfigTarget::Endpoint),
+        "api_key" | "apikey" | "api-key" | "cloud.api_key" | "cloud.apikey" | "cloud.api-key" => {
+            Some(ConfigTarget::ApiKey)
+        }
+        _ => None,
+    }
+}
+
 impl ConfigSetCmd {
     pub fn run(self) -> anyhow::Result<()> {
-        match self.key.as_str() {
-            "cloud" => {
+        match resolve_config_key(&self.key) {
+            Some(ConfigTarget::Endpoint) => {
                 validate_cloud_endpoint(&self.value)?;
                 let mut settings = SmolSettings::load()?;
                 settings.cloud.endpoint = Some(self.value.clone());
@@ -45,14 +68,18 @@ impl ConfigSetCmd {
                 eprintln!("Cloud endpoint set to: {}", self.value);
                 Ok(())
             }
-            "api_key" | "apikey" | "api-key" => {
+            Some(ConfigTarget::ApiKey) => {
                 let mut settings = SmolSettings::load()?;
                 settings.cloud.api_key = Some(self.value.clone());
                 settings.save()?;
                 eprintln!("API key configured.");
                 Ok(())
             }
-            other => anyhow::bail!("unknown config key: '{}'. Available: cloud, api_key", other),
+            None => anyhow::bail!(
+                "unknown config key: '{}'. Available: cloud.endpoint (alias: cloud), \
+                 cloud.api_key (alias: api_key)",
+                self.key
+            ),
         }
     }
 }
@@ -100,8 +127,14 @@ fn validate_cloud_endpoint(value: &str) -> anyhow::Result<()> {
 
 fn show_config() -> anyhow::Result<()> {
     let settings = SmolSettings::load()?;
-    println!("cloud.endpoint = {}", settings.cloud.endpoint.as_deref().unwrap_or("(not set)"));
-    println!("cloud.api_key  = {}", mask_secret(settings.cloud.api_key.as_deref()));
+    println!(
+        "cloud.endpoint = {}",
+        settings.cloud.endpoint.as_deref().unwrap_or("(not set)")
+    );
+    println!(
+        "cloud.api_key  = {}",
+        mask_secret(settings.cloud.api_key.as_deref())
+    );
 
     // Registries are the other half of the config; enumerate both sections so
     // `config show` is a complete picture of config.toml. Credentials are
@@ -144,7 +177,36 @@ fn print_registries(section: &str, config: &smolvm::registry::RegistryConfig) {
 
 #[cfg(test)]
 mod tests {
-    use super::validate_cloud_endpoint;
+    use super::{resolve_config_key, validate_cloud_endpoint, ConfigTarget};
+
+    // The spellings the tool itself prints must work. `auth status` says to run
+    // `smol config set cloud.api_key smk_…` and `config show` labels the values
+    // `cloud.endpoint` / `cloud.api_key`; those used to be rejected outright.
+    #[test]
+    fn keys_the_tool_prints_are_accepted() {
+        assert_eq!(
+            resolve_config_key("cloud.api_key"),
+            Some(ConfigTarget::ApiKey)
+        );
+        assert_eq!(
+            resolve_config_key("cloud.endpoint"),
+            Some(ConfigTarget::Endpoint)
+        );
+    }
+
+    #[test]
+    fn legacy_bare_keys_still_work() {
+        assert_eq!(resolve_config_key("cloud"), Some(ConfigTarget::Endpoint));
+        for k in ["api_key", "apikey", "api-key"] {
+            assert_eq!(resolve_config_key(k), Some(ConfigTarget::ApiKey), "{k}");
+        }
+    }
+
+    #[test]
+    fn unknown_keys_are_still_rejected() {
+        assert_eq!(resolve_config_key("cloud.token"), None);
+        assert_eq!(resolve_config_key(""), None);
+    }
 
     #[test]
     fn https_endpoints_are_accepted() {
