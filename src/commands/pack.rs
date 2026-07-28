@@ -537,27 +537,98 @@ impl PackCreateCmd {
             return Ok(path.clone());
         }
 
-        let candidates = [
-            Some(PathBuf::from("target/release/smolvm")),
-            Some(PathBuf::from("target/debug/smolvm")),
-            std::env::current_exe()
-                .ok()
-                .and_then(|p| p.parent().map(|d| d.join("smolvm-bin"))),
-            std::env::current_exe().ok(),
-            dirs::data_dir().map(|d| d.join("smolvm/smolvm-bin")),
-        ];
-
-        for candidate in candidates.into_iter().flatten() {
+        for candidate in Self::stub_candidates().into_iter().flatten() {
             if candidate.exists() {
                 return Ok(candidate);
             }
         }
 
         anyhow::bail!(
-            "could not find smolvm binary. Build it with:\n  \
-             cargo build --release\n\
-             Or use --stub to specify the path."
+            "could not find a smolvm binary to use as the packed-artifact stub.\n\
+             Install smolvm (https://smolmachines.com/docs/install), or pass --stub \
+             with the path to one.\n\
+             Note: the smol CLI itself cannot be the stub — a packed binary must be \
+             able to detect and rehydrate its own payload."
         )
+    }
+
+    /// Places a *smolvm* binary may live, in preference order.
+    ///
+    /// Every entry must be smolvm. The stub is what a packed artifact re-executes,
+    /// and only smolvm detects packed mode at startup (`detect_packed_mode` runs
+    /// before its CLI parse). smol has no such check, so a smol-stubbed artifact
+    /// carries its payload but can never rehydrate — running it just prints the
+    /// smol CLI (`auth`, `cloud`, …) to whoever it was shipped to.
+    ///
+    /// Split out so the invariant below is testable: `current_exe()` must never
+    /// appear here. It does appear in smolvm's copy of this search, where the
+    /// running binary IS a valid stub; inheriting it here was the bug.
+    fn stub_candidates() -> Vec<Option<PathBuf>> {
+        vec![
+            Some(PathBuf::from("target/release/smolvm")),
+            Some(PathBuf::from("target/debug/smolvm")),
+            // Distribution layout: `smolvm` on PATH is a wrapper script that execs
+            // `smolvm-bin` beside its resolved location, so follow the symlink to
+            // the real install dir. This is the case that actually matters — the
+            // installer puts smolvm under ~/.smolvm while smol lives on PATH
+            // elsewhere, so neither sibling nor data-dir lookups find it.
+            which_smolvm_install_dir().map(|d| d.join("smolvm-bin")),
+            // smol and smolvm installed side by side.
+            std::env::current_exe()
+                .ok()
+                .and_then(|p| p.parent().map(|d| d.join("smolvm-bin"))),
+            dirs::data_dir().map(|d| d.join("smolvm/smolvm-bin")),
+        ]
+    }
+}
+
+/// Directory holding the real smolvm install, found by resolving the `smolvm`
+/// wrapper on `PATH` through any symlinks.
+///
+/// Returns `None` when smolvm isn't on `PATH` — callers treat that as "candidate
+/// unavailable", never as an error, so a build-tree or side-by-side layout still
+/// resolves through the other candidates.
+fn which_smolvm_install_dir() -> Option<PathBuf> {
+    let path = std::env::var_os("PATH")?;
+    for dir in std::env::split_paths(&path) {
+        let wrapper = dir.join("smolvm");
+        if wrapper.exists() {
+            let real = std::fs::canonicalize(&wrapper).unwrap_or(wrapper);
+            return real.parent().map(PathBuf::from);
+        }
+    }
+    None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The regression this guards: smol used `current_exe()` as a last-resort
+    /// stub. That silently produced an artifact which could never rehydrate,
+    /// because smol — unlike smolvm — never checks whether it is packed.
+    #[test]
+    fn the_running_binary_is_never_a_stub_candidate() {
+        let me = std::env::current_exe().expect("current_exe");
+        for c in PackCreateCmd::stub_candidates().into_iter().flatten() {
+            assert_ne!(c, me, "smol must never offer itself as the packed stub");
+        }
+    }
+
+    /// Every candidate names a smolvm binary, not some other executable.
+    #[test]
+    fn every_candidate_points_at_a_smolvm_binary() {
+        for c in PackCreateCmd::stub_candidates().into_iter().flatten() {
+            let name = c
+                .file_name()
+                .and_then(|s| s.to_str())
+                .expect("candidate has a file name")
+                .to_string();
+            assert!(
+                name == "smolvm" || name == "smolvm-bin",
+                "candidate {name:?} is not a smolvm binary"
+            );
+        }
     }
 }
 
