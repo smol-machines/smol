@@ -2,6 +2,7 @@ pub mod auth;
 pub mod auth_status;
 pub mod machines;
 pub mod cloud;
+pub mod compose;
 pub mod common;
 pub mod config;
 pub mod cp;
