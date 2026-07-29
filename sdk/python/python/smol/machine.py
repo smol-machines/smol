@@ -12,6 +12,7 @@ Mirrors the Node SDK's ``machine.ts`` (sync, since the embedded engine blocks)::
 
 from __future__ import annotations
 
+import uuid
 from typing import Optional
 
 from .transport import Transport, connect_transport, make_transport
@@ -197,6 +198,38 @@ class Machine:
         :returns: a :class:`Machine` handle to the running clone.
         """
         return Machine(self._t.fork(name, ports))
+
+    def reward_fork(
+        self,
+        command: list[str],
+        opts: Optional[ExecOptions] = None,
+        name: Optional[str] = None,
+    ) -> ExecResult:
+        """Score this machine's state WITHOUT mutating it.
+
+        Forks an ephemeral clone, runs the grader ``command`` in the clone, then
+        destroys it — so grading never touches this machine. The returned
+        :class:`ExecResult` is your reward signal (``.exit_code == 0`` for
+        pass/fail, ``.stdout`` for a parsed score). This is the RL "reward judging
+        without
+        side effects" primitive (grade the end of a rollout, or run a verifier)
+        as one call; the throwaway clone is always cleaned up, even if the grader
+        raises. Requires this machine to be ``forkable`` (like :meth:`fork`).
+
+        :param command: the grader/verifier argv to run in the clone.
+        :param opts: exec options (env, cwd, timeout, …).
+        :param name: optional clone name (default: a generated unique name).
+        :returns: the grader's :class:`ExecResult`.
+        """
+        clone = self.fork(name or f"{self.name}-rf-{uuid.uuid4().hex[:8]}")
+        try:
+            return clone.exec(command, opts)
+        finally:
+            # Best-effort teardown — never mask the grader's result/error.
+            try:
+                clone.delete()
+            except Exception:
+                pass
 
     # -- context manager: auto-delete on exit (ergonomic for ephemeral use) --
     def __enter__(self) -> "Machine":

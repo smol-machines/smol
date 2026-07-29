@@ -8,6 +8,7 @@
  *  a given backend lacks throw `NotSupportedError`.
  */
 
+import { randomUUID } from "node:crypto";
 import { ExecutionError } from "./errors";
 import {
   makeTransport,
@@ -225,5 +226,32 @@ export class Machine {
    *  @returns a `Machine` handle to the running clone. */
   async fork(name: string, ports?: PortSpec[]): Promise<Machine> {
     return new Machine(await this.transport.fork(name, ports));
+  }
+
+  /** Score this machine's state WITHOUT mutating it: fork an ephemeral clone,
+   *  run the grader command in the clone, then destroy it. The result (exit code
+   *  / stdout) is your reward signal; this machine is untouched. This is the RL
+   *  "reward judging without side effects" primitive — grade the end of a rollout,
+   *  or run a verifier — as one call, with the throwaway clone always cleaned up
+   *  even if the grader errors. Requires this machine to be `forkable` (like
+   *  `fork()`); a clone name is generated unless you pass one.
+   *
+   *  @param command  the grader/verifier argv to run in the clone
+   *  @param opts      exec options (env, cwd, timeout, …)
+   *  @param name      optional clone name (default: a generated unique name)
+   *  @returns the grader's `ExecResult` (use `.success` for pass/fail, `.stdout` for a score) */
+  async rewardFork(
+    command: string[],
+    opts?: ExecOptions,
+    name?: string,
+  ): Promise<ExecResult> {
+    const cloneName = name ?? `${this.name}-rf-${randomUUID().slice(0, 8)}`;
+    const clone = await this.fork(cloneName);
+    try {
+      return await clone.exec(command, opts);
+    } finally {
+      // Best-effort teardown — never mask the grader's result/error.
+      await clone.delete().catch(() => {});
+    }
   }
 }

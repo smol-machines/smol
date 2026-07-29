@@ -97,6 +97,24 @@ const server = createServer(async (req, res) => {
   }
   if (method === "GET" && url === "/v1/machines/m2")
     return json(200, { id: "m2", state: "running" });
+  // Clone (fork) exec + delete — reward_fork forks m1 -> m2, grades in m2,
+  // then deletes m2. Distinct stdout proves the GRADER ran in the clone, and
+  // the DELETE proves the throwaway clone is always cleaned up.
+  if (method === "POST" && url === "/v1/machines/m2/exec") {
+    seen.rewardExecBody = JSON.parse((await readBody(req)).toString() || "{}");
+    return json(200, {
+      exitCode: 0,
+      stdout: "reward-clone-exec-ok\n",
+      stderr: "",
+      stdoutTruncated: false,
+      stderrTruncated: false,
+    });
+  }
+  if (method === "DELETE" && url === "/v1/machines/m2") {
+    seen.cloneDeleted = true;
+    res.writeHead(204);
+    return res.end();
+  }
   if (method === "POST" && url === "/v1/machines/m1/exec") {
     seen.execBody = JSON.parse((await readBody(req)).toString() || "{}");
     return json(200, {
@@ -358,6 +376,25 @@ async function main(): Promise<void> {
     "fork returns running clone handle",
     clone.name === "rollout-1" && (await clone.state()) === "running",
     clone.name,
+  );
+
+  // --- reward_fork: grade in a throwaway clone without touching the original ---
+  seen.cloneDeleted = false;
+  const reward = await m.rewardFork(["python", "grade.py"]);
+  check(
+    "reward_fork grades in the CLONE (not the parent)",
+    reward.stdout.trim() === "reward-clone-exec-ok",
+    reward.stdout,
+  );
+  check(
+    "reward_fork sent the grader command to the clone",
+    JSON.stringify(seen.rewardExecBody?.command) ===
+      JSON.stringify(["python", "grade.py"]),
+    JSON.stringify(seen.rewardExecBody),
+  );
+  check(
+    "reward_fork destroys the throwaway clone (cleanup)",
+    seen.cloneDeleted === true,
   );
 
   // Errors surface the server's x-request-id so support can correlate the call

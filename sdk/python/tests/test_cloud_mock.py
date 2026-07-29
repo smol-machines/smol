@@ -91,6 +91,16 @@ class Handler(BaseHTTPRequestHandler):
                 # can't hold — proves the SDK decodes b64, not the text.
                 "stdoutB64": base64.b64encode(bytes([0x68, 0x69, 0xFF])).decode(),
             }).encode())
+        # Clone exec — reward_fork forks MACHINE_ID -> CLONE_ID, grades in the
+        # clone, then deletes it. Distinct stdout proves the grader ran in the
+        # CLONE, not the parent.
+        if self.path == f"/v1/machines/{CLONE_ID}/exec":
+            captured["reward_exec_body"] = json.loads(self._read() or b"{}")
+            return self._send(200, json.dumps({
+                "stdout": "reward-clone-exec-ok\n", "stderr": "", "exitCode": 0,
+                "durationMs": 5, "machineId": CLONE_ID,
+                "stdoutTruncated": False, "stderrTruncated": False,
+            }).encode())
         if self.path == f"/v1/machines/{MACHINE_ID}/stop":
             return self._send(200, json.dumps({"id": MACHINE_ID, "state": "stopped"}).encode())
         return self._send(404, b"no route")
@@ -135,6 +145,9 @@ class Handler(BaseHTTPRequestHandler):
         if not self._auth_ok():
             return self._send(401, b"bad token")
         if self.path == f"/v1/machines/{MACHINE_ID}":
+            return self._send(204)
+        if self.path == f"/v1/machines/{CLONE_ID}":
+            captured["clone_deleted"] = True
             return self._send(204)
         return self._send(404, b"no route")
 
@@ -258,6 +271,17 @@ def main() -> int:
               str(captured["fork_body"].get("ports")))
         check("fork returns running clone handle", clone.name == "rollout-1" and clone.state() == "started",
               f"{clone.name}/{clone.state()}")
+
+        # reward_fork: grade in a throwaway clone without touching the original.
+        captured["clone_deleted"] = False
+        reward = m.reward_fork(["python", "grade.py"])
+        check("reward_fork grades in the CLONE (not the parent)",
+              reward.stdout.strip() == "reward-clone-exec-ok", reward.stdout)
+        check("reward_fork sent the grader command to the clone",
+              captured.get("reward_exec_body", {}).get("command") == ["python", "grade.py"],
+              str(captured.get("reward_exec_body")))
+        check("reward_fork destroys the throwaway clone (cleanup)",
+              captured.get("clone_deleted") is True)
 
         r = m.exec(["echo", "hello"], )
         check("exec hit POST /exec", f"POST /v1/machines/{MACHINE_ID}/exec" in captured["hits"])

@@ -180,6 +180,19 @@ class AsyncMachine:
         clone = await asyncio.to_thread(self._m.fork, name, ports)
         return AsyncMachine(clone)
 
+    async def reward_fork(
+        self,
+        command: list[str],
+        opts: Optional[ExecOptions] = None,
+        name: Optional[str] = None,
+    ) -> ExecResult:
+        """Score this machine's state WITHOUT mutating it: fork an ephemeral clone,
+        run the grader ``command`` in it, then destroy it. The returned
+        :class:`ExecResult` is your reward signal. RL "reward judging without side
+        effects" as one call; the clone is always cleaned up. Requires this machine
+        to be ``forkable``. See :meth:`Machine.reward_fork`."""
+        return await asyncio.to_thread(self._m.reward_fork, command, opts, name)
+
     # -- async context manager: auto-delete on exit --
     async def __aenter__(self) -> "AsyncMachine":
         return self
