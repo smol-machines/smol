@@ -81,6 +81,27 @@ const server = createServer(async (req, res) => {
       ports: seen.forkBody.ports ?? [],
     });
   }
+  if (method === "POST" && url === "/v1/machines/m1/fork-batch") {
+    seen.forkBatchBody = JSON.parse((await readBody(req)).toString() || "{}");
+    const n = seen.forkBatchBody.count ?? seen.forkBatchBody.names?.length ?? 0;
+    const prefix = seen.forkBatchBody.namePrefix ?? "golden";
+    const clones = Array.from({ length: n }, (_, i) => ({
+      id: `b${i + 1}`,
+      name: seen.forkBatchBody.names?.[i] ?? `${prefix}-${i + 1}`,
+      state: "started",
+      source: { type: "image", reference: "alpine" },
+      resources: { cpus: 2, memoryMb: 1024 },
+      network: { mode: "open" },
+      env: {},
+      ephemeral: false,
+      ports: seen.forkBatchBody.ports ?? [],
+    }));
+    return json(201, { clones });
+  }
+  // Readiness for batch-fork clones (b1, b2, …).
+  if (method === "GET" && /^\/v1\/machines\/b\d+$/.test(url)) {
+    return json(200, { id: url.split("/").pop(), state: "running" });
+  }
   if (method === "GET" && url === "/v1/machines/m1")
     return json(200, readinessResponse("m1", 2));
   if (method === "GET" && url === "/v1/machines/m-wait")
@@ -376,6 +397,22 @@ async function main(): Promise<void> {
     "fork returns running clone handle",
     clone.name === "rollout-1" && (await clone.state()) === "running",
     clone.name,
+  );
+
+  // --- fork-batch: fan out N RL rollouts in one transactional call ---
+  const batch = await m.forkBatch({ count: 3, namePrefix: "rollout" });
+  check(
+    "forkBatch hit POST /fork-batch with the size spec",
+    seen.forkBatchBody?.count === 3 &&
+      seen.forkBatchBody?.namePrefix === "rollout",
+    JSON.stringify(seen.forkBatchBody),
+  );
+  check(
+    "forkBatch returns N clone handles in request order",
+    batch.length === 3 &&
+      batch[0].name === "rollout-1" &&
+      batch[2].name === "rollout-3",
+    batch.map((c) => c.name).join(","),
   );
 
   // --- reward_fork: grade in a throwaway clone without touching the original ---

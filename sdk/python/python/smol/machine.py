@@ -199,6 +199,38 @@ class Machine:
         """
         return Machine(self._t.fork(name, ports))
 
+    def fork_batch(
+        self,
+        count: Optional[int] = None,
+        *,
+        names: Optional[list[str]] = None,
+        name_prefix: Optional[str] = None,
+        ports: Optional[list[PortSpec]] = None,
+    ) -> "list[Machine]":
+        """Fork this forkable machine into MANY clones in one call — the RL
+        fan-out primitive (GRPO group sampling / eval-task fan-out). Each clone is
+        a live-RAM CoW fork off this golden, like :meth:`fork`. On the cloud target
+        the batch is transactional (all-or-nothing: if any clone fails, the whole
+        batch is rolled back), so you get all N branches or none. Requires this
+        machine to be ``forkable``.
+
+        Provide either ``count`` (clones auto-named ``{name_prefix}-{n}``) or
+        explicit ``names``.
+
+        :param count: number of clones to fork (ignored when ``names`` is given).
+        :param names: explicit clone names; its length is the batch size.
+        :param name_prefix: prefix for auto-named clones (default: the golden's
+            name on the cloud target, else ``"fork"``).
+        :param ports: optional pinned inbound port forwards applied to every clone.
+        :returns: the clones, in request order.
+        """
+        return [
+            Machine(t)
+            for t in self._t.fork_batch(
+                count, names=names, name_prefix=name_prefix, ports=ports
+            )
+        ]
+
     def reward_fork(
         self,
         command: list[str],

@@ -81,6 +81,23 @@ class Handler(BaseHTTPRequestHandler):
                 "env": {}, "ephemeral": False, "ports": captured["fork_body"].get("ports") or [],
                 "createdAt": "2026-05-30T00:00:00Z", "updatedAt": "2026-05-30T00:00:00Z",
             }).encode())
+        if self.path == f"/v1/machines/{MACHINE_ID}/fork-batch":
+            captured["fork_batch_body"] = json.loads(self._read() or b"{}")
+            body = captured["fork_batch_body"]
+            names = body.get("names")
+            n = body.get("count") or len(names or [])
+            prefix = body.get("namePrefix") or "golden"
+            clones = []
+            for i in range(n):
+                clones.append({
+                    "id": f"mach-b{i + 1}",
+                    "name": names[i] if names else f"{prefix}-{i + 1}",
+                    "source": {"type": "image", "reference": "alpine:3.20"}, "state": "started",
+                    "resources": {"cpus": 2, "memoryMb": 1024}, "network": {"mode": "open"},
+                    "env": {}, "ephemeral": False, "ports": body.get("ports") or [],
+                    "createdAt": "2026-05-30T00:00:00Z", "updatedAt": "2026-05-30T00:00:00Z",
+                })
+            return self._send(201, json.dumps({"clones": clones}).encode())
         if self.path == f"/v1/machines/{MACHINE_ID}/exec":
             captured["exec_body"] = json.loads(self._read() or b"{}")
             return self._send(200, json.dumps({
@@ -122,6 +139,10 @@ class Handler(BaseHTTPRequestHandler):
             )
         if self.path == f"/v1/machines/{CLONE_ID}":
             return self._send(200, json.dumps({"id": CLONE_ID, "state": "started", "ready": True}).encode())
+        # Readiness for batch-fork clones (mach-b1, mach-b2, …).
+        if self.path.startswith("/v1/machines/mach-b"):
+            mid = self.path.rsplit("/", 1)[-1]
+            return self._send(200, json.dumps({"id": mid, "state": "started", "ready": True}).encode())
         # The connect bridge: GET /v1/machines/:id/connect/:port[/rest]. Echo the
         # path + auth so the SDK's endpoint()/request() wiring can be asserted.
         if self.path.startswith(f"/v1/machines/{MACHINE_ID}/connect/"):
@@ -271,6 +292,18 @@ def main() -> int:
               str(captured["fork_body"].get("ports")))
         check("fork returns running clone handle", clone.name == "rollout-1" and clone.state() == "started",
               f"{clone.name}/{clone.state()}")
+
+        # --- fork_batch: fan out N RL rollouts in one transactional call ---
+        batch = m.fork_batch(count=3, name_prefix="rollout")
+        check("fork_batch hit POST /fork-batch",
+              f"POST /v1/machines/{MACHINE_ID}/fork-batch" in captured["hits"])
+        check("fork_batch sent the size spec",
+              captured["fork_batch_body"].get("count") == 3
+              and captured["fork_batch_body"].get("namePrefix") == "rollout",
+              str(captured.get("fork_batch_body")))
+        check("fork_batch returns N clones in request order",
+              len(batch) == 3 and batch[0].name == "rollout-1" and batch[2].name == "rollout-3",
+              ",".join(c.name for c in batch))
 
         # reward_fork: grade in a throwaway clone without touching the original.
         captured["clone_deleted"] = False

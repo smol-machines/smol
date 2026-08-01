@@ -180,6 +180,26 @@ class AsyncMachine:
         clone = await asyncio.to_thread(self._m.fork, name, ports)
         return AsyncMachine(clone)
 
+    async def fork_batch(
+        self,
+        count: Optional[int] = None,
+        *,
+        names: Optional[list[str]] = None,
+        name_prefix: Optional[str] = None,
+        ports: Optional[list[PortSpec]] = None,
+    ) -> "list[AsyncMachine]":
+        """Fork this forkable machine into MANY clones in one call — the RL fan-out
+        primitive (GRPO group sampling / eval-task fan-out). Transactional on the
+        cloud target (all-or-nothing). See :meth:`Machine.fork_batch`."""
+        clones = await asyncio.to_thread(
+            self._m.fork_batch,
+            count,
+            names=names,
+            name_prefix=name_prefix,
+            ports=ports,
+        )
+        return [AsyncMachine(c) for c in clones]
+
     async def reward_fork(
         self,
         command: list[str],

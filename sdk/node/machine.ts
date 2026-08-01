@@ -21,6 +21,7 @@ import type {
   ExecEvent,
   ExecOptions,
   ExecResult,
+  ForkBatchOptions,
   ImageInfo,
   MachineConfig,
   PortEndpoint,
@@ -226,6 +227,26 @@ export class Machine {
    *  @returns a `Machine` handle to the running clone. */
   async fork(name: string, ports?: PortSpec[]): Promise<Machine> {
     return new Machine(await this.transport.fork(name, ports));
+  }
+
+  /** Fork this forkable machine into MANY clones in one call — the RL fan-out
+   *  primitive (GRPO group sampling / eval-task fan-out). Each clone is a live-RAM
+   *  CoW fork off this golden, like `fork()`. On the cloud target the batch is
+   *  transactional (all-or-nothing: if any clone fails, the whole batch is rolled
+   *  back), so you get all N branches or none. Provide either `count` (clones
+   *  auto-named `{namePrefix}-{n}`) or explicit `names`. Requires this machine to
+   *  be `forkable`.
+   *
+   *  @param opts  batch size (`count` or `names`), optional `namePrefix`/`ports`
+   *  @returns the clones, in request order
+   *
+   *  ```ts
+   *  const clones = await golden.forkBatch({ count: 32, namePrefix: "rollout" });
+   *  await Promise.all(clones.map((c) => c.exec(["python", "rollout.py"])));
+   *  ``` */
+  async forkBatch(opts: ForkBatchOptions): Promise<Machine[]> {
+    const clones = await this.transport.forkBatch(opts);
+    return clones.map((t) => new Machine(t));
   }
 
   /** Score this machine's state WITHOUT mutating it: fork an ephemeral clone,

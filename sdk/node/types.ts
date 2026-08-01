@@ -60,6 +60,22 @@ export interface PortSpec {
   guest: number;
 }
 
+/** Options for forking a forkable golden into many clones at once — the RL
+ *  fan-out primitive (GRPO group sampling / eval-task fan-out). Provide either
+ *  `count` (clones auto-named `{namePrefix}-{n}`) or explicit `names`. */
+export interface ForkBatchOptions {
+  /** Number of clones to fork (1..=64). Ignored when `names` is set. */
+  count?: number;
+  /** Explicit clone names; its length is the batch size when set. */
+  names?: string[];
+  /** Prefix for auto-named clones when `count` is used (default: the golden's
+   *  name on the cloud target, else `"fork"`). */
+  namePrefix?: string;
+  /** Inbound port forwards applied to every clone. Empty = each clone gets fresh
+   *  host ports so clones don't collide. */
+  ports?: PortSpec[];
+}
+
 /** Configuration for creating a machine. */
 export interface MachineConfig {
   /** Machine name (auto-generated if omitted). */

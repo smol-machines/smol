@@ -25,6 +25,7 @@ export type {
   ResourceSpec,
   MountSpec,
   PortSpec,
+  ForkBatchOptions,
   ExecOptions,
   ExecResult,
   ImageInfo,

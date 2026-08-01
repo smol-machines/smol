@@ -26,6 +26,7 @@ import type {
   ConnectOptions,
   ExecEvent,
   ExecOptions,
+  ForkBatchOptions,
   ImageInfo,
   MachineConfig,
   PortEndpoint,
@@ -104,6 +105,23 @@ export interface Transport {
   stop(): Promise<void>;
   delete(): Promise<void>;
   fork(name: string, ports?: PortSpec[]): Promise<Transport>;
+  forkBatch(opts: ForkBatchOptions): Promise<Transport[]>;
+}
+
+/** Resolve a batch fork's clone names + size, mirroring the control plane:
+ *  explicit `names` win, otherwise `count` clones are named `{prefix}-{n}`.
+ *  Used by the local target (the cloud target lets the server resolve). */
+function resolveBatchNames(
+  opts: ForkBatchOptions,
+  defaultPrefix: string,
+): string[] {
+  if (opts.names && opts.names.length > 0) return opts.names;
+  const count = opts.count ?? 0;
+  if (count < 1) {
+    throw new Error("forkBatch requires `count` >= 1 or a non-empty `names`");
+  }
+  const prefix = opts.namePrefix ?? defaultPrefix;
+  return Array.from({ length: count }, (_, i) => `${prefix}-${i + 1}`);
 }
 
 // ---------------------------------------------------------------------------
@@ -371,6 +389,24 @@ class LocalTransport implements Transport {
     } catch (e) {
       throw wrapNativeError(e);
     }
+  }
+
+  async forkBatch(opts: ForkBatchOptions): Promise<Transport[]> {
+    // No control plane locally, so fan out sequential single forks off the same
+    // golden (each is CoW O(metadata) after the first freeze) and clean up what
+    // succeeded if any fork fails — best-effort local mirror of the cloud
+    // target's all-or-nothing transaction.
+    const names = resolveBatchNames(opts, "fork");
+    const forks: Transport[] = [];
+    try {
+      for (const name of names) {
+        forks.push(await this.fork(name, opts.ports));
+      }
+    } catch (e) {
+      await Promise.all(forks.map((f) => f.delete().catch(() => {})));
+      throw e;
+    }
+    return forks;
   }
 }
 
@@ -862,6 +898,30 @@ class CloudTransport implements Transport {
     const cloneName = clone.name ?? name;
     await waitForReady(this.conn, cloneId);
     return new CloudTransport(this.conn, cloneName, cloneId);
+  }
+
+  async forkBatch(opts: ForkBatchOptions): Promise<Transport[]> {
+    // One transactional call: the control plane forks all clones (or none) off
+    // the golden. Send the size spec raw so the server resolves names uniformly.
+    const portBody = (opts.ports ?? []).map((p) => ({
+      port: p.guest,
+      hostPort: p.host,
+    }));
+    const body: Record<string, unknown> = { ports: portBody };
+    if (opts.names && opts.names.length > 0) body.names = opts.names;
+    if (opts.count !== undefined) body.count = opts.count;
+    if (opts.namePrefix !== undefined) body.namePrefix = opts.namePrefix;
+    const resp = await cloudFetch<{ clones: MachineInfo[] }>(
+      this.conn,
+      "POST",
+      `/v1/machines/${this.id}/fork-batch`,
+      { json: body },
+    );
+    const clones = resp.clones ?? [];
+    // Clones come back already forked/started; wait for each in parallel so every
+    // returned handle is usable.
+    await Promise.all(clones.map((c) => waitForReady(this.conn, c.id)));
+    return clones.map((c) => new CloudTransport(this.conn, c.name ?? c.id, c.id));
   }
 }
 

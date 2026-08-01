@@ -89,6 +89,15 @@ class Transport(Protocol):
     def delete(self) -> None: ...
     def fork(self, name: str, ports: Optional[list[PortSpec]] = None) -> "Transport": ...
 
+    def fork_batch(
+        self,
+        count: Optional[int] = None,
+        *,
+        names: Optional[list[str]] = None,
+        name_prefix: Optional[str] = None,
+        ports: Optional[list[PortSpec]] = None,
+    ) -> "list[Transport]": ...
+
 
 def _encode_path(p: str) -> str:
     """Percent-encode each segment but keep ``/`` (smolfleet files route is a
@@ -326,6 +335,32 @@ class LocalTransport:
             raise wrap_native_error(e) from e
         # LocalTransport.__init__ registers the clone for atexit cleanup.
         return LocalTransport(clone_inner)
+
+    def fork_batch(
+        self,
+        count: Optional[int] = None,
+        *,
+        names: Optional[list[str]] = None,
+        name_prefix: Optional[str] = None,
+        ports: Optional[list[PortSpec]] = None,
+    ) -> "list[Transport]":
+        # No control plane locally: fan out sequential single forks off the same
+        # golden (each CoW O(metadata) after the first freeze), cleaning up what
+        # succeeded on failure — best-effort local mirror of the cloud target's
+        # all-or-nothing transaction.
+        resolved = _resolve_batch_names(count, names, name_prefix, "fork")
+        forks: list[Transport] = []
+        try:
+            for n in resolved:
+                forks.append(self.fork(n, ports))
+        except Exception:
+            for f in forks:
+                try:
+                    f.delete()
+                except Exception:
+                    pass
+            raise
+        return forks
 
 
 # ---------------------------------------------------------------------------
@@ -566,6 +601,63 @@ class CloudTransport:
         clone_name = clone.get("name") or name
         _wait_for_ready(self._base, self._key, clone_id)
         return CloudTransport(self._base, self._key, clone_id, clone_name)
+
+    def fork_batch(
+        self,
+        count: Optional[int] = None,
+        *,
+        names: Optional[list[str]] = None,
+        name_prefix: Optional[str] = None,
+        ports: Optional[list[PortSpec]] = None,
+    ) -> "list[CloudTransport]":
+        # One transactional call: the control plane forks all clones (or none)
+        # off the golden. Send the size spec raw so the server resolves names
+        # uniformly with the single-fork path.
+        port_body = [{"port": p.guest, "hostPort": p.host} for p in (ports or [])]
+        body: dict[str, Any] = {"ports": port_body}
+        if names:
+            body["names"] = names
+        if count is not None:
+            body["count"] = count
+        if name_prefix is not None:
+            body["namePrefix"] = name_prefix
+        resp = (
+            _cloud_fetch(
+                self._base,
+                self._key,
+                "POST",
+                f"/v1/machines/{self._id}/fork-batch",
+                json_body=body,
+            )
+            or {}
+        )
+        clones = resp.get("clones") or []
+        transports = [
+            CloudTransport(self._base, self._key, c["id"], c.get("name") or c["id"])
+            for c in clones
+        ]
+        # Clones come back already forked/started; wait for each so every returned
+        # handle is usable.
+        for t in transports:
+            _wait_for_ready(self._base, self._key, t._id)
+        return transports
+
+
+def _resolve_batch_names(
+    count: Optional[int],
+    names: Optional[list[str]],
+    name_prefix: Optional[str],
+    default_prefix: str,
+) -> list[str]:
+    """Resolve a batch fork's clone names + size, mirroring the control plane:
+    explicit ``names`` win, otherwise ``count`` clones are named ``{prefix}-{n}``.
+    Used by the local target (the cloud target lets the server resolve)."""
+    if names:
+        return names
+    if not count or count < 1:
+        raise ValueError("fork_batch requires `count` >= 1 or a non-empty `names`")
+    prefix = name_prefix or default_prefix
+    return [f"{prefix}-{i}" for i in range(1, count + 1)]
 
 
 def _cloud_fetch(
