@@ -90,6 +90,30 @@ bun add smolmachines
 bun run app.ts
 ```
 
+## Fused multi-policy rollouts
+
+```ts
+import { RolloutClient } from 'smolmachines';
+
+const rollouts = new RolloutClient('http://127.0.0.1:8080/api/v1', 'qwen');
+await rollouts.ensureVllmExecutor({
+  endpoint: 'http://127.0.0.1:8000',
+  adapterRoot: '/var/lib/smol/adapters',
+  fallbackPool: 'isolated-rollouts',
+});
+await rollouts.publishPolicy('experiment-a', 'step-40', '/var/lib/smol/adapters/a-40');
+const result = await rollouts.generate({
+  idempotencyKey: 'experiment-a-step-40-batch-7',
+  policy: 'experiment-a',
+  prompts: [[1, 2, 3]],
+  sampling: { maxTokens: 64, temperature: 0.9, logprobs: 1 },
+});
+```
+
+The client targets the loopback rollout API on a CUDA node; it publishes
+content-verified LoRA versions and submits cross-policy cohorts without exposing
+vLLM's unrestricted adapter loader.
+
 ## Usage
 
 ```ts

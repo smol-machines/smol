@@ -12,7 +12,8 @@ Global behavior:
 - Commands are grouped under nouns: `smol machine …` (a machine's whole
   lifecycle), `smol file …` (Smolfile), `smol pack …` (artifacts),
   `smol registry …` (registries), `smol auth …` (login), `smol cloud …`
-  (smolfleet). `smol run` (ephemeral one-shot) stays top-level.
+  (smolfleet), and `smol rollout …` (fused policy generation). `smol run`
+  (ephemeral one-shot) stays top-level.
 - **Local or cloud is resolved automatically.** `smol machine …` commands find a
   machine wherever it lives — local engine or smolfleet — so `smol machine ls`
   shows both. Force one side with `--local` / `--cloud`, or with a `local/<name>`
@@ -50,6 +51,20 @@ Global behavior:
 |---------|-------------|
 | `smol file init` | Scaffold a `Smolfile` in the current directory. |
 | `smol file up` / `smol file down` | Bring the `Smolfile`-defined machine up / down. |
+
+## Fused policy rollouts — `smol rollout …`
+
+These commands administer the framework-aware rollout service on a CUDA node.
+They use the loopback node API at `http://127.0.0.1:8080/api/v1` by default;
+pass `--api-url` when it listens elsewhere.
+
+| Command | Description |
+|---------|-------------|
+| `smol rollout executor ensure <name> --endpoint <vllm-url> --adapter-root <dir>` | Create a vLLM executor or verify that an identical registration already exists; add `--fallback-pool <name>` for unsupported workloads. |
+| `smol rollout executor ls` / `status <name>` | Inspect executor capacity, queue state, capabilities, and published policies. |
+| `smol rollout executor rm <name>` | Drain requests, unload adapters, and remove the executor. |
+| `smol rollout policy publish --executor <name> --policy <name> --version <version> --adapter <dir>` | Hash, verify, load, and atomically publish one immutable LoRA version. |
+| `smol rollout policy retire --executor <name> --policy <name> --version <version>` | Stop routing and unload one version after active requests drain. |
 
 ## Artifacts — `smol pack …`
 

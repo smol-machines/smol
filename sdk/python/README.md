@@ -64,6 +64,35 @@ Every `Machine` method has an `await`able counterpart on `AsyncMachine`
 `async with` for auto-delete. `endpoint(port)` stays synchronous — it only builds
 a URL and does no I/O.
 
+### Fused multi-policy rollouts
+
+`RolloutClient` is the thin generation boundary for TRL, Unsloth, and custom RL
+loops. The node keeps one vLLM engine hot, verifies immutable LoRA versions, and
+submits cross-policy cohorts concurrently so vLLM can continuously batch them.
+
+```python
+from smol import RolloutClient
+
+rollouts = RolloutClient("http://127.0.0.1:8080/api/v1", "qwen")
+rollouts.ensure_vllm_executor(
+    endpoint="http://127.0.0.1:8000",
+    adapter_root="/var/lib/smol/adapters",
+    fallback_pool="isolated-rollouts",
+)
+rollouts.publish_policy("experiment-a", "step-40", "/var/lib/smol/adapters/a-40")
+result = rollouts.generate(
+    idempotency_key="experiment-a-step-40-batch-7",
+    policy="experiment-a",
+    prompts=[[1, 2, 3]],
+    max_tokens=64,
+    temperature=0.9,
+    logprobs=1,
+)
+```
+
+The vLLM backend must bind to loopback, enable runtime LoRA updates, and reserve
+one spare CPU LoRA slot so a new version can load before the old version drains.
+
 ## Architecture
 - **Pure-Python layer** (`python/smol`): `Machine`, transports, types, errors —
   zero third-party deps (the cloud transport uses only `urllib`).
@@ -108,6 +137,7 @@ existing.wait_until_ready()
 
 ## API
 - `Machine` (sync) / `AsyncMachine` (awaitable, non-blocking) — identical surface; see the async example above.
+- `RolloutClient` — publish versioned LoRAs and generate single- or multi-policy cohorts.
 - `Machine.create(config=None, conn=None)` — create and start a machine; cloud
   waits for `ready is True` before returning.
 - `Machine.connect(machine_id, conn=None)` — attach without waiting; call

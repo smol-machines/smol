@@ -47,6 +47,7 @@ from .errors import (
 )
 from .async_machine import AsyncEpisode, AsyncMachine
 from .machine import Episode, Machine
+from .rollout import RolloutClient, RolloutError, adapter_sha256
 from .types import (
     ConnectOptions,
     ExecOptions,
@@ -80,4 +81,7 @@ __all__ = [
     "InvalidConfigError",
     "ExecutionError",
     "wrap_native_error",
+    "RolloutClient",
+    "RolloutError",
+    "adapter_sha256",
 ]

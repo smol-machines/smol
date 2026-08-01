@@ -133,6 +133,25 @@ smol machine ls --cloud
 See **[docs/cli.md](docs/cli.md)** for the full command reference, and run
 `smol <command> --help` for flags.
 
+## Fused policy rollouts
+
+On a CUDA rollout node, `smol rollout` declaratively registers a loopback vLLM
+backend and publishes immutable LoRA versions without exposing vLLM's adapter
+loader directly. Python and Node training loops use the matching
+`RolloutClient` to submit cross-policy cohorts at their generation boundary;
+unsupported work can retain an ordinary isolated fork pool as the fallback.
+
+```bash
+smol rollout executor ensure qwen --endpoint http://127.0.0.1:8000 \
+  --adapter-root /var/lib/smol/adapters --fallback-pool isolated-rollouts
+smol rollout policy publish --executor qwen --policy experiment-a \
+  --version step-40 --adapter /var/lib/smol/adapters/experiment-a/step-40
+```
+
+The command connects to the node API at `http://127.0.0.1:8080/api/v1` by
+default; override it with `--api-url` when the loopback listener uses another
+port.
+
 ## Building from source / the engine core
 
 This repository is the open **`smol` SDK + CLI** (Apache-2.0). The microVM

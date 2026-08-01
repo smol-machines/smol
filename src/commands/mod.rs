@@ -29,6 +29,7 @@ pub mod push;
 pub mod registry;
 pub mod resolve;
 pub mod rm;
+pub mod rollout;
 pub mod run;
 pub mod scale;
 pub mod start;

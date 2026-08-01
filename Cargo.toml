@@ -58,6 +58,8 @@ chrono = { version = "0.4", features = ["serde"] }
 open = "5"
 base64 = "0.22"
 libc = "0.2"
+sha2 = "0.10"
+hex = "0.4"
 
 [build-dependencies]
 pkg-config = "0.3"

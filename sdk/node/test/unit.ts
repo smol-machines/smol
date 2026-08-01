@@ -5,6 +5,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { wrapNativeError, SmolError } from '../errors';
+import { adapterSha256, RolloutClient } from '../rollout';
 import { cliConfigApiKey, encodePath, toNativeConfig } from '../transport';
 
 let passed = 0;
@@ -80,6 +81,40 @@ check('forwards cuda to native resources', () => {
 check('omits cuda when unset (engine default applies)', () => {
   const cfg = toNativeConfig('m', { resources: { cpus: 2 } });
   assert.strictEqual(cfg.resources?.cuda, undefined);
+});
+
+check('rollout adapter digest matches the engine contract', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'smol-rollout-unit-'));
+  try {
+    writeFileSync(join(dir, 'adapter_config.json'), '{}');
+    writeFileSync(join(dir, 'adapter_model.safetensors'), 'weights');
+    assert.strictEqual(
+      adapterSha256(dir),
+      '26d1c7593b9650cb489a9a1fe2fad9def32c75ec2685cf8261c3c0fa3b73e315',
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+check('rollout job preserves token prompts and sampling', () => {
+  const client = new RolloutClient('http://127.0.0.1:8080/api/v1', 'qwen');
+  assert.deepStrictEqual(
+    client.job({
+      idempotencyKey: 'policy-a-step-4',
+      policy: 'policy-a',
+      version: 'step-4',
+      prompts: [[1, 2, 3]],
+      sampling: { maxTokens: 64, temperature: 0.8, topP: 0.95 },
+    }),
+    {
+      idempotencyKey: 'policy-a-step-4',
+      policy: 'policy-a',
+      version: 'step-4',
+      prompts: [{ tokenIds: [1, 2, 3] }],
+      sampling: { maxTokens: 64, temperature: 0.8, topP: 0.95, n: 1 },
+    },
+  );
 });
 
 // --- cliConfigApiKey: read the smol CLI's stored login from config.toml ---

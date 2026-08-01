@@ -49,6 +49,9 @@ enum Commands {
     /// Manage CLI configuration
     Config(commands::config::ConfigCmd),
 
+    /// Manage framework-aware fused rollout executors and policy versions
+    Rollout(commands::rollout::RolloutCmd),
+
     /// Internal: boot a VM subprocess (not for direct use)
     #[command(name = "_boot-vm", hide = true)]
     BootVm {
@@ -156,6 +159,7 @@ fn main() {
         Commands::Auth(cmd) => cmd.run(),
         Commands::Cloud(cmd) => cmd.run(),
         Commands::Config(cmd) => cmd.run(),
+        Commands::Rollout(cmd) => cmd.run(),
         Commands::BootVm { config } => boot_vm(config).map_err(|e| anyhow::anyhow!("{}", e)),
         #[cfg(unix)]
         Commands::CudaDaemon { socket } => {

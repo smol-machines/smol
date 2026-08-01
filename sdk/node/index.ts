@@ -18,6 +18,20 @@
  */
 
 export { Machine, Episode } from './machine';
+export { RolloutClient, RolloutError, adapterSha256 } from './rollout';
+export type {
+  BuildRolloutJobOptions,
+  EnsureRolloutExecutorOptions,
+  RolloutBatchItem,
+  RolloutClientOptions,
+  RolloutCompletion,
+  RolloutExecutorInfo,
+  RolloutGenerateResponse,
+  RolloutJob,
+  RolloutPolicyInfo,
+  RolloutPrompt,
+  RolloutSampling,
+} from './rollout';
 export { SmolError, NotSupportedError, InvalidConfigError, ExecutionError } from './errors';
 export type {
   MachineConfig,

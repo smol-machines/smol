@@ -1,11 +1,13 @@
 """Pure-unit tests — no VM boot, no network. Mirrors the Node ``test/unit.ts``."""
 
 import sys
+import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "python"))
 
 from smol.errors import ExecutionError, SmolError, wrap_native_error  # noqa: E402
+from smol.rollout import RolloutClient, RolloutError, adapter_sha256  # noqa: E402
 from smol.transport import _cli_config_api_key, _encode_path, _native_config  # noqa: E402
 from smol.types import ExecResult, MachineConfig, ResourceSpec  # noqa: E402
 
@@ -128,6 +130,63 @@ def test_native_config_omits_gpu_when_unset():
     res = _native_config("m", cfg)["resources"]
     assert "gpu" not in res
     assert "gpu_vram_mib" not in res
+
+
+def test_rollout_adapter_digest_matches_engine_contract():
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        (root / "adapter_config.json").write_bytes(b"{}")
+        (root / "adapter_model.safetensors").write_bytes(b"weights")
+        assert adapter_sha256(root) == (
+            "26d1c7593b9650cb489a9a1fe2fad9def32c75ec2685cf8261c3c0fa3b73e315"
+        )
+
+
+def test_rollout_job_preserves_token_prompts_and_sampling():
+    client = RolloutClient("http://127.0.0.1:8080/api/v1", "qwen")
+    job = client.job(
+        idempotency_key="policy-a-step-4",
+        policy="policy-a",
+        version="step-4",
+        prompts=[[1, 2, 3]],
+        max_tokens=64,
+        temperature=0.8,
+        top_p=0.95,
+    )
+    assert job["prompts"] == [{"tokenIds": [1, 2, 3]}]
+    assert job["sampling"] == {
+        "n": 1,
+        "maxTokens": 64,
+        "temperature": 0.8,
+        "topP": 0.95,
+    }
+
+
+def test_rollout_ensure_rejects_different_existing_config():
+    class ExistingClient(RolloutClient):
+        def _request(self, method, path, body=None):
+            if method == "POST":
+                raise RolloutError(409, "CONFLICT", "already exists")
+            return {
+                "backend": "vllm",
+                "endpoint": "http://127.0.0.1:8000",
+                "adapterRoot": "/adapters",
+                "fallbackPool": None,
+                "maxConcurrentRequests": 8,
+                "maxQueueDepth": 256,
+                "requestTimeoutSecs": 300,
+            }
+
+    client = ExistingClient("http://127.0.0.1:8080/api/v1", "qwen")
+    try:
+        client.ensure_vllm_executor(
+            endpoint="http://127.0.0.1:8000",
+            adapter_root="/adapters",
+            max_concurrent_requests=32,
+        )
+        raise AssertionError("should reject a different existing configuration")
+    except RolloutError as error:
+        assert error.code == "CONFLICT"
 
 
 if __name__ == "__main__":
