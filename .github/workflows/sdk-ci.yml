@@ -49,6 +49,77 @@ jobs:
       - name: Type-check (no native addon required)
         run: npx tsc -p tsconfig.json --noEmit
 
+  bun-local-e2e:
+    name: Bun · local microVM
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: monorepo/smol/sdk/node
+    env:
+      CARGO_TARGET_DIR: ${{ github.workspace }}/.cargo-target/smol-bun
+    steps:
+      - name: Checkout smolvm engine
+        uses: actions/checkout@v4
+        with:
+          repository: smol-machines/smolvm
+          path: monorepo
+          lfs: true
+      - name: Checkout smol SDK
+        uses: actions/checkout@v4
+        with:
+          path: monorepo/smol
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-musl
+      - name: Install build dependencies
+        working-directory: ${{ github.workspace }}
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential libssl-dev musl-tools patchelf pkg-config
+          test -c /dev/kvm
+          sudo chmod 666 /dev/kvm
+      - name: Install SDK dependencies and run Bun tests
+        run: |
+          bun install --frozen-lockfile
+          bun test/unit.ts
+          bun test/cloud-mock.ts
+      - name: Build guest agent and rootfs
+        working-directory: ${{ github.workspace }}/monorepo
+        run: |
+          cargo build --profile release-small -p smolvm-agent --target x86_64-unknown-linux-musl
+          AGENT_BINARY="$CARGO_TARGET_DIR/x86_64-unknown-linux-musl/release-small/smolvm-agent" \
+            ./scripts/build-agent-rootfs.sh --arch x86_64 --no-build-agent
+          sudo tar -cf "${{ runner.temp }}/agent-rootfs.tar" -C target/agent-rootfs .
+      - name: Build native addon and boot helper
+        env:
+          LIBKRUN_BUNDLE: ${{ github.workspace }}/monorepo/lib/linux-x86_64
+          SMOLVM_LIB_DIR: ${{ github.workspace }}/monorepo/lib/linux-x86_64
+        run: |
+          bun run build:native
+          cargo build --release --bin smolvm --manifest-path ../../../Cargo.toml
+      - name: Assemble release assets
+        env:
+          SMOLVM_LIB_DIR: ${{ github.workspace }}/monorepo/lib/linux-x86_64
+          SMOLVM_HELPER: ${{ github.workspace }}/.cargo-target/smol-bun/release/smolvm
+          SMOLVM_ROOTFS_TAR: ${{ runner.temp }}/agent-rootfs.tar
+        run: |
+          bash scripts/bundle-native.sh
+          bun run build:ts
+          cp binding.js binding.d.ts smol.*.node dist/
+      - name: Run zero-config Bun lifecycle
+        env:
+          XDG_DATA_HOME: ${{ runner.temp }}/bun-smol-data
+          XDG_CACHE_HOME: ${{ runner.temp }}/bun-smol-cache
+          XDG_CONFIG_HOME: ${{ runner.temp }}/bun-smol-config
+        run: |
+          unset SMOLVM_BOOT_BINARY SMOLVM_LIB_DIR SMOLVM_AGENT_ROOTFS SMOLVM_AGENT_ROOTFS_TAR LD_LIBRARY_PATH
+          bun test/e2e.ts
+          bun test/bun-package-e2e.ts
+
   python-check:
     name: Python · unit + cloud-mock
     runs-on: ubuntu-latest
@@ -76,10 +147,8 @@ jobs:
         run: python tests/test_verifiers_adapter.py
 
   # --------------------------------------------------------------------------
-  # Native build + microVM end-to-end. Requires a runner WITH libkrun + a
-  # hypervisor AND the full monorepo (the crates link the engine via a relative
-  # path dependency). Wire this to a self-hosted runner and uncomment the steps.
-  # Manually triggered so the per-PR gate stays green on stock runners.
+  # The Bun job above covers the native Linux lifecycle on every SDK PR. Keep a
+  # manual placeholder for future Python-native and macOS coverage.
   # --------------------------------------------------------------------------
   native-e2e:
     name: Native build + e2e (manual; needs libkrun)

@@ -12,6 +12,20 @@ use smolvm::data::resources::{DEFAULT_MICROVM_CPU_COUNT, DEFAULT_MICROVM_MEMORY_
 // Input types (JS → Rust)
 // ============================================================================
 
+/// Paths to the runtime assets bundled with the JavaScript package.
+#[napi(object)]
+#[derive(Debug, Clone)]
+pub struct RuntimeAssets {
+    /// `_boot-vm`-capable helper executable.
+    pub boot_binary: Option<String>,
+    /// Directory containing libkrun and libkrunfw.
+    pub lib_dir: Option<String>,
+    /// Already-extracted guest agent rootfs.
+    pub agent_rootfs: Option<String>,
+    /// Guest agent rootfs tarball to extract on first use.
+    pub agent_rootfs_tar: Option<String>,
+}
+
 /// Configuration for creating a machine.
 #[napi(object)]
 #[derive(Debug, Clone)]

@@ -310,7 +310,8 @@ if (!nativeBinding) {
   throw new Error(`Failed to load native binding`)
 }
 
-const { NapiMachine, ExecStream } = nativeBinding
+const { NapiMachine, ExecStream, configureRuntimeAssets } = nativeBinding
 
 module.exports.NapiMachine = NapiMachine
 module.exports.ExecStream = ExecStream
+module.exports.configureRuntimeAssets = configureRuntimeAssets

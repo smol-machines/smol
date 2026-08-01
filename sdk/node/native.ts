@@ -110,7 +110,12 @@ export interface NapiMachineCtor {
   connect(name: string): NapiMachine;
 }
 
-import { wireBundledAssets } from "./assets";
+import { wireBundledAssets, type RuntimeAssets } from "./assets";
+
+interface NativeBinding {
+  NapiMachine: NapiMachineCtor;
+  configureRuntimeAssets(assets: RuntimeAssets): void;
+}
 
 let cachedCtor: NapiMachineCtor | undefined;
 
@@ -126,9 +131,10 @@ export function getNapiMachine(): NapiMachineCtor {
     // Wire the bundled boot helper + libs into the environment BEFORE the addon
     // loads, so the engine (which reads SMOLVM_BOOT_BINARY / SMOLVM_LIB_DIR at
     // spawn time) uses them.
-    wireBundledAssets();
+    const assets = wireBundledAssets();
     // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const binding = require("./binding.js") as { NapiMachine: NapiMachineCtor };
+    const binding = require("./binding.js") as NativeBinding;
+    binding.configureRuntimeAssets(assets);
     cachedCtor = binding.NapiMachine;
   }
   return cachedCtor;

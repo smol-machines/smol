@@ -17,11 +17,22 @@
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 
-let wired = false;
+export interface RuntimeAssets {
+  bootBinary?: string;
+  libDir?: string;
+  agentRootfs?: string;
+  agentRootfsTar?: string;
+}
 
-export function wireBundledAssets(): void {
-  if (wired) return;
-  wired = true;
+export function wireBundledAssets(): RuntimeAssets {
+  const assets: RuntimeAssets = {};
+  if (process.env.SMOLVM_BOOT_BINARY) assets.bootBinary = process.env.SMOLVM_BOOT_BINARY;
+  if (process.env.SMOLVM_LIB_DIR) assets.libDir = process.env.SMOLVM_LIB_DIR;
+  if (process.env.SMOLVM_AGENT_ROOTFS) {
+    assets.agentRootfs = process.env.SMOLVM_AGENT_ROOTFS;
+  } else if (process.env.SMOLVM_AGENT_ROOTFS_TAR) {
+    assets.agentRootfsTar = process.env.SMOLVM_AGENT_ROOTFS_TAR;
+  }
 
   const platformArch = `${process.platform}-${process.arch}`;
   const helperName = process.platform === 'win32' ? 'smol-vmm.exe' : 'smol-vmm';
@@ -36,18 +47,22 @@ export function wireBundledAssets(): void {
   for (const nativeDir of candidates) {
     if (!existsSync(nativeDir)) continue;
     const helper = join(nativeDir, helperName);
-    if (!process.env.SMOLVM_BOOT_BINARY && existsSync(helper)) {
+    if (!assets.bootBinary && existsSync(helper)) {
+      assets.bootBinary = helper;
       process.env.SMOLVM_BOOT_BINARY = helper;
     }
-    if (!process.env.SMOLVM_LIB_DIR) {
+    if (!assets.libDir) {
+      assets.libDir = nativeDir;
       process.env.SMOLVM_LIB_DIR = nativeDir;
     }
     const rootfsTar = join(nativeDir, 'agent-rootfs.tar');
-    if (!process.env.SMOLVM_AGENT_ROOTFS && !process.env.SMOLVM_AGENT_ROOTFS_TAR && existsSync(rootfsTar)) {
+    if (!assets.agentRootfs && !assets.agentRootfsTar && existsSync(rootfsTar)) {
+      assets.agentRootfsTar = rootfsTar;
       process.env.SMOLVM_AGENT_ROOTFS_TAR = rootfsTar;
     }
-    return;
+    break;
   }
+  return assets;
 }
 
 wireBundledAssets();

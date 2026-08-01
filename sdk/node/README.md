@@ -81,6 +81,15 @@ npm install smolmachines
 Requires Node.js ≥ 18 on a host the engine supports (macOS Apple Silicon, or Linux
 with KVM).
 
+Bun 1.3.14 and newer uses the same API, including zero-configuration local
+machines—the package automatically configures its bundled hypervisor, boot
+helper, and guest rootfs:
+
+```bash
+bun add smolmachines
+bun run app.ts
+```
+
 ## Usage
 
 ```ts
