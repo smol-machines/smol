@@ -72,6 +72,8 @@ jobs:
         run: python tests/test_cloud_ready_no_ports.py
       - name: Async-transport tests (AsyncMachine vs mock /v1; pure Python)
         run: python tests/test_async_mock.py
+      - name: verifiers runtime adapter (pure mapping; skips runtime checks without verifiers)
+        run: python tests/test_verifiers_adapter.py
 
   # --------------------------------------------------------------------------
   # Native build + microVM end-to-end. Requires a runner WITH libkrun + a
