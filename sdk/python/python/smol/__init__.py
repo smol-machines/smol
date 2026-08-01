@@ -45,8 +45,8 @@ from .errors import (
     SmolError,
     wrap_native_error,
 )
-from .async_machine import AsyncMachine
-from .machine import Machine
+from .async_machine import AsyncEpisode, AsyncMachine
+from .machine import Episode, Machine
 from .types import (
     ConnectOptions,
     ExecOptions,
@@ -64,6 +64,8 @@ __version__ = "1.7.0"
 __all__ = [
     "Machine",
     "AsyncMachine",
+    "Episode",
+    "AsyncEpisode",
     "MachineConfig",
     "ResourceSpec",
     "MountSpec",

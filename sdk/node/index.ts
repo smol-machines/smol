@@ -17,7 +17,7 @@
  * cloud — same API, backend selected via ConnectOptions / SMOL_CLOUD_TOKEN.
  */
 
-export { Machine } from './machine';
+export { Machine, Episode } from './machine';
 export { SmolError, NotSupportedError, InvalidConfigError, ExecutionError } from './errors';
 export type {
   MachineConfig,
@@ -26,6 +26,7 @@ export type {
   MountSpec,
   PortSpec,
   ForkBatchOptions,
+  AssignOptions,
   ExecOptions,
   ExecResult,
   ImageInfo,

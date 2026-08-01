@@ -98,6 +98,27 @@ class Handler(BaseHTTPRequestHandler):
                     "createdAt": "2026-05-30T00:00:00Z", "updatedAt": "2026-05-30T00:00:00Z",
                 })
             return self._send(201, json.dumps({"clones": clones}).encode())
+        if self.path == f"/v1/machines/{MACHINE_ID}/assign":
+            captured["assign_body"] = json.loads(self._read() or b"{}")
+            return self._send(201, json.dumps({
+                "leaseId": captured["assign_body"].get("leaseId"),
+                "machineId": "mach-ep1", "ownerToken": "tok_secret", "state": "ready",
+                "machine": {
+                    "id": "mach-ep1", "name": "ep-1",
+                    "source": {"type": "image", "reference": "alpine:3.20"}, "state": "started",
+                    "resources": {"cpus": 2, "memoryMb": 1024}, "network": {"mode": "open"},
+                    "env": {}, "ephemeral": False, "ports": [],
+                    "createdAt": "2026-05-30T00:00:00Z", "updatedAt": "2026-05-30T00:00:00Z",
+                },
+            }).encode())
+        if self.path.startswith("/v1/leases/") and self.path.endswith("/heartbeat"):
+            captured["heartbeat_body"] = json.loads(self._read() or b"{}")
+            return self._send(200, json.dumps(
+                {"leaseId": "task-99", "machineId": "mach-ep1", "state": "ready"}).encode())
+        if self.path.startswith("/v1/leases/") and self.path.endswith("/complete"):
+            captured["complete_body"] = json.loads(self._read() or b"{}")
+            return self._send(200, json.dumps(
+                {"leaseId": "task-99", "machineId": "mach-ep1", "state": "completed"}).encode())
         if self.path == f"/v1/machines/{MACHINE_ID}/exec":
             captured["exec_body"] = json.loads(self._read() or b"{}")
             return self._send(200, json.dumps({
@@ -139,6 +160,10 @@ class Handler(BaseHTTPRequestHandler):
             )
         if self.path == f"/v1/machines/{CLONE_ID}":
             return self._send(200, json.dumps({"id": CLONE_ID, "state": "started", "ready": True}).encode())
+        # Readiness for the assigned episode clone.
+        if self.path.startswith("/v1/machines/mach-ep"):
+            mid = self.path.rsplit("/", 1)[-1]
+            return self._send(200, json.dumps({"id": mid, "state": "started", "ready": True}).encode())
         # Readiness for batch-fork clones (mach-b1, mach-b2, …).
         if self.path.startswith("/v1/machines/mach-b"):
             mid = self.path.rsplit("/", 1)[-1]
@@ -304,6 +329,28 @@ def main() -> int:
         check("fork_batch returns N clones in request order",
               len(batch) == 3 and batch[0].name == "rollout-1" and batch[2].name == "rollout-3",
               ",".join(c.name for c in batch))
+
+        # --- assign: lease an RL episode, heartbeat, auto-complete on context exit ---
+        with m.assign("task-99", task={"seed": 7}, secrets={"KEY": "v"}) as ep:
+            check("assign hit POST /assign", f"POST /v1/machines/{MACHINE_ID}/assign" in captured["hits"])
+            check("assign sent leaseId + task + secrets",
+                  captured["assign_body"].get("leaseId") == "task-99"
+                  and captured["assign_body"].get("task") == {"seed": 7}
+                  and captured["assign_body"].get("secrets") == {"KEY": "v"},
+                  str(captured.get("assign_body")))
+            check("episode exposes the provisioned clone", ep.machine.name == "ep-1", ep.machine.name)
+            ep.heartbeat()
+            check("heartbeat hit POST /leases/:id/heartbeat",
+                  "POST /v1/leases/task-99/heartbeat" in captured["hits"])
+            check("heartbeat sent the owner token",
+                  captured.get("heartbeat_body", {}).get("ownerToken") == "tok_secret",
+                  str(captured.get("heartbeat_body")))
+        check("complete hit POST /leases/:id/complete on context exit",
+              "POST /v1/leases/task-99/complete" in captured["hits"])
+        check("complete sent owner token + 'done' reason on clean exit",
+              captured.get("complete_body", {}).get("ownerToken") == "tok_secret"
+              and captured.get("complete_body", {}).get("reason") == "done",
+              str(captured.get("complete_body")))
 
         # reward_fork: grade in a throwaway clone without touching the original.
         captured["clone_deleted"] = False

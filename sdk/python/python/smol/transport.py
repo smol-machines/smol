@@ -98,6 +98,22 @@ class Transport(Protocol):
         ports: Optional[list[PortSpec]] = None,
     ) -> "list[Transport]": ...
 
+    def assign(
+        self,
+        lease_id: str,
+        *,
+        task: Any = None,
+        files: Optional[dict[str, bytes]] = None,
+        secrets: Optional[dict[str, str]] = None,
+        ports: Optional[list[PortSpec]] = None,
+        ttl_secs: Optional[int] = None,
+        heartbeat_secs: Optional[int] = None,
+    ) -> "tuple[Transport, str, str]": ...
+
+    def heartbeat_lease(self, lease_id: str, owner_token: str) -> None: ...
+
+    def complete_lease(self, lease_id: str, owner_token: str, reason: str) -> None: ...
+
 
 def _encode_path(p: str) -> str:
     """Percent-encode each segment but keep ``/`` (smolfleet files route is a
@@ -361,6 +377,29 @@ class LocalTransport:
                     pass
             raise
         return forks
+
+    def assign(
+        self,
+        lease_id: str,
+        *,
+        task: Any = None,
+        files: Optional[dict[str, bytes]] = None,
+        secrets: Optional[dict[str, str]] = None,
+        ports: Optional[list[PortSpec]] = None,
+        ttl_secs: Optional[int] = None,
+        heartbeat_secs: Optional[int] = None,
+    ) -> "tuple[Transport, str, str]":
+        raise NotSupportedError(
+            "assign() is a cloud feature: episode leases (idempotent assignment, "
+            "heartbeat, TTL reclaim) live in the control plane. On the local target "
+            "use fork()/fork_batch() directly."
+        )
+
+    def heartbeat_lease(self, lease_id: str, owner_token: str) -> None:
+        raise NotSupportedError("heartbeat_lease() is a cloud-only lease feature.")
+
+    def complete_lease(self, lease_id: str, owner_token: str, reason: str) -> None:
+        raise NotSupportedError("complete_lease() is a cloud-only lease feature.")
 
 
 # ---------------------------------------------------------------------------
@@ -641,6 +680,72 @@ class CloudTransport:
         for t in transports:
             _wait_for_ready(self._base, self._key, t._id)
         return transports
+
+    def assign(
+        self,
+        lease_id: str,
+        *,
+        task: Any = None,
+        files: Optional[dict[str, bytes]] = None,
+        secrets: Optional[dict[str, str]] = None,
+        ports: Optional[list[PortSpec]] = None,
+        ttl_secs: Optional[int] = None,
+        heartbeat_secs: Optional[int] = None,
+    ) -> "tuple[CloudTransport, str, str]":
+        # One idempotent call: the control plane forks + provisions ONE clone and
+        # returns it only once fully installed, plus the owner token. Files are
+        # base64-encoded for a binary-safe hop.
+        body: dict[str, Any] = {"leaseId": lease_id}
+        if task is not None:
+            body["task"] = task
+        if files:
+            body["files"] = [
+                {"path": p, "contentB64": base64.b64encode(c).decode()}
+                for p, c in files.items()
+            ]
+        if secrets:
+            body["secrets"] = secrets
+        if ports:
+            body["ports"] = [{"port": p.guest, "hostPort": p.host} for p in ports]
+        if ttl_secs is not None:
+            body["ttlSecs"] = ttl_secs
+        if heartbeat_secs is not None:
+            body["heartbeatSecs"] = heartbeat_secs
+        resp = (
+            _cloud_fetch(
+                self._base,
+                self._key,
+                "POST",
+                f"/v1/machines/{self._id}/assign",
+                json_body=body,
+            )
+            or {}
+        )
+        machine_id = resp["machineId"]
+        owner_token = resp["ownerToken"]
+        info = resp.get("machine") or {}
+        clone_name = info.get("name") or machine_id
+        clone = CloudTransport(self._base, self._key, machine_id, clone_name)
+        _wait_for_ready(self._base, self._key, machine_id)
+        return (clone, lease_id, owner_token)
+
+    def heartbeat_lease(self, lease_id: str, owner_token: str) -> None:
+        _cloud_fetch(
+            self._base,
+            self._key,
+            "POST",
+            f"/v1/leases/{lease_id}/heartbeat",
+            json_body={"ownerToken": owner_token},
+        )
+
+    def complete_lease(self, lease_id: str, owner_token: str, reason: str) -> None:
+        _cloud_fetch(
+            self._base,
+            self._key,
+            "POST",
+            f"/v1/leases/{lease_id}/complete",
+            json_body={"ownerToken": owner_token, "reason": reason},
+        )
 
 
 def _resolve_batch_names(

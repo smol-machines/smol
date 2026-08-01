@@ -76,6 +76,26 @@ export interface ForkBatchOptions {
   ports?: PortSpec[];
 }
 
+/** Options for assigning an RL episode — fork + provision one clone of a forkable
+ *  golden under an idempotent lease. Cloud target only. */
+export interface AssignOptions {
+  /** Caller-chosen idempotency key; a retried assign returns the same episode. */
+  leaseId: string;
+  /** JSON-serializable task payload, staged into the clone at
+   *  `/run/smol-task.json` before it's handed back. */
+  task?: unknown;
+  /** Files to stage into the clone: `{ guestPath: content }`. */
+  files?: Record<string, Uint8Array>;
+  /** Per-episode secrets, staged at `/run/smol-secrets.json`; never persisted. */
+  secrets?: Record<string, string>;
+  /** Optional pinned inbound port forwards. */
+  ports?: PortSpec[];
+  /** Lease time-to-live in seconds; the clone is reclaimed past it. */
+  ttlSecs?: number;
+  /** Expected heartbeat cadence in seconds; reclaimed if missed. */
+  heartbeatSecs?: number;
+}
+
 /** Configuration for creating a machine. */
 export interface MachineConfig {
   /** Machine name (auto-generated if omitted). */

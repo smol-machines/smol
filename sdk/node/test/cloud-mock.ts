@@ -98,8 +98,36 @@ const server = createServer(async (req, res) => {
     }));
     return json(201, { clones });
   }
-  // Readiness for batch-fork clones (b1, b2, …).
-  if (method === "GET" && /^\/v1\/machines\/b\d+$/.test(url)) {
+  if (method === "POST" && url === "/v1/machines/m1/assign") {
+    seen.assignBody = JSON.parse((await readBody(req)).toString() || "{}");
+    return json(201, {
+      leaseId: seen.assignBody.leaseId,
+      machineId: "ep1",
+      ownerToken: "tok_secret",
+      state: "ready",
+      machine: {
+        id: "ep1",
+        name: "ep-1",
+        state: "started",
+        source: { type: "image", reference: "alpine" },
+        resources: { cpus: 2, memoryMb: 1024 },
+        network: { mode: "open" },
+        env: {},
+        ephemeral: false,
+        ports: [],
+      },
+    });
+  }
+  if (method === "POST" && /^\/v1\/leases\/[^/]+\/heartbeat$/.test(url)) {
+    seen.heartbeatBody = JSON.parse((await readBody(req)).toString() || "{}");
+    return json(200, { leaseId: "task-99", machineId: "ep1", state: "ready" });
+  }
+  if (method === "POST" && /^\/v1\/leases\/[^/]+\/complete$/.test(url)) {
+    seen.completeBody = JSON.parse((await readBody(req)).toString() || "{}");
+    return json(200, { leaseId: "task-99", machineId: "ep1", state: "completed" });
+  }
+  // Readiness for batch-fork clones (b1, b2, …) and the episode clone (ep1).
+  if (method === "GET" && /^\/v1\/machines\/(b\d+|ep\d+)$/.test(url)) {
     return json(200, { id: url.split("/").pop(), state: "running" });
   }
   if (method === "GET" && url === "/v1/machines/m1")
@@ -413,6 +441,37 @@ async function main(): Promise<void> {
       batch[0].name === "rollout-1" &&
       batch[2].name === "rollout-3",
     batch.map((c) => c.name).join(","),
+  );
+
+  // --- assign: lease an RL episode, heartbeat, complete ---
+  const episode = await m.assign({
+    leaseId: "task-99",
+    task: { seed: 7 },
+    secrets: { KEY: "v" },
+  });
+  check(
+    "assign hit POST /assign with leaseId + task + secrets",
+    seen.assignBody?.leaseId === "task-99" &&
+      JSON.stringify(seen.assignBody?.task) === JSON.stringify({ seed: 7 }) &&
+      JSON.stringify(seen.assignBody?.secrets) === JSON.stringify({ KEY: "v" }),
+    JSON.stringify(seen.assignBody),
+  );
+  check(
+    "episode exposes the provisioned clone",
+    episode.machine.name === "ep-1",
+    episode.machine.name,
+  );
+  await episode.heartbeat();
+  check(
+    "heartbeat sent the owner token to /leases/:id/heartbeat",
+    seen.heartbeatBody?.ownerToken === "tok_secret",
+    JSON.stringify(seen.heartbeatBody),
+  );
+  await episode.complete("done");
+  check(
+    "complete sent owner token + reason to /leases/:id/complete",
+    seen.completeBody?.ownerToken === "tok_secret" && seen.completeBody?.reason === "done",
+    JSON.stringify(seen.completeBody),
   );
 
   // --- reward_fork: grade in a throwaway clone without touching the original ---

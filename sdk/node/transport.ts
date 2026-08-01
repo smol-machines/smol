@@ -26,6 +26,7 @@ import type {
   ConnectOptions,
   ExecEvent,
   ExecOptions,
+  AssignOptions,
   ForkBatchOptions,
   ImageInfo,
   MachineConfig,
@@ -106,6 +107,11 @@ export interface Transport {
   delete(): Promise<void>;
   fork(name: string, ports?: PortSpec[]): Promise<Transport>;
   forkBatch(opts: ForkBatchOptions): Promise<Transport[]>;
+  assign(
+    opts: AssignOptions,
+  ): Promise<{ transport: Transport; leaseId: string; ownerToken: string }>;
+  heartbeatLease(leaseId: string, ownerToken: string): Promise<void>;
+  completeLease(leaseId: string, ownerToken: string, reason: string): Promise<void>;
 }
 
 /** Resolve a batch fork's clone names + size, mirroring the control plane:
@@ -407,6 +413,26 @@ class LocalTransport implements Transport {
       throw e;
     }
     return forks;
+  }
+
+  async assign(): Promise<{
+    transport: Transport;
+    leaseId: string;
+    ownerToken: string;
+  }> {
+    throw new NotSupportedError(
+      "assign() is a cloud feature: episode leases (idempotent assignment, " +
+        "heartbeat, TTL reclaim) live in the control plane. On the local target " +
+        "use fork()/forkBatch() directly.",
+    );
+  }
+
+  async heartbeatLease(): Promise<void> {
+    throw new NotSupportedError("heartbeatLease() is a cloud-only lease feature.");
+  }
+
+  async completeLease(): Promise<void> {
+    throw new NotSupportedError("completeLease() is a cloud-only lease feature.");
   }
 }
 
@@ -922,6 +948,56 @@ class CloudTransport implements Transport {
     // returned handle is usable.
     await Promise.all(clones.map((c) => waitForReady(this.conn, c.id)));
     return clones.map((c) => new CloudTransport(this.conn, c.name ?? c.id, c.id));
+  }
+
+  async assign(
+    opts: AssignOptions,
+  ): Promise<{ transport: Transport; leaseId: string; ownerToken: string }> {
+    // One idempotent call: the control plane forks + provisions ONE clone and
+    // returns it only once fully installed, plus the owner token. Files are
+    // base64-encoded for a binary-safe hop.
+    const body: Record<string, unknown> = { leaseId: opts.leaseId };
+    if (opts.task !== undefined) body.task = opts.task;
+    if (opts.files) {
+      body.files = Object.entries(opts.files).map(([path, content]) => ({
+        path,
+        contentB64: Buffer.from(content).toString("base64"),
+      }));
+    }
+    if (opts.secrets) body.secrets = opts.secrets;
+    if (opts.ports) {
+      body.ports = opts.ports.map((p) => ({ port: p.guest, hostPort: p.host }));
+    }
+    if (opts.ttlSecs !== undefined) body.ttlSecs = opts.ttlSecs;
+    if (opts.heartbeatSecs !== undefined) body.heartbeatSecs = opts.heartbeatSecs;
+    const resp = await cloudFetch<{
+      machineId: string;
+      ownerToken: string;
+      machine: MachineInfo;
+    }>(this.conn, "POST", `/v1/machines/${this.id}/assign`, { json: body });
+    await waitForReady(this.conn, resp.machineId);
+    const transport = new CloudTransport(
+      this.conn,
+      resp.machine?.name ?? resp.machineId,
+      resp.machineId,
+    );
+    return { transport, leaseId: opts.leaseId, ownerToken: resp.ownerToken };
+  }
+
+  async heartbeatLease(leaseId: string, ownerToken: string): Promise<void> {
+    await cloudFetch(this.conn, "POST", `/v1/leases/${leaseId}/heartbeat`, {
+      json: { ownerToken },
+    });
+  }
+
+  async completeLease(
+    leaseId: string,
+    ownerToken: string,
+    reason: string,
+  ): Promise<void> {
+    await cloudFetch(this.conn, "POST", `/v1/leases/${leaseId}/complete`, {
+      json: { ownerToken, reason },
+    });
   }
 }
 

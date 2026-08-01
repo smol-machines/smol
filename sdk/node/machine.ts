@@ -17,6 +17,7 @@ import {
   type Transport,
 } from "./transport";
 import type {
+  AssignOptions,
   ConnectOptions,
   ExecEvent,
   ExecOptions,
@@ -249,6 +250,30 @@ export class Machine {
     return clones.map((t) => new Machine(t));
   }
 
+  /** Assign an RL episode: fork + provision a clone of this forkable golden under
+   *  an idempotent lease, returned only once fully installed — with lifecycle
+   *  control (`Episode.heartbeat()` / `Episode.complete()`). The scheduler's "give
+   *  me one clean worker for this task, exactly once" call. **Cloud target only.**
+   *
+   *  Idempotent on `opts.leaseId`: a retried assign with the same key returns the
+   *  SAME episode instead of a second fork. `task` is staged into the clone at
+   *  `/run/smol-task.json`, `secrets` at `/run/smol-secrets.json`, and `files` at
+   *  their paths — all before the episode is handed back. Always `complete()` the
+   *  episode (e.g. in a `finally`) so its clone is reclaimed.
+   *
+   *  ```ts
+   *  const ep = await golden.assign({ leaseId: "task-42", task: { seed: 7 } });
+   *  try {
+   *    await ep.exec(["python", "rollout.py"]);
+   *  } finally {
+   *    await ep.complete("done");
+   *  }
+   *  ``` */
+  async assign(opts: AssignOptions): Promise<Episode> {
+    const { transport, leaseId, ownerToken } = await this.transport.assign(opts);
+    return new Episode(new Machine(transport), leaseId, ownerToken, this.transport);
+  }
+
   /** Score this machine's state WITHOUT mutating it: fork an ephemeral clone,
    *  run the grader command in the clone, then destroy it. The result (exit code
    *  / stdout) is your reward signal; this machine is untouched. This is the RL
@@ -274,5 +299,54 @@ export class Machine {
       // Best-effort teardown — never mask the grader's result/error.
       await clone.delete().catch(() => {});
     }
+  }
+}
+
+/** A leased RL episode: a freshly-provisioned clone plus its lease. Created by
+ *  `Machine.assign()`. Always `complete()` it (e.g. in a `finally`) so the clone
+ *  is reclaimed — the RL "one clean worker per task, guaranteed reclaimed"
+ *  pattern. Cloud target only. */
+export class Episode {
+  readonly #machine: Machine;
+  readonly leaseId: string;
+  readonly #ownerToken: string;
+  readonly #leaseTransport: Transport;
+  #completed = false;
+
+  constructor(
+    machine: Machine,
+    leaseId: string,
+    ownerToken: string,
+    leaseTransport: Transport,
+  ) {
+    this.#machine = machine;
+    this.leaseId = leaseId;
+    this.#ownerToken = ownerToken;
+    this.#leaseTransport = leaseTransport;
+  }
+
+  /** The episode's provisioned clone. */
+  get machine(): Machine {
+    return this.#machine;
+  }
+
+  /** Run a command in the episode's machine (shortcut for `.machine.exec`). */
+  async exec(command: string[], opts?: ExecOptions): Promise<ExecResult> {
+    return this.#machine.exec(command, opts);
+  }
+
+  /** Keep the lease alive. Call within the `heartbeatSecs` cadence you requested,
+   *  or the episode is reclaimed as `heartbeat_lost`. */
+  async heartbeat(): Promise<void> {
+    await this.#leaseTransport.heartbeatLease(this.leaseId, this.#ownerToken);
+  }
+
+  /** Finish the episode with a typed termination reason (e.g. `done`,
+   *  `agent_failed`, `infra_failed`, `cancelled`) and tear its clone down.
+   *  Idempotent — a second call is a no-op. */
+  async complete(reason = "done"): Promise<void> {
+    if (this.#completed) return;
+    await this.#leaseTransport.completeLease(this.leaseId, this.#ownerToken, reason);
+    this.#completed = true;
   }
 }

@@ -200,6 +200,33 @@ class AsyncMachine:
         )
         return [AsyncMachine(c) for c in clones]
 
+    async def assign(
+        self,
+        lease_id: str,
+        *,
+        task: object = None,
+        files: Optional[dict[str, bytes]] = None,
+        secrets: Optional[dict[str, str]] = None,
+        ports: Optional[list[PortSpec]] = None,
+        ttl_secs: Optional[int] = None,
+        heartbeat_secs: Optional[int] = None,
+    ) -> "AsyncEpisode":
+        """Assign an RL episode (cloud target only): fork + provision a clone under
+        an idempotent lease. See :meth:`Machine.assign`. Returns an
+        :class:`AsyncEpisode` usable as an async context manager for guaranteed
+        teardown."""
+        ep = await asyncio.to_thread(
+            self._m.assign,
+            lease_id,
+            task=task,
+            files=files,
+            secrets=secrets,
+            ports=ports,
+            ttl_secs=ttl_secs,
+            heartbeat_secs=heartbeat_secs,
+        )
+        return AsyncEpisode(AsyncMachine(ep.machine), ep)
+
     async def reward_fork(
         self,
         command: list[str],
@@ -219,3 +246,44 @@ class AsyncMachine:
 
     async def __aexit__(self, *exc: object) -> None:
         await self.delete()
+
+
+class AsyncEpisode:
+    """Async view of a leased RL episode (see :class:`smol.Episode`). Created by
+    :meth:`AsyncMachine.assign`; use as an async context manager for guaranteed
+    teardown."""
+
+    def __init__(self, machine: "AsyncMachine", episode: object) -> None:
+        self._machine = machine
+        self._ep = episode  # the underlying sync smol.Episode
+
+    @property
+    def machine(self) -> "AsyncMachine":
+        """The episode's provisioned clone."""
+        return self._machine
+
+    @property
+    def lease_id(self) -> str:
+        return self._ep.lease_id
+
+    async def exec(self, command: list[str], opts: Optional[ExecOptions] = None) -> ExecResult:
+        """Run a command in the episode's machine."""
+        return await self._machine.exec(command, opts)
+
+    async def heartbeat(self) -> None:
+        """Keep the lease alive (call within your ``heartbeat_secs`` cadence)."""
+        await asyncio.to_thread(self._ep.heartbeat)
+
+    async def complete(self, reason: str = "done") -> None:
+        """Finish the episode with a termination reason and tear its clone down.
+        Idempotent."""
+        await asyncio.to_thread(self._ep.complete, reason)
+
+    async def __aenter__(self) -> "AsyncEpisode":
+        return self
+
+    async def __aexit__(self, exc_type: object, *_: object) -> None:
+        try:
+            await self.complete("done" if exc_type is None else "agent_failed")
+        except Exception:
+            pass

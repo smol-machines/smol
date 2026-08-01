@@ -231,6 +231,53 @@ class Machine:
             )
         ]
 
+    def assign(
+        self,
+        lease_id: str,
+        *,
+        task: object = None,
+        files: Optional[dict[str, bytes]] = None,
+        secrets: Optional[dict[str, str]] = None,
+        ports: Optional[list[PortSpec]] = None,
+        ttl_secs: Optional[int] = None,
+        heartbeat_secs: Optional[int] = None,
+    ) -> "Episode":
+        """Assign an RL episode: fork + provision a clone of this forkable golden
+        under an idempotent lease, and get it back only once fully installed —
+        with lifecycle control (:meth:`Episode.heartbeat`, :meth:`Episode.complete`).
+        The scheduler's "give me one clean worker for this task, exactly once"
+        call. **Cloud target only** (leases live in the control plane).
+
+        Idempotent on ``lease_id``: a retried ``assign`` with the same key returns
+        the SAME episode instead of forking a second one. The ``task`` payload is
+        staged into the clone at ``/run/smol-task.json``, ``secrets`` at
+        ``/run/smol-secrets.json``, and ``files`` at their given paths — all before
+        the episode is handed back, so a returned :class:`Episode` is always fully
+        provisioned. Use it as a context manager to guarantee teardown::
+
+            with golden.assign("task-42", task={"seed": 7}) as ep:
+                ep.exec(["python", "rollout.py"])   # clone auto-completed on exit
+
+        :param lease_id: caller-chosen idempotency key.
+        :param task: JSON-serializable task payload.
+        :param files: ``{guest_path: bytes}`` to stage into the clone.
+        :param secrets: ``{name: value}`` staged as a JSON file, never persisted.
+        :param ports: optional pinned inbound port forwards.
+        :param ttl_secs: lease time-to-live; the clone is reclaimed past it.
+        :param heartbeat_secs: expected heartbeat cadence; reclaimed if missed.
+        :returns: an :class:`Episode` handle.
+        """
+        clone_t, lid, owner_token = self._t.assign(
+            lease_id,
+            task=task,
+            files=files,
+            secrets=secrets,
+            ports=ports,
+            ttl_secs=ttl_secs,
+            heartbeat_secs=heartbeat_secs,
+        )
+        return Episode(Machine(clone_t), lid, owner_token, self._t)
+
     def reward_fork(
         self,
         command: list[str],
@@ -269,3 +316,58 @@ class Machine:
 
     def __exit__(self, *exc: object) -> None:
         self.delete()
+
+
+class Episode:
+    """A leased RL episode: a freshly-provisioned clone plus its lease. Created by
+    :meth:`Machine.assign`. Use it as a context manager so the clone is always torn
+    down when the block exits (even on error) — the RL "one clean worker per task,
+    guaranteed reclaimed" pattern. Cloud target only.
+    """
+
+    def __init__(
+        self,
+        machine: Machine,
+        lease_id: str,
+        owner_token: str,
+        lease_transport: "Transport",
+    ) -> None:
+        self._machine = machine
+        self.lease_id = lease_id
+        self._owner_token = owner_token
+        self._lease_t = lease_transport
+        self._completed = False
+
+    @property
+    def machine(self) -> Machine:
+        """The episode's provisioned clone."""
+        return self._machine
+
+    def exec(self, command: list[str], opts: Optional[ExecOptions] = None) -> ExecResult:
+        """Run a command in the episode's machine (shortcut for ``.machine.exec``)."""
+        return self._machine.exec(command, opts)
+
+    def heartbeat(self) -> None:
+        """Keep the lease alive. Call within the ``heartbeat_secs`` cadence you
+        requested, or the episode is reclaimed as ``heartbeat_lost``."""
+        self._lease_t.heartbeat_lease(self.lease_id, self._owner_token)
+
+    def complete(self, reason: str = "done") -> None:
+        """Finish the episode with a typed termination reason (e.g. ``done``,
+        ``agent_failed``, ``infra_failed``, ``cancelled``) and tear its clone down.
+        Idempotent — a second call is a no-op."""
+        if self._completed:
+            return
+        self._lease_t.complete_lease(self.lease_id, self._owner_token, reason)
+        self._completed = True
+
+    def __enter__(self) -> "Episode":
+        return self
+
+    def __exit__(self, exc_type: object, *_: object) -> None:
+        # Always release the episode; a clean exit is `done`, an exception is
+        # `agent_failed` so a trainer can tell task failure from infra failure.
+        try:
+            self.complete("done" if exc_type is None else "agent_failed")
+        except Exception:
+            pass
