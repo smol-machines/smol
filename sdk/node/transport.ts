@@ -103,7 +103,9 @@ export interface Transport {
   writeFile(path: string, data: Buffer, mode?: number): Promise<void>;
   pullImage(image: string): Promise<ImageInfo>;
   listImages(): Promise<ImageInfo[]>;
+  readonly machineId: string;
   stop(): Promise<void>;
+  start(): Promise<void>;
   delete(): Promise<void>;
   fork(name: string, ports?: PortSpec[]): Promise<Transport>;
   forkBatch(opts: ForkBatchOptions): Promise<Transport[]>;
@@ -111,7 +113,14 @@ export interface Transport {
     opts: AssignOptions,
   ): Promise<{ transport: Transport; leaseId: string; ownerToken: string }>;
   heartbeatLease(leaseId: string, ownerToken: string): Promise<void>;
-  completeLease(leaseId: string, ownerToken: string, reason: string): Promise<void>;
+  completeLease(
+    leaseId: string,
+    ownerToken: string,
+    reason: string,
+    score?: number,
+    result?: unknown,
+  ): Promise<void>;
+  getLease(leaseId: string): Promise<Record<string, unknown>>;
 }
 
 /** Resolve a batch fork's clone names + size, mirroring the control plane:
@@ -251,6 +260,11 @@ class LocalTransport implements Transport {
     return this.inner.name;
   }
 
+  get machineId(): string {
+    // Local machines are identified by their name (no cloud `mach-…` id).
+    return this.inner.name;
+  }
+
   async state(): Promise<string> {
     return this.inner.state();
   }
@@ -373,6 +387,15 @@ class LocalTransport implements Transport {
     }
   }
 
+  async start(): Promise<void> {
+    try {
+      await this.inner.start();
+    } catch (e) {
+      throw wrapNativeError(e);
+    }
+    liveLocal.add(this);
+  }
+
   async delete(): Promise<void> {
     liveLocal.delete(this);
     try {
@@ -433,6 +456,10 @@ class LocalTransport implements Transport {
 
   async completeLease(): Promise<void> {
     throw new NotSupportedError("completeLease() is a cloud-only lease feature.");
+  }
+
+  async getLease(): Promise<Record<string, unknown>> {
+    throw new NotSupportedError("getLease() is a cloud-only lease feature.");
   }
 }
 
@@ -634,6 +661,10 @@ class CloudTransport implements Transport {
     public readonly name: string,
     private readonly id: string,
   ) {}
+
+  get machineId(): string {
+    return this.id;
+  }
 
   async state(): Promise<string> {
     const m = await cloudFetch<MachineInfo>(
@@ -901,6 +932,12 @@ class CloudTransport implements Transport {
     await cloudFetch(this.conn, "POST", `/v1/machines/${this.id}/stop`);
   }
 
+  async start(): Promise<void> {
+    // Resume a stopped machine, then wait for its agent so the handle is usable.
+    await cloudFetch(this.conn, "POST", `/v1/machines/${this.id}/start`);
+    await waitForReady(this.conn, this.id);
+  }
+
   async delete(): Promise<void> {
     await cloudFetch(this.conn, "DELETE", `/v1/machines/${this.id}`);
   }
@@ -994,10 +1031,23 @@ class CloudTransport implements Transport {
     leaseId: string,
     ownerToken: string,
     reason: string,
+    score?: number,
+    result?: unknown,
   ): Promise<void> {
+    const json: Record<string, unknown> = { ownerToken, reason };
+    if (score !== undefined) json.score = score;
+    if (result !== undefined) json.result = result;
     await cloudFetch(this.conn, "POST", `/v1/leases/${leaseId}/complete`, {
-      json: { ownerToken, reason },
+      json,
     });
+  }
+
+  async getLease(leaseId: string): Promise<Record<string, unknown>> {
+    return cloudFetch<Record<string, unknown>>(
+      this.conn,
+      "GET",
+      `/v1/leases/${leaseId}`,
+    );
   }
 }
 

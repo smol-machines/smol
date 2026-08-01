@@ -96,6 +96,13 @@ export class Machine {
     return this.transport.name;
   }
 
+  /** The machine's id — the cloud `mach-…` id (or the name on local). Handy right
+   *  after `create()`/`fork()` so you don't have to list the tenant to find the
+   *  machine you just made. */
+  get id(): string {
+    return this.transport.machineId;
+  }
+
   /** Current lifecycle state. On cloud, `"started"` means only that the VM
    *  process launched; it does not mean the guest or workload is ready. Use
    *  `ready()` or `waitUntilReady()` before doing work. */
@@ -209,6 +216,13 @@ export class Machine {
   /** Stop the machine. */
   stop(): Promise<void> {
     return this.transport.stop();
+  }
+
+  /** Start (resume) a stopped machine, awaiting until its agent is ready. The
+   *  counterpart to `stop()` — disk state is preserved across a stop/start, so
+   *  this is a cheap pause/resume. */
+  start(): Promise<void> {
+    return this.transport.start();
   }
 
   /** Stop the machine and delete its storage. */
@@ -343,10 +357,27 @@ export class Episode {
 
   /** Finish the episode with a typed termination reason (e.g. `done`,
    *  `agent_failed`, `infra_failed`, `cancelled`) and tear its clone down.
+   *  Optionally record a `score` (per-task reward / pass-rate) and an arbitrary
+   *  JSON `result` — the "did it improve?" number, read back via `status()`.
    *  Idempotent — a second call is a no-op. */
-  async complete(reason = "done"): Promise<void> {
+  async complete(
+    reason = "done",
+    opts?: { score?: number; result?: unknown },
+  ): Promise<void> {
     if (this.#completed) return;
-    await this.#leaseTransport.completeLease(this.leaseId, this.#ownerToken, reason);
+    await this.#leaseTransport.completeLease(
+      this.leaseId,
+      this.#ownerToken,
+      reason,
+      opts?.score,
+      opts?.result,
+    );
     this.#completed = true;
+  }
+
+  /** Read this lease's current status and, once completed, its outcome (`state`,
+   *  `reason`, `score`, `result`) — how a trainer collects the per-task score. */
+  async status(): Promise<Record<string, unknown>> {
+    return this.#leaseTransport.getLease(this.leaseId);
   }
 }

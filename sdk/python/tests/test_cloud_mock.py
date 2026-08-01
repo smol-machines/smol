@@ -160,6 +160,12 @@ class Handler(BaseHTTPRequestHandler):
             )
         if self.path == f"/v1/machines/{CLONE_ID}":
             return self._send(200, json.dumps({"id": CLONE_ID, "state": "started", "ready": True}).encode())
+        # Lease status read (GET /v1/leases/:id) — outcome after completion.
+        if self.path.startswith("/v1/leases/"):
+            return self._send(200, json.dumps({
+                "leaseId": "task-100", "machineId": "mach-ep1", "state": "completed",
+                "reason": "done", "score": 0.9, "result": {"passed": 3},
+            }).encode())
         # Readiness for the assigned episode clone.
         if self.path.startswith("/v1/machines/mach-ep"):
             mid = self.path.rsplit("/", 1)[-1]
@@ -351,6 +357,22 @@ def main() -> int:
               captured.get("complete_body", {}).get("ownerToken") == "tok_secret"
               and captured.get("complete_body", {}).get("reason") == "done",
               str(captured.get("complete_body")))
+
+        # --- Machine.id + Machine.start (resume a stopped machine) ---
+        check("machine exposes its id (mach-…)", m.id == MACHINE_ID, m.id)
+        m.start()  # POST /start + wait-ready (both mocked) — must not raise
+        check("start() resumes a stopped machine without error", True)
+
+        # --- complete with a score/result, read the outcome back via status() ---
+        ep2 = m.assign("task-100")
+        ep2.complete(reason="done", score=0.9, result={"passed": 3})
+        check("complete sent score + result",
+              captured["complete_body"].get("score") == 0.9
+              and captured["complete_body"].get("result") == {"passed": 3},
+              str(captured.get("complete_body")))
+        st = ep2.status()
+        check("status() reads the lease outcome (state + score)",
+              st.get("state") == "completed" and st.get("score") == 0.9, str(st))
 
         # reward_fork: grade in a throwaway clone without touching the original.
         captured["clone_deleted"] = False

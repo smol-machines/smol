@@ -27,7 +27,7 @@ many machines concurrently::
 from __future__ import annotations
 
 import asyncio
-from typing import AsyncIterator, Optional
+from typing import Any, AsyncIterator, Optional
 
 from .machine import Machine
 from .types import (
@@ -81,6 +81,11 @@ class AsyncMachine:
     def name(self) -> str:
         """The machine's name / identifier."""
         return self._m.name
+
+    @property
+    def id(self) -> str:
+        """The machine's id (cloud ``mach-…`` id, or the name on local)."""
+        return self._m.id
 
     async def state(self) -> str:
         """Current lifecycle state. Cloud ``"started"`` means the VM process
@@ -170,6 +175,11 @@ class AsyncMachine:
     async def stop(self) -> None:
         """Stop the machine."""
         await asyncio.to_thread(self._m.stop)
+
+    async def start(self) -> None:
+        """Start (resume) a stopped machine, waiting until its agent is ready. The
+        counterpart to :meth:`stop`; disk state is preserved across the cycle."""
+        await asyncio.to_thread(self._m.start)
 
     async def delete(self) -> None:
         """Stop the machine and delete its storage."""
@@ -274,10 +284,23 @@ class AsyncEpisode:
         """Keep the lease alive (call within your ``heartbeat_secs`` cadence)."""
         await asyncio.to_thread(self._ep.heartbeat)
 
-    async def complete(self, reason: str = "done") -> None:
-        """Finish the episode with a termination reason and tear its clone down.
-        Idempotent."""
-        await asyncio.to_thread(self._ep.complete, reason)
+    async def complete(
+        self,
+        reason: str = "done",
+        *,
+        score: Optional[float] = None,
+        result: Any = None,
+    ) -> None:
+        """Finish the episode with a termination reason and tear its clone down;
+        optionally record a ``score`` + JSON ``result`` (read back via
+        :meth:`status`). Idempotent."""
+        await asyncio.to_thread(
+            lambda: self._ep.complete(reason, score=score, result=result)
+        )
+
+    async def status(self) -> "dict[str, Any]":
+        """Read the lease's status/outcome (state, reason, score, result)."""
+        return await asyncio.to_thread(self._ep.status)
 
     async def __aenter__(self) -> "AsyncEpisode":
         return self

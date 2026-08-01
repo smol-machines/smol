@@ -64,6 +64,8 @@ def _decode_exec_bytes(raw: dict[str, Any], b64_key: str, text: str) -> bytes:
 class Transport(Protocol):
     @property
     def name(self) -> str: ...
+    @property
+    def machine_id(self) -> str: ...
     def state(self) -> str: ...
     def ready(self) -> bool: ...
     def ready_at(self) -> Optional[str]: ...
@@ -86,6 +88,7 @@ class Transport(Protocol):
     def pull_image(self, image: str) -> ImageInfo: ...
     def list_images(self) -> list[ImageInfo]: ...
     def stop(self) -> None: ...
+    def start(self) -> None: ...
     def delete(self) -> None: ...
     def fork(self, name: str, ports: Optional[list[PortSpec]] = None) -> "Transport": ...
 
@@ -112,7 +115,16 @@ class Transport(Protocol):
 
     def heartbeat_lease(self, lease_id: str, owner_token: str) -> None: ...
 
-    def complete_lease(self, lease_id: str, owner_token: str, reason: str) -> None: ...
+    def complete_lease(
+        self,
+        lease_id: str,
+        owner_token: str,
+        reason: str,
+        score: Optional[float] = None,
+        result: Any = None,
+    ) -> None: ...
+
+    def get_lease(self, lease_id: str) -> "dict[str, Any]": ...
 
 
 def _encode_path(p: str) -> str:
@@ -230,6 +242,11 @@ class LocalTransport:
     def name(self) -> str:
         return self._inner.name
 
+    @property
+    def machine_id(self) -> str:
+        # Local machines are identified by their name (there's no cloud `mach-…`).
+        return self._inner.name
+
     def state(self) -> str:
         return str(self._inner.state())
 
@@ -334,6 +351,13 @@ class LocalTransport:
         except Exception as e:  # noqa: BLE001
             raise wrap_native_error(e) from e
 
+    def start(self) -> None:
+        try:
+            self._inner.start()
+        except Exception as e:  # noqa: BLE001
+            raise wrap_native_error(e) from e
+        _live_local.add(self)
+
     def delete(self) -> None:
         _live_local.discard(self)
         try:
@@ -398,8 +422,18 @@ class LocalTransport:
     def heartbeat_lease(self, lease_id: str, owner_token: str) -> None:
         raise NotSupportedError("heartbeat_lease() is a cloud-only lease feature.")
 
-    def complete_lease(self, lease_id: str, owner_token: str, reason: str) -> None:
+    def complete_lease(
+        self,
+        lease_id: str,
+        owner_token: str,
+        reason: str,
+        score: Optional[float] = None,
+        result: Any = None,
+    ) -> None:
         raise NotSupportedError("complete_lease() is a cloud-only lease feature.")
+
+    def get_lease(self, lease_id: str) -> "dict[str, Any]":
+        raise NotSupportedError("get_lease() is a cloud-only lease feature.")
 
 
 # ---------------------------------------------------------------------------
@@ -415,6 +449,10 @@ class CloudTransport:
     @property
     def name(self) -> str:
         return self._name
+
+    @property
+    def machine_id(self) -> str:
+        return self._id
 
     def state(self) -> str:
         m = _cloud_fetch(self._base, self._key, "GET", f"/v1/machines/{self._id}")
@@ -619,6 +657,12 @@ class CloudTransport:
     def stop(self) -> None:
         _cloud_fetch(self._base, self._key, "POST", f"/v1/machines/{self._id}/stop")
 
+    def start(self) -> None:
+        # Resume a stopped machine, then wait for its agent so the returned handle
+        # is usable (the control plane returns as soon as it's `started`).
+        _cloud_fetch(self._base, self._key, "POST", f"/v1/machines/{self._id}/start")
+        _wait_for_ready(self._base, self._key, self._id)
+
     def delete(self) -> None:
         _cloud_fetch(self._base, self._key, "DELETE", f"/v1/machines/{self._id}")
 
@@ -738,13 +782,31 @@ class CloudTransport:
             json_body={"ownerToken": owner_token},
         )
 
-    def complete_lease(self, lease_id: str, owner_token: str, reason: str) -> None:
+    def complete_lease(
+        self,
+        lease_id: str,
+        owner_token: str,
+        reason: str,
+        score: Optional[float] = None,
+        result: Any = None,
+    ) -> None:
+        body: dict[str, Any] = {"ownerToken": owner_token, "reason": reason}
+        if score is not None:
+            body["score"] = score
+        if result is not None:
+            body["result"] = result
         _cloud_fetch(
             self._base,
             self._key,
             "POST",
             f"/v1/leases/{lease_id}/complete",
-            json_body={"ownerToken": owner_token, "reason": reason},
+            json_body=body,
+        )
+
+    def get_lease(self, lease_id: str) -> "dict[str, Any]":
+        return (
+            _cloud_fetch(self._base, self._key, "GET", f"/v1/leases/{lease_id}")
+            or {}
         )
 
 

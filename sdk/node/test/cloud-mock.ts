@@ -126,6 +126,16 @@ const server = createServer(async (req, res) => {
     seen.completeBody = JSON.parse((await readBody(req)).toString() || "{}");
     return json(200, { leaseId: "task-99", machineId: "ep1", state: "completed" });
   }
+  if (method === "GET" && /^\/v1\/leases\/[^/]+$/.test(url)) {
+    return json(200, {
+      leaseId: "task-100",
+      machineId: "ep1",
+      state: "completed",
+      reason: "done",
+      score: 0.9,
+      result: { passed: 3 },
+    });
+  }
   // Readiness for batch-fork clones (b1, b2, …) and the episode clone (ep1).
   if (method === "GET" && /^\/v1\/machines\/(b\d+|ep\d+)$/.test(url)) {
     return json(200, { id: url.split("/").pop(), state: "running" });
@@ -472,6 +482,27 @@ async function main(): Promise<void> {
     "complete sent owner token + reason to /leases/:id/complete",
     seen.completeBody?.ownerToken === "tok_secret" && seen.completeBody?.reason === "done",
     JSON.stringify(seen.completeBody),
+  );
+
+  // --- Machine.id + Machine.start (resume a stopped machine) ---
+  check("machine exposes its id", m.id === "m1", m.id);
+  await m.start(); // POST /start + wait-ready (both mocked) — must not throw
+  check("start() resumes a stopped machine without error", true);
+
+  // --- complete with score/result, read the outcome back via status() ---
+  const episode2 = await m.assign({ leaseId: "task-100" });
+  await episode2.complete("done", { score: 0.9, result: { passed: 3 } });
+  check(
+    "complete sent score + result",
+    seen.completeBody?.score === 0.9 &&
+      JSON.stringify(seen.completeBody?.result) === JSON.stringify({ passed: 3 }),
+    JSON.stringify(seen.completeBody),
+  );
+  const st = await episode2.status();
+  check(
+    "status() reads the lease outcome (state + score)",
+    st.state === "completed" && st.score === 0.9,
+    JSON.stringify(st),
   );
 
   // --- reward_fork: grade in a throwaway clone without touching the original ---

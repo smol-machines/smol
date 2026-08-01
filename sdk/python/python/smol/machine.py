@@ -13,7 +13,7 @@ Mirrors the Node SDK's ``machine.ts`` (sync, since the embedded engine blocks)::
 from __future__ import annotations
 
 import uuid
-from typing import Optional
+from typing import Any, Optional
 
 from .transport import Transport, connect_transport, make_transport
 from .types import (
@@ -83,6 +83,13 @@ class Machine:
     def name(self) -> str:
         """The machine's name / identifier."""
         return self._t.name
+
+    @property
+    def id(self) -> str:
+        """The machine's id — the cloud ``mach-…`` id (or the name on local). Handy
+        right after :meth:`create`/:meth:`fork` so you don't have to list the
+        tenant to find the machine you just made."""
+        return self._t.machine_id
 
     def state(self) -> str:
         """Current lifecycle state. On cloud, ``"started"`` means only that the
@@ -178,6 +185,12 @@ class Machine:
     def stop(self) -> None:
         """Stop the machine."""
         self._t.stop()
+
+    def start(self) -> None:
+        """Start (resume) a stopped machine, waiting until its agent is ready. The
+        counterpart to :meth:`stop` — a stopped machine keeps its disk state, so
+        ``start()`` brings it back with that state intact (cheap pause/resume)."""
+        self._t.start()
 
     def delete(self) -> None:
         """Stop the machine and delete its storage."""
@@ -352,14 +365,30 @@ class Episode:
         requested, or the episode is reclaimed as ``heartbeat_lost``."""
         self._lease_t.heartbeat_lease(self.lease_id, self._owner_token)
 
-    def complete(self, reason: str = "done") -> None:
+    def complete(
+        self,
+        reason: str = "done",
+        *,
+        score: Optional[float] = None,
+        result: Any = None,
+    ) -> None:
         """Finish the episode with a typed termination reason (e.g. ``done``,
         ``agent_failed``, ``infra_failed``, ``cancelled``) and tear its clone down.
-        Idempotent — a second call is a no-op."""
+        Optionally record a ``score`` (the per-task reward / pass-rate) and an
+        arbitrary JSON ``result`` — the "did it improve?" number, read back later
+        via :meth:`status`. Idempotent — a second call is a no-op."""
         if self._completed:
             return
-        self._lease_t.complete_lease(self.lease_id, self._owner_token, reason)
+        self._lease_t.complete_lease(
+            self.lease_id, self._owner_token, reason, score=score, result=result
+        )
         self._completed = True
+
+    def status(self) -> "dict[str, Any]":
+        """Read this lease's current status and, once completed, its outcome
+        (``state``, ``reason``, ``score``, ``result``) — how a trainer collects the
+        per-task score after the episode ends."""
+        return self._lease_t.get_lease(self.lease_id)
 
     def __enter__(self) -> "Episode":
         return self
