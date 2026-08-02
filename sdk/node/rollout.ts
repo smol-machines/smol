@@ -30,6 +30,7 @@ export interface RolloutPolicyInfo {
   backendModel: string;
   current: boolean;
   activeRequests: number;
+  retiring: boolean;
 }
 
 export interface RolloutExecutorInfo {
@@ -43,6 +44,7 @@ export interface RolloutExecutorInfo {
   requestTimeoutSecs: number;
   activeRequests: number;
   queuedRequests: number;
+  accepting: boolean;
   policies: RolloutPolicyInfo[];
   capabilities: string[];
 }
