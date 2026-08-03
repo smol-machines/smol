@@ -20,6 +20,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/livez": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["livez"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/metrics": {
         parameters: {
             query?: never;
@@ -28,6 +44,38 @@ export interface paths {
             cookie?: never;
         };
         get: operations["metrics"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/readyz": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["readyz"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/account": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["account_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -68,46 +116,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/v1/apps": {
+    "/v1/billing/checkout-session": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        get: operations["app_list"];
+        get?: never;
         put?: never;
-        post: operations["app_deploy"];
+        post: operations["billing_checkout_session"];
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/v1/apps/{name}": {
+    "/v1/billing/meters": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        get: operations["app_get"];
-        put?: never;
-        post?: never;
-        delete: operations["app_destroy"];
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/apps/{name}/logs": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get: operations["app_logs"];
+        get: operations["billing_meters"];
         put?: never;
         post?: never;
         delete?: never;
@@ -116,39 +148,55 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/v1/apps/{name}/promote": {
+    "/v1/groups": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        get: operations["group_list"];
         put?: never;
-        post: operations["app_promote"];
+        post: operations["group_deploy"];
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/v1/apps/{name}/redeploy": {
+    "/v1/groups/{name}": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        get: operations["group_get"];
         put?: never;
-        post: operations["app_redeploy"];
+        post?: never;
+        delete: operations["group_destroy"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/groups/{name}/logs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["group_logs"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/v1/apps/{name}/scale": {
+    "/v1/groups/{name}/promote": {
         parameters: {
             query?: never;
             header?: never;
@@ -157,7 +205,39 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        post: operations["app_scale"];
+        post: operations["group_promote"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/groups/{name}/redeploy": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["group_redeploy"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/groups/{name}/scale": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["group_scale"];
         delete?: never;
         options?: never;
         head?: never;
@@ -340,6 +420,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/me": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["me_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/nodes": {
         parameters: {
             query?: never;
@@ -452,6 +548,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/plans": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["plan_list"];
+        put?: never;
+        post: operations["plan_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/pools": {
         parameters: {
             query?: never;
@@ -478,6 +590,70 @@ export interface paths {
         get?: never;
         put?: never;
         post: operations["pool_claim"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/tenants": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["tenant_list"];
+        put?: never;
+        post: operations["tenant_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/tenants/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["tenant_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch: operations["tenant_update"];
+        trace?: never;
+    };
+    "/v1/tenants/{id}/reactivate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["tenant_reactivate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/tenants/{id}/suspend": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["tenant_suspend"];
         delete?: never;
         options?: never;
         head?: never;
@@ -568,6 +744,38 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** @description The tenant self-service account view: plan, effective limits, usage, spend. */
+        AccountInfo: {
+            /** Format: int64 */
+            budgetRemainingMicros?: number | null;
+            /** Format: int32 */
+            effectiveMaxCpus: number;
+            /** Format: int32 */
+            effectiveMaxMachines: number;
+            /** Format: int64 */
+            effectiveMaxMemoryMb: number;
+            /**
+             * Format: int64
+             * @description Effective low-balance email threshold (micros): the balance at which a
+             *     low-balance warning email fires. Always the resolved value — the
+             *     per-tenant override if set, else the platform default. `0` means the
+             *     customer has turned the email off.
+             */
+            lowBalanceThresholdMicros?: number;
+            /** Format: int64 */
+            monthlyBudgetMicros?: number | null;
+            periodCost: components["schemas"]["CostBreakdown"];
+            periodUsage: components["schemas"]["UsageResponse"];
+            plan?: null | components["schemas"]["PlanInfo"];
+            /**
+             * Format: int64
+             * @description Prepaid wallet balance (micros). Topped up via Stripe Checkout; drawn down
+             *     by metered usage. 0 for tenants that have never added credit.
+             */
+            prepaidCreditMicros?: number;
+            status: string;
+            tenantId: string;
+        };
         ApiKeyCreated: {
             id: string;
             key: string;
@@ -580,24 +788,10 @@ export interface components {
             lastUsedAt?: string | null;
             scopes: string[];
         };
-        AppInfo: {
-            createdAt: string;
-            domain?: string | null;
-            id: string;
-            image: string;
-            instances: components["schemas"]["InstanceInfo"][];
-            name: string;
-            /** Format: int32 */
-            port: number;
-            /** Format: int32 */
-            replicas: number;
-            status: string;
-            updatedAt: string;
-        };
         ClusterHealth: {
-            /** Format: int32 */
-            appsTotal: number;
             clusterId: string;
+            /** Format: int32 */
+            groupsTotal: number;
             /** Format: int32 */
             nodesReady: number;
             /** Format: int32 */
@@ -609,6 +803,61 @@ export interface components {
             version: string;
         };
         CommandSpec: string[] | string;
+        /** @description Cost breakdown for a usage period (all amounts in integer micros). */
+        CostBreakdown: {
+            /**
+             * Format: int64
+             * @description What the tenant actually owes: `total − discount − credit_applied`.
+             */
+            amountDueMicros?: number;
+            /**
+             * Format: int64
+             * @description Per-machine "slot" fee: alive machine-hours × the plan's base rate. Prices
+             *     the held VM slot (isolation, scheduling, readiness) independent of consumed
+             *     compute — it is NOT allocated vCPU/RAM. `serde(default)` so older
+             *     clients/payloads omitting it still deserialize.
+             */
+            baseMicros?: number;
+            /** Format: int64 */
+            cpuMicros: number;
+            /**
+             * Format: int64
+             * @description Portion of the free credit actually consumed this period
+             *     (`min(free_credit, subtotal − discount)`).
+             */
+            creditAppliedMicros?: number;
+            /**
+             * Format: int64
+             * @description Disk gb·hour cost. `serde(default)` so older clients/payloads omitting it
+             *     still deserialize.
+             */
+            diskMicros?: number;
+            /**
+             * Format: int64
+             * @description Egress (gb total) cost.
+             */
+            egressMicros?: number;
+            /** Format: int64 */
+            execMicros: number;
+            /**
+             * Format: int64
+             * @description The plan's recurring free-credit allotment for the period.
+             */
+            freeCreditMicros?: number;
+            /** Format: int64 */
+            memoryMicros: number;
+            /**
+             * Format: int64
+             * @description Gross subtotal: sum of all resource line items, before discounts/credits.
+             */
+            totalMicros: number;
+            /**
+             * Format: int64
+             * @description Graduated volume discount applied to the subtotal (period-level only;
+             *     always 0 on per-machine breakdowns).
+             */
+            volumeDiscountMicros?: number;
+        };
         CreateApiKeyRequest: {
             description?: string | null;
             /** Format: int64 */
@@ -623,13 +872,36 @@ export interface components {
         CreateMachineRequest: {
             /** Format: int64 */
             autoStopSeconds?: number | null;
+            /**
+             * @description Optional workload command (argv) that overrides the source image's or
+             *     `.smolmachine` artifact's own entrypoint+cmd when the machine starts, so a
+             *     deploy of an off-the-shelf image can say what to run/serve. Empty (default)
+             *     = use the source's own entrypoint, preserving prior behavior.
+             */
+            command?: string[];
             env?: {
                 [key: string]: string;
             };
             ephemeral?: boolean;
+            /**
+             * @description Create this machine as a FORKABLE golden: it boots as a live-RAM fork base
+             *     (cloneable copy-on-write) so `POST /v1/machines/:id/fork` can spawn
+             *     near-instant clones that share the golden's RAM. Default false. Forkable
+             *     requires a fork-capable node (currently amd64) and always cold-boots (never
+             *     warm-pool-claimed); a create pinning an incompatible arch is rejected.
+             */
+            forkable?: boolean;
             mounts?: components["schemas"]["MachineMountSpec"][];
             name?: string | null;
             network?: components["schemas"]["MachineNetwork"];
+            /** @description Ports to publish (web groups). Guest ports only; hostPort is allocated. */
+            ports?: components["schemas"]["MachinePort"][];
+            /**
+             * @description Opt in to UNAUTHENTICATED public ingress: when true (and the machine has a
+             *     published port), its `*.apps`/`/proxy` URL is reachable by anyone. Default
+             *     false — a published port is reachable only via the authenticated path.
+             */
+            public?: boolean;
             resources?: components["schemas"]["MachineResources"];
             source: components["schemas"]["MachineSource"];
             /** Format: int64 */
@@ -643,7 +915,60 @@ export interface components {
             };
             id?: string | null;
         };
+        CreatePlanRequest: {
+            budgetPolicy?: string;
+            /** Format: int64 */
+            freeCreditMicros?: number;
+            id?: string | null;
+            isDefault?: boolean;
+            /** Format: int32 */
+            maxConcurrentMachines?: number;
+            /** Format: int32 */
+            maxCpus?: number;
+            /** Format: int64 */
+            maxEgressGb?: number | null;
+            /** Format: int32 */
+            maxGroups?: number;
+            /** Format: int32 */
+            maxMachines?: number;
+            /** Format: int64 */
+            maxMemoryMb?: number;
+            /** Format: int64 */
+            monthlyBudgetMicros?: number | null;
+            name: string;
+            /** Format: int64 */
+            rateBaseHourMicros?: number;
+            /** Format: int64 */
+            rateCpuHourMicros?: number;
+            /** Format: int64 */
+            rateDiskGbHourMicros?: number;
+            /** Format: int64 */
+            rateEgressGbMicros?: number;
+            /** Format: int64 */
+            rateExecMicros?: number;
+            /** Format: int64 */
+            rateMemoryGbHourMicros?: number;
+        };
+        CreateTenantRequest: {
+            id?: string | null;
+            name: string;
+            planId?: string | null;
+        };
         CreateVolumeRequest: {
+            /**
+             * @description Low-level storage backend override (`"local"` | `"pd"`). Prefer `durable`;
+             *     this is for power users and takes precedence when set. Unknown values are
+             *     rejected by the handler.
+             */
+            backend?: string | null;
+            /**
+             * @description Durability of the volume. `false`/absent (the default) is **ephemeral** —
+             *     fast node-local storage that is lost if the host node fails. `true` is
+             *     **durable** — a disk that re-attaches to a live node on failover (requires
+             *     the deployment to have a durable backend configured). This is the
+             *     customer-facing knob; it maps to `backend` internally.
+             */
+            durable?: boolean | null;
             name: string;
             node?: string | null;
             /** Format: int64 */
@@ -663,6 +988,13 @@ export interface components {
             network?: boolean;
             /** Format: int32 */
             port?: number;
+            /**
+             * @description Opt-in: expose this group's published port on the UNAUTHENTICATED public
+             *     `/proxy` / `*.apps` ingress. Default false — the app is reachable only by
+             *     its owner tenant (or admin) until explicitly made public, matching the
+             *     per-machine `public_ingress` default.
+             */
+            publicIngress?: boolean;
             /** Format: int64 */
             stopGraceSecs?: number;
             strategy?: components["schemas"]["DeployStrategy"];
@@ -707,6 +1039,20 @@ export interface components {
             level: string;
             message: string;
         };
+        GroupInfo: {
+            createdAt: string;
+            domain?: string | null;
+            id: string;
+            image: string;
+            instances: components["schemas"]["InstanceInfo"][];
+            name: string;
+            /** Format: int32 */
+            port: number;
+            /** Format: int32 */
+            replicas: number;
+            status: string;
+            updatedAt: string;
+        };
         HealthCheck: {
             /** Format: int64 */
             intervalSecs?: number;
@@ -741,6 +1087,11 @@ export interface components {
             timeoutSeconds?: number | null;
         };
         MachineCommandRequest: {
+            /**
+             * @description Run the command detached: spawn it in the background and return its PID
+             *     immediately. Use for long-lived daemons (dev server, agent runner).
+             */
+            background?: boolean;
             command: components["schemas"]["CommandSpec"];
             cwd?: string | null;
             env?: {
@@ -757,12 +1108,38 @@ export interface components {
             /** Format: int32 */
             exitCode: number;
             machineId: string;
+            /** @description Lossy UTF-8 stderr, capped. Prefer `stderrB64`. */
             stderr: string;
+            /**
+             * Format: byte
+             * @description Byte-exact stderr (base64), binary-safe and NOT truncated. Serializes as
+             *     `stderrB64`.
+             */
+            stderrB64?: string;
             stderrTruncated?: boolean;
+            /**
+             * @description Lossy UTF-8 stdout, capped (see `stdout_truncated`). Kept for old clients
+             *     and log views; prefer `stdoutB64` for byte-exact, untruncated output.
+             */
             stdout: string;
+            /**
+             * Format: byte
+             * @description Byte-exact stdout (base64), binary-safe and NOT truncated. Preferred by
+             *     clients that need fidelity (`smol cloud exec`). `rename_all=camelCase`
+             *     serializes this as `stdoutB64`.
+             */
+            stdoutB64?: string;
             stdoutTruncated?: boolean;
         };
         MachineInfo: {
+            /**
+             * @description The machine's actual CPU arch (`arm64`/`amd64`): the arch of the node it
+             *     runs on, falling back to `source.arch` (a `.smolmachine`'s pinned arch)
+             *     when the machine is unplaced or its node is gone. `None` only when neither
+             *     is known. Lets the console show an arch badge for every machine, including
+             *     ones whose source pinned no arch. Populated by the server's `machine_info`.
+             */
+            arch?: string | null;
             /** Format: int64 */
             autoStopSeconds?: number | null;
             createdAt: string;
@@ -770,16 +1147,53 @@ export interface components {
                 [key: string]: string;
             };
             ephemeral: boolean;
+            /**
+             * @description When [`Self::state`] is `"error"`, a human-readable reason the machine
+             *     failed — the latest control-plane error event (e.g. `"start failed: …"`,
+             *     `"auto-start failed: …"`, or `"machine stuck in creating state"`). `null`
+             *     for machines that are not in an error state. Gives clients something
+             *     actionable instead of a bare `error` with no explanation.
+             */
+            error?: string | null;
+            /**
+             * @description Whether this machine was created as a forkable golden — a live-RAM fork
+             *     base that `POST /v1/machines/:id/fork` can CoW-clone. Default false.
+             */
+            forkable?: boolean;
             id: string;
             lastActivityAt?: string | null;
             name?: string | null;
             network: components["schemas"]["MachineNetwork"];
+            /** @description Published ports with their allocated node host ports. */
+            ports?: components["schemas"]["MachinePort"][];
+            /**
+             * @description Whether the machine is READY to do work. `state == "started"` only means
+             *     the VM process launched on the node — the guest OS and your in-VM workload
+             *     still need a moment to boot. `ready` becomes true once the guest agent is
+             *     reachable (an `exec`/`connect` will succeed) and, if the machine publishes
+             *     a port, that port is accepting connections. Wait for `ready` (poll
+             *     `GET /v1/machines/:id`) before expecting an in-guest worker to have started
+             *     or before connecting to it — do NOT act on `started` alone.
+             */
+            ready?: boolean;
+            /**
+             * @description When the machine first became [`Self::ready`] (RFC3339), or `null` if not
+             *     yet ready. Monotonic: once set it isn't cleared until a stop/restart.
+             */
+            readyAt?: string | null;
             resources: components["schemas"]["MachineResources"];
             source: components["schemas"]["MachineSource"];
             state: string;
             /** Format: int64 */
             ttlSeconds?: number | null;
             updatedAt: string;
+            /**
+             * @description Public ingress URL for the machine's first published port, when the
+             *     machine is started and the control plane has a public base URL
+             *     configured. `null` for stopped machines, machines with no published
+             *     port, or when the deployment exposes no public base URL.
+             */
+            url?: string | null;
             workdir?: string | null;
         };
         MachineMountSpec: {
@@ -797,10 +1211,28 @@ export interface components {
             /** @enum {string} */
             mode: "open";
         } | {
-            cidrs: string[];
+            cidrs?: string[];
             hosts?: string[];
             /** @enum {string} */
             mode: "allowCidrs";
+        };
+        /**
+         * @description A machine-published port. On create, supply only `port` (the guest port the
+         *     workload listens on); the control plane allocates `hostPort` on the chosen
+         *     node at first start and routes ingress to it. Publishing a port implies the
+         *     virtio-net network backend on the node (TSI is outbound-only).
+         */
+        MachinePort: {
+            /**
+             * Format: int32
+             * @description Node host port allocated at placement (read-only; ignored on create).
+             */
+            hostPort?: number | null;
+            /**
+             * Format: int32
+             * @description Guest port the workload listens on.
+             */
+            port: number;
         };
         MachineResources: {
             /** Format: int32 */
@@ -822,13 +1254,53 @@ export interface components {
             status: string;
         };
         MachineSource: {
+            /**
+             * @description Requested CPU arch ("arm64"/"amd64"). Optional: an OCI image is
+             *     usually multi-arch (the node pulls its own variant), so `None`
+             *     means "no constraint" — but a caller that NEEDS a specific arch
+             *     (e.g. x86-only binaries inside) can pin placement with it. Was
+             *     previously silently dropped by deserialization.
+             */
+            arch?: string | null;
             reference: string;
             /** @enum {string} */
             type: "image";
         } | {
+            /**
+             * @description Canonical CPU arch the packed artifact targets ("arm64"/"amd64").
+             *     A `.smolmachine` is single-arch, so this becomes a hard placement
+             *     constraint. `None` (older clients) means "no arch constraint".
+             */
+            arch?: string | null;
             reference: string;
             /** @enum {string} */
             type: "smolmachine";
+        };
+        /**
+         * @description Identity self-discovery (`GET /v1/me`): who the caller is and where they
+         *     may push registry artifacts. Requires authentication but NO scopes — any
+         *     identity may ask who it is. This is how the CLI resolves a bare
+         *     `myapp:v1` push reference to `tenants/<tenantId>/myapp:v1`.
+         */
+        MeResponse: {
+            /**
+             * @description The OCI repository namespace this identity may push to
+             *     (`tenants/<tenantId>`), ready to prefix onto a repo name.
+             */
+            registryNamespace?: string | null;
+            /** @description Scopes this identity holds. */
+            scopes: string[];
+            /** @description Acting principal: the JWT subject or the API key id. */
+            subject: string;
+            /**
+             * @description Canonical tenant id, if the identity is tenant-scoped. `None` for
+             *     admin keys and identities without a provisioned tenant.
+             */
+            tenantId?: string | null;
+            /** @description Tenant display name (the IdP email/name captured at provisioning). */
+            tenantName?: string | null;
+            /** @description Tenant status (`active`, `waitlisted`, `suspended`). */
+            tenantStatus?: string | null;
         };
         NodeInfo: {
             address: string;
@@ -838,12 +1310,47 @@ export interface components {
             availableDiskGb: number;
             /** Format: int64 */
             availableMemoryMb: number;
+            /**
+             * @description Runtime's per-process boot id, forwarded from the node's `/capacity`. A
+             *     change between heartbeats means the serve restarted (its warm pool wiped),
+             *     which the control uses to prune the node's now-stale pool records. Absent on
+             *     an older node/runtime that doesn't report it.
+             */
+            bootId?: string | null;
+            /**
+             * @description PEM-encoded certificate signing request, sent only at registration. When
+             *     present, the control plane signs it as the node's mTLS **server** cert
+             *     (overriding the CSR's subject/SANs with the validated node id/addresses)
+             *     and returns the cert in `RegisterResponse`. The node's private key never
+             *     leaves it. Absent ⇒ control plane has no node-CA configured, or this is
+             *     an older node; the registration still succeeds (cert fields stay empty).
+             */
+            csrPem?: string | null;
+            /**
+             * @description Set (RFC3339) when the control plane soft-cordons this node for DISK
+             *     pressure — its heartbeat-reported host-free disk dropped below the cordon
+             *     threshold, so it stops receiving NEW placements. SEPARATE from the
+             *     data-plane cordon: the node stays `status = "ready"` and is never reaped;
+             *     its running machines are untouched. Cleared when free disk recovers past
+             *     the (higher, hysteretic) un-cordon threshold. `None` = not disk-cordoned.
+             */
+            diskCordonedAt?: string | null;
             id: string;
             labels: {
                 [key: string]: string;
             };
             lastHeartbeatAt?: string | null;
             registeredAt: string;
+            /**
+             * Format: int64
+             * @description Sum of the (thin/nominal) local-SSD footprints reserved by the machines
+             *     placed on this node — the disk-overcommit ledger. Unlike `available_disk_gb`
+             *     (overwritten by every heartbeat with the host's live free space), this is a
+             *     reserve/release decrement ledger the scheduler gates admission on, so a node
+             *     can't be packed past `total_disk_gb * ratio`. Reconciled by the capacity
+             *     self-heal. Default 0 (legacy rows / never reserved).
+             */
+            reservedDiskGb?: number;
             /**
              * @description The runtime this node speaks (e.g. `"smolvm"`). The control plane resolves
              *     a driver from this name; `smolvm_address` is that runtime's endpoint.
@@ -881,6 +1388,50 @@ export interface components {
              */
             usedMemoryMb?: number;
         };
+        /** @description A reusable plan: quota + per-unit rates (money in integer micros) + budget. */
+        PlanInfo: {
+            budgetPolicy: string;
+            createdAt: string;
+            /**
+             * Format: int64
+             * @description Recurring free credit applied to each billing period, in micros (e.g.
+             *     5_000_000 = $5/month free). Discount applies after volume tiers.
+             */
+            freeCreditMicros?: number;
+            id: string;
+            isDefault: boolean;
+            /** Format: int32 */
+            maxConcurrentMachines: number;
+            /** Format: int32 */
+            maxCpus: number;
+            /** Format: int64 */
+            maxEgressGb?: number | null;
+            /** Format: int32 */
+            maxGroups: number;
+            /** Format: int32 */
+            maxMachines: number;
+            /** Format: int64 */
+            maxMemoryMb: number;
+            /** Format: int64 */
+            monthlyBudgetMicros?: number | null;
+            name: string;
+            /**
+             * Format: int64
+             * @description Per-machine-alive-hour "slot" fee in micros (e.g. 40_000 = $0.04/hr). Prices
+             *     the held VM slot on top of consumed CPU/RAM — not allocated resources.
+             */
+            rateBaseHourMicros?: number;
+            /** Format: int64 */
+            rateCpuHourMicros: number;
+            /** Format: int64 */
+            rateDiskGbHourMicros?: number;
+            /** Format: int64 */
+            rateEgressGbMicros?: number;
+            /** Format: int64 */
+            rateExecMicros: number;
+            /** Format: int64 */
+            rateMemoryGbHourMicros: number;
+        };
         PoolConfig: {
             /** Format: int32 */
             cpus?: number;
@@ -913,13 +1464,77 @@ export interface components {
             /** Format: int32 */
             count: number;
         };
-        UsageResponse: {
+        /**
+         * @description A tenant (customer account). Quota override fields are `None` when inherited
+         *     from the plan. See docs/product-backend-layer.md.
+         */
+        TenantInfo: {
+            createdAt: string;
+            externalBillingId?: string | null;
+            id: string;
+            /** Format: int32 */
+            maxCpus?: number | null;
+            /** Format: int32 */
+            maxGroups?: number | null;
+            /** Format: int64 */
+            maxMemoryMb?: number | null;
+            /** Format: int32 */
+            maxSandboxPools?: number | null;
+            name: string;
+            planId?: string | null;
+            status: string;
+            updatedAt?: string | null;
+        };
+        /**
+         * @description One tenant's metered usage for a period, in the shape a billing system
+         *     ingests (`GET /v1/billing/meters`).
+         */
+        TenantMeter: {
+            cost: components["schemas"]["CostBreakdown"];
             /** Format: double */
             cpuHours: number;
-            /** Format: int32 */
-            execCount: number;
+            /**
+             * Format: double
+             * @description Disk gb·hours metered for the period.
+             */
+            diskGbHours?: number;
+            /**
+             * Format: double
+             * @description Egress gb (networking, billed by gb total) for the period.
+             */
+            egressGb?: number;
             /** Format: int64 */
-            execDurationMs: number;
+            execCount: number;
+            externalBillingId?: string | null;
+            /** Format: double */
+            memoryGbHours: number;
+            tenantId: string;
+        };
+        /** @description Partial update — only present fields change. */
+        UpdateTenantRequest: {
+            externalBillingId?: string | null;
+            /**
+             * Format: int64
+             * @description Per-tenant free-credit override (micros). Present → this tenant's monthly
+             *     free allotment is set to exactly this, overriding its plan's. Absent →
+             *     unchanged (still falls back to the plan). Admin-only.
+             */
+            freeCreditMicros?: number | null;
+            planId?: string | null;
+            status?: string | null;
+        };
+        UsageResponse: {
+            /**
+             * Format: double
+             * @description The four metered-and-priced dimensions. Exec is intentionally absent: it
+             *     is metered for the event timeline but priced at $0, so surfacing it as
+             *     "usage" here would imply a charge that never happens.
+             */
+            cpuHours: number;
+            /** Format: double */
+            diskGbHours: number;
+            /** Format: double */
+            egressGb: number;
             from: string;
             /** Format: int32 */
             machineCount: number;
@@ -931,8 +1546,14 @@ export interface components {
             totalUptimeSeconds: number;
         };
         VolumeInfo: {
-            appInstanceId?: string | null;
             createdAt: string;
+            /**
+             * @description `"ephemeral"` — lives on a single node's disk and is lost if that node
+             *     fails (the default); `"durable"` — backed by a detachable disk that
+             *     re-attaches to a live node on failover. Derived from the storage backend.
+             */
+            durability: string;
+            groupInstanceId?: string | null;
             id: string;
             name: string;
             nodeId: string;
@@ -975,6 +1596,24 @@ export interface operations {
             };
         };
     };
+    livez: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Process is alive */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     metrics: {
         parameters: {
             query?: never;
@@ -990,6 +1629,51 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+        };
+    };
+    readyz: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Ready to serve */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description State backend unreachable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    account_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Tenant account: plan, effective limits, period usage + spend */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AccountInfo"];
+                };
             };
         };
     };
@@ -1058,7 +1742,7 @@ export interface operations {
             };
         };
     };
-    app_list: {
+    billing_checkout_session: {
         parameters: {
             query?: never;
             header?: never;
@@ -1067,18 +1751,56 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description List apps */
+            /** @description Start a one-time Stripe Checkout to add prepaid credit. Request body: {"amount_usd": <1..=2000>}. Returns {"url": <stripe-hosted checkout url>}; redirect the browser there. The wallet is credited only when Stripe's webhook confirms payment. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    billing_meters: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Per-tenant metered usage + cost for the period */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["AppInfo"][];
+                    "application/json": components["schemas"]["TenantMeter"][];
                 };
             };
         };
     };
-    app_deploy: {
+    group_list: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description List groups */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GroupInfo"][];
+                };
+            };
+        };
+    };
+    group_deploy: {
         parameters: {
             query?: never;
             header?: never;
@@ -1091,36 +1813,36 @@ export interface operations {
             };
         };
         responses: {
-            /** @description App deployed */
+            /** @description Group deployed */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["AppInfo"];
+                    "application/json": components["schemas"]["GroupInfo"];
                 };
             };
         };
     };
-    app_get: {
+    group_get: {
         parameters: {
             query?: never;
             header?: never;
             path: {
-                /** @description App name */
+                /** @description Group name */
                 name: string;
             };
             cookie?: never;
         };
         requestBody?: never;
         responses: {
-            /** @description App */
+            /** @description Group */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["AppInfo"];
+                    "application/json": components["schemas"]["GroupInfo"];
                 };
             };
             /** @description Not found */
@@ -1132,12 +1854,12 @@ export interface operations {
             };
         };
     };
-    app_destroy: {
+    group_destroy: {
         parameters: {
             query?: never;
             header?: never;
             path: {
-                /** @description App name */
+                /** @description Group name */
                 name: string;
             };
             cookie?: never;
@@ -1153,12 +1875,12 @@ export interface operations {
             };
         };
     };
-    app_logs: {
+    group_logs: {
         parameters: {
             query?: never;
             header?: never;
             path: {
-                /** @description App name */
+                /** @description Group name */
                 name: string;
             };
             cookie?: never;
@@ -1174,12 +1896,12 @@ export interface operations {
             };
         };
     };
-    app_promote: {
+    group_promote: {
         parameters: {
             query?: never;
             header?: never;
             path: {
-                /** @description App name */
+                /** @description Group name */
                 name: string;
             };
             cookie?: never;
@@ -1192,17 +1914,17 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["AppInfo"];
+                    "application/json": components["schemas"]["GroupInfo"];
                 };
             };
         };
     };
-    app_redeploy: {
+    group_redeploy: {
         parameters: {
             query?: never;
             header?: never;
             path: {
-                /** @description App name */
+                /** @description Group name */
                 name: string;
             };
             cookie?: never;
@@ -1215,17 +1937,17 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["AppInfo"];
+                    "application/json": components["schemas"]["GroupInfo"];
                 };
             };
         };
     };
-    app_scale: {
+    group_scale: {
         parameters: {
             query?: never;
             header?: never;
             path: {
-                /** @description App name */
+                /** @description Group name */
                 name: string;
             };
             cookie?: never;
@@ -1242,7 +1964,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["AppInfo"];
+                    "application/json": components["schemas"]["GroupInfo"];
                 };
             };
         };
@@ -1629,6 +2351,26 @@ export interface operations {
             };
         };
     };
+    me_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Caller identity: subject, tenant, scopes, and the registry namespace it may push to */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MeResponse"];
+                };
+            };
+        };
+    };
     node_list: {
         parameters: {
             query?: never;
@@ -1775,6 +2517,50 @@ export interface operations {
             };
         };
     };
+    plan_list: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description List plans */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlanInfo"][];
+                };
+            };
+        };
+    };
+    plan_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreatePlanRequest"];
+            };
+        };
+        responses: {
+            /** @description Plan created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlanInfo"];
+                };
+            };
+        };
+    };
     pool_list: {
         parameters: {
             query?: never;
@@ -1839,6 +2625,149 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["MachineInfo"];
                 };
+            };
+        };
+    };
+    tenant_list: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description List tenants */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TenantInfo"][];
+                };
+            };
+        };
+    };
+    tenant_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateTenantRequest"];
+            };
+        };
+        responses: {
+            /** @description Tenant created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TenantInfo"];
+                };
+            };
+        };
+    };
+    tenant_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Tenant id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Tenant */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TenantInfo"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    tenant_update: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Tenant id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateTenantRequest"];
+            };
+        };
+        responses: {
+            /** @description Updated */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TenantInfo"];
+                };
+            };
+        };
+    };
+    tenant_reactivate: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Tenant id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Reactivated */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    tenant_suspend: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Tenant id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Suspended */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };

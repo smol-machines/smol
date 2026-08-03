@@ -35,6 +35,19 @@
         }
       }
     },
+    "/livez": {
+      "get": {
+        "tags": [
+          "health"
+        ],
+        "operationId": "livez",
+        "responses": {
+          "200": {
+            "description": "Process is alive"
+          }
+        }
+      }
+    },
     "/metrics": {
       "get": {
         "tags": [
@@ -44,6 +57,42 @@
         "responses": {
           "200": {
             "description": "Prometheus metrics (text)"
+          }
+        }
+      }
+    },
+    "/readyz": {
+      "get": {
+        "tags": [
+          "health"
+        ],
+        "operationId": "readyz",
+        "responses": {
+          "200": {
+            "description": "Ready to serve"
+          },
+          "503": {
+            "description": "State backend unreachable"
+          }
+        }
+      }
+    },
+    "/v1/account": {
+      "get": {
+        "tags": [
+          "billing"
+        ],
+        "operationId": "account_get",
+        "responses": {
+          "200": {
+            "description": "Tenant account: plan, effective limits, period usage + spend",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountInfo"
+                }
+              }
+            }
           }
         }
       }
@@ -123,21 +172,57 @@
         }
       }
     },
-    "/v1/apps": {
-      "get": {
+    "/v1/billing/checkout-session": {
+      "post": {
         "tags": [
-          "apps"
+          "billing"
         ],
-        "operationId": "app_list",
+        "operationId": "billing_checkout_session",
         "responses": {
           "200": {
-            "description": "List apps",
+            "description": "Start a one-time Stripe Checkout to add prepaid credit. Request body: {\"amount_usd\": <1..=2000>}. Returns {\"url\": <stripe-hosted checkout url>}; redirect the browser there. The wallet is credited only when Stripe's webhook confirms payment."
+          }
+        }
+      }
+    },
+    "/v1/billing/meters": {
+      "get": {
+        "tags": [
+          "billing"
+        ],
+        "operationId": "billing_meters",
+        "responses": {
+          "200": {
+            "description": "Per-tenant metered usage + cost for the period",
             "content": {
               "application/json": {
                 "schema": {
                   "type": "array",
                   "items": {
-                    "$ref": "#/components/schemas/AppInfo"
+                    "$ref": "#/components/schemas/TenantMeter"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/groups": {
+      "get": {
+        "tags": [
+          "groups"
+        ],
+        "operationId": "group_list",
+        "responses": {
+          "200": {
+            "description": "List groups",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/GroupInfo"
                   }
                 }
               }
@@ -147,9 +232,9 @@
       },
       "post": {
         "tags": [
-          "apps"
+          "groups"
         ],
-        "operationId": "app_deploy",
+        "operationId": "group_deploy",
         "requestBody": {
           "content": {
             "application/json": {
@@ -162,11 +247,11 @@
         },
         "responses": {
           "200": {
-            "description": "App deployed",
+            "description": "Group deployed",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AppInfo"
+                  "$ref": "#/components/schemas/GroupInfo"
                 }
               }
             }
@@ -174,17 +259,17 @@
         }
       }
     },
-    "/v1/apps/{name}": {
+    "/v1/groups/{name}": {
       "get": {
         "tags": [
-          "apps"
+          "groups"
         ],
-        "operationId": "app_get",
+        "operationId": "group_get",
         "parameters": [
           {
             "name": "name",
             "in": "path",
-            "description": "App name",
+            "description": "Group name",
             "required": true,
             "schema": {
               "type": "string"
@@ -193,11 +278,11 @@
         ],
         "responses": {
           "200": {
-            "description": "App",
+            "description": "Group",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AppInfo"
+                  "$ref": "#/components/schemas/GroupInfo"
                 }
               }
             }
@@ -209,14 +294,14 @@
       },
       "delete": {
         "tags": [
-          "apps"
+          "groups"
         ],
-        "operationId": "app_destroy",
+        "operationId": "group_destroy",
         "parameters": [
           {
             "name": "name",
             "in": "path",
-            "description": "App name",
+            "description": "Group name",
             "required": true,
             "schema": {
               "type": "string"
@@ -230,17 +315,17 @@
         }
       }
     },
-    "/v1/apps/{name}/logs": {
+    "/v1/groups/{name}/logs": {
       "get": {
         "tags": [
-          "apps"
+          "groups"
         ],
-        "operationId": "app_logs",
+        "operationId": "group_logs",
         "parameters": [
           {
             "name": "name",
             "in": "path",
-            "description": "App name",
+            "description": "Group name",
             "required": true,
             "schema": {
               "type": "string"
@@ -254,17 +339,17 @@
         }
       }
     },
-    "/v1/apps/{name}/promote": {
+    "/v1/groups/{name}/promote": {
       "post": {
         "tags": [
-          "apps"
+          "groups"
         ],
-        "operationId": "app_promote",
+        "operationId": "group_promote",
         "parameters": [
           {
             "name": "name",
             "in": "path",
-            "description": "App name",
+            "description": "Group name",
             "required": true,
             "schema": {
               "type": "string"
@@ -277,7 +362,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AppInfo"
+                  "$ref": "#/components/schemas/GroupInfo"
                 }
               }
             }
@@ -285,17 +370,17 @@
         }
       }
     },
-    "/v1/apps/{name}/redeploy": {
+    "/v1/groups/{name}/redeploy": {
       "post": {
         "tags": [
-          "apps"
+          "groups"
         ],
-        "operationId": "app_redeploy",
+        "operationId": "group_redeploy",
         "parameters": [
           {
             "name": "name",
             "in": "path",
-            "description": "App name",
+            "description": "Group name",
             "required": true,
             "schema": {
               "type": "string"
@@ -308,7 +393,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AppInfo"
+                  "$ref": "#/components/schemas/GroupInfo"
                 }
               }
             }
@@ -316,17 +401,17 @@
         }
       }
     },
-    "/v1/apps/{name}/scale": {
+    "/v1/groups/{name}/scale": {
       "post": {
         "tags": [
-          "apps"
+          "groups"
         ],
-        "operationId": "app_scale",
+        "operationId": "group_scale",
         "parameters": [
           {
             "name": "name",
             "in": "path",
-            "description": "App name",
+            "description": "Group name",
             "required": true,
             "schema": {
               "type": "string"
@@ -349,7 +434,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AppInfo"
+                  "$ref": "#/components/schemas/GroupInfo"
                 }
               }
             }
@@ -877,6 +962,26 @@
         }
       }
     },
+    "/v1/me": {
+      "get": {
+        "tags": [
+          "billing"
+        ],
+        "operationId": "me_get",
+        "responses": {
+          "200": {
+            "description": "Caller identity: subject, tenant, scopes, and the registry namespace it may push to",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MeResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/nodes": {
       "get": {
         "tags": [
@@ -1039,6 +1144,57 @@
         }
       }
     },
+    "/v1/plans": {
+      "get": {
+        "tags": [
+          "plans"
+        ],
+        "operationId": "plan_list",
+        "responses": {
+          "200": {
+            "description": "List plans",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/PlanInfo"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "plans"
+        ],
+        "operationId": "plan_create",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreatePlanRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Plan created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlanInfo"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/pools": {
       "get": {
         "tags": [
@@ -1117,6 +1273,178 @@
                 }
               }
             }
+          }
+        }
+      }
+    },
+    "/v1/tenants": {
+      "get": {
+        "tags": [
+          "tenants"
+        ],
+        "operationId": "tenant_list",
+        "responses": {
+          "200": {
+            "description": "List tenants",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/TenantInfo"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "tenants"
+        ],
+        "operationId": "tenant_create",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateTenantRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Tenant created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TenantInfo"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/tenants/{id}": {
+      "get": {
+        "tags": [
+          "tenants"
+        ],
+        "operationId": "tenant_get",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Tenant id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Tenant",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TenantInfo"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found"
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "tenants"
+        ],
+        "operationId": "tenant_update",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Tenant id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateTenantRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TenantInfo"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/tenants/{id}/reactivate": {
+      "post": {
+        "tags": [
+          "tenants"
+        ],
+        "operationId": "tenant_reactivate",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Tenant id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Reactivated"
+          }
+        }
+      }
+    },
+    "/v1/tenants/{id}/suspend": {
+      "post": {
+        "tags": [
+          "tenants"
+        ],
+        "operationId": "tenant_suspend",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Tenant id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Suspended"
           }
         }
       }
@@ -1299,6 +1627,86 @@
   },
   "components": {
     "schemas": {
+      "AccountInfo": {
+        "type": "object",
+        "description": "The tenant self-service account view: plan, effective limits, usage, spend.",
+        "required": [
+          "tenantId",
+          "status",
+          "effectiveMaxCpus",
+          "effectiveMaxMemoryMb",
+          "effectiveMaxMachines",
+          "periodUsage",
+          "periodCost"
+        ],
+        "properties": {
+          "budgetRemainingMicros": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
+          },
+          "effectiveMaxCpus": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "effectiveMaxMachines": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "effectiveMaxMemoryMb": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "lowBalanceThresholdMicros": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Effective low-balance email threshold (micros): the balance at which a\nlow-balance warning email fires. Always the resolved value — the\nper-tenant override if set, else the platform default. `0` means the\ncustomer has turned the email off.",
+            "minimum": 0
+          },
+          "monthlyBudgetMicros": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
+          },
+          "periodCost": {
+            "$ref": "#/components/schemas/CostBreakdown"
+          },
+          "periodUsage": {
+            "$ref": "#/components/schemas/UsageResponse"
+          },
+          "plan": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/PlanInfo"
+              }
+            ]
+          },
+          "prepaidCreditMicros": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Prepaid wallet balance (micros). Topped up via Stripe Checkout; drawn down\nby metered usage. 0 for tenants that have never added credit.",
+            "minimum": 0
+          },
+          "status": {
+            "type": "string"
+          },
+          "tenantId": {
+            "type": "string"
+          }
+        }
+      },
       "ApiKeyCreated": {
         "type": "object",
         "required": [
@@ -1354,62 +1762,6 @@
           }
         }
       },
-      "AppInfo": {
-        "type": "object",
-        "required": [
-          "id",
-          "name",
-          "image",
-          "replicas",
-          "status",
-          "port",
-          "instances",
-          "createdAt",
-          "updatedAt"
-        ],
-        "properties": {
-          "createdAt": {
-            "type": "string"
-          },
-          "domain": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "id": {
-            "type": "string"
-          },
-          "image": {
-            "type": "string"
-          },
-          "instances": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/InstanceInfo"
-            }
-          },
-          "name": {
-            "type": "string"
-          },
-          "port": {
-            "type": "integer",
-            "format": "int32",
-            "minimum": 0
-          },
-          "replicas": {
-            "type": "integer",
-            "format": "int32",
-            "minimum": 0
-          },
-          "status": {
-            "type": "string"
-          },
-          "updatedAt": {
-            "type": "string"
-          }
-        }
-      },
       "ClusterHealth": {
         "type": "object",
         "required": [
@@ -1417,18 +1769,18 @@
           "version",
           "nodesTotal",
           "nodesReady",
-          "appsTotal",
+          "groupsTotal",
           "poolsTotal",
           "uptimeSecs"
         ],
         "properties": {
-          "appsTotal": {
+          "clusterId": {
+            "type": "string"
+          },
+          "groupsTotal": {
             "type": "integer",
             "format": "int32",
             "minimum": 0
-          },
-          "clusterId": {
-            "type": "string"
           },
           "nodesReady": {
             "type": "integer",
@@ -1467,6 +1819,81 @@
             "type": "string"
           }
         ]
+      },
+      "CostBreakdown": {
+        "type": "object",
+        "description": "Cost breakdown for a usage period (all amounts in integer micros).",
+        "required": [
+          "cpuMicros",
+          "memoryMicros",
+          "execMicros",
+          "totalMicros"
+        ],
+        "properties": {
+          "amountDueMicros": {
+            "type": "integer",
+            "format": "int64",
+            "description": "What the tenant actually owes: `total − discount − credit_applied`.",
+            "minimum": 0
+          },
+          "baseMicros": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Per-machine \"slot\" fee: alive machine-hours × the plan's base rate. Prices\nthe held VM slot (isolation, scheduling, readiness) independent of consumed\ncompute — it is NOT allocated vCPU/RAM. `serde(default)` so older\nclients/payloads omitting it still deserialize.",
+            "minimum": 0
+          },
+          "cpuMicros": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "creditAppliedMicros": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Portion of the free credit actually consumed this period\n(`min(free_credit, subtotal − discount)`).",
+            "minimum": 0
+          },
+          "diskMicros": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Disk gb·hour cost. `serde(default)` so older clients/payloads omitting it\nstill deserialize.",
+            "minimum": 0
+          },
+          "egressMicros": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Egress (gb total) cost.",
+            "minimum": 0
+          },
+          "execMicros": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "freeCreditMicros": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The plan's recurring free-credit allotment for the period.",
+            "minimum": 0
+          },
+          "memoryMicros": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "totalMicros": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Gross subtotal: sum of all resource line items, before discounts/credits.",
+            "minimum": 0
+          },
+          "volumeDiscountMicros": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Graduated volume discount applied to the subtotal (period-level only;\nalways 0 on per-machine breakdowns).",
+            "minimum": 0
+          }
+        }
       },
       "CreateApiKeyRequest": {
         "type": "object",
@@ -1514,6 +1941,13 @@
             "format": "int64",
             "minimum": 0
           },
+          "command": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Optional workload command (argv) that overrides the source image's or\n`.smolmachine` artifact's own entrypoint+cmd when the machine starts, so a\ndeploy of an off-the-shelf image can say what to run/serve. Empty (default)\n= use the source's own entrypoint, preserving prior behavior."
+          },
           "env": {
             "type": "object",
             "additionalProperties": {
@@ -1525,6 +1959,10 @@
           },
           "ephemeral": {
             "type": "boolean"
+          },
+          "forkable": {
+            "type": "boolean",
+            "description": "Create this machine as a FORKABLE golden: it boots as a live-RAM fork base\n(cloneable copy-on-write) so `POST /v1/machines/:id/fork` can spawn\nnear-instant clones that share the golden's RAM. Default false. Forkable\nrequires a fork-capable node (currently amd64) and always cold-boots (never\nwarm-pool-claimed); a create pinning an incompatible arch is rejected."
           },
           "mounts": {
             "type": "array",
@@ -1540,6 +1978,17 @@
           },
           "network": {
             "$ref": "#/components/schemas/MachineNetwork"
+          },
+          "ports": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MachinePort"
+            },
+            "description": "Ports to publish (web groups). Guest ports only; hostPort is allocated."
+          },
+          "public": {
+            "type": "boolean",
+            "description": "Opt in to UNAUTHENTICATED public ingress: when true (and the machine has a\npublished port), its `*.apps`/`/proxy` URL is reachable by anyone. Default\nfalse — a published port is reachable only via the authenticated path."
           },
           "resources": {
             "$ref": "#/components/schemas/MachineResources"
@@ -1589,6 +2038,128 @@
           }
         }
       },
+      "CreatePlanRequest": {
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "budgetPolicy": {
+            "type": "string"
+          },
+          "freeCreditMicros": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "isDefault": {
+            "type": "boolean"
+          },
+          "maxConcurrentMachines": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "maxCpus": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "maxEgressGb": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
+          },
+          "maxGroups": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "maxMachines": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "maxMemoryMb": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "monthlyBudgetMicros": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
+          },
+          "name": {
+            "type": "string"
+          },
+          "rateBaseHourMicros": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "rateCpuHourMicros": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "rateDiskGbHourMicros": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "rateEgressGbMicros": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "rateExecMicros": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "rateMemoryGbHourMicros": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          }
+        }
+      },
+      "CreateTenantRequest": {
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "name": {
+            "type": "string"
+          },
+          "planId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
       "CreateVolumeRequest": {
         "type": "object",
         "required": [
@@ -1596,6 +2167,20 @@
           "sizeGb"
         ],
         "properties": {
+          "backend": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Low-level storage backend override (`\"local\"` | `\"pd\"`). Prefer `durable`;\nthis is for power users and takes precedence when set. Unknown values are\nrejected by the handler."
+          },
+          "durable": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Durability of the volume. `false`/absent (the default) is **ephemeral** —\nfast node-local storage that is lost if the host node fails. `true` is\n**durable** — a disk that re-attaches to a live node on failover (requires\nthe deployment to have a durable backend configured). This is the\ncustomer-facing knob; it maps to `backend` internally."
+          },
           "name": {
             "type": "string"
           },
@@ -1670,6 +2255,10 @@
             "type": "integer",
             "format": "int32",
             "minimum": 0
+          },
+          "publicIngress": {
+            "type": "boolean",
+            "description": "Opt-in: expose this group's published port on the UNAUTHENTICATED public\n`/proxy` / `*.apps` ingress. Default false — the app is reachable only by\nits owner tenant (or admin) until explicitly made public, matching the\nper-machine `public_ingress` default."
           },
           "stopGraceSecs": {
             "type": "integer",
@@ -1804,6 +2393,62 @@
           }
         }
       },
+      "GroupInfo": {
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "image",
+          "replicas",
+          "status",
+          "port",
+          "instances",
+          "createdAt",
+          "updatedAt"
+        ],
+        "properties": {
+          "createdAt": {
+            "type": "string"
+          },
+          "domain": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "id": {
+            "type": "string"
+          },
+          "image": {
+            "type": "string"
+          },
+          "instances": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/InstanceInfo"
+            }
+          },
+          "name": {
+            "type": "string"
+          },
+          "port": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "replicas": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "status": {
+            "type": "string"
+          },
+          "updatedAt": {
+            "type": "string"
+          }
+        }
+      },
       "HealthCheck": {
         "type": "object",
         "required": [
@@ -1929,6 +2574,10 @@
           "command"
         ],
         "properties": {
+          "background": {
+            "type": "boolean",
+            "description": "Run the command detached: spawn it in the background and return its PID\nimmediately. Use for long-lived daemons (dev server, agent runner)."
+          },
           "command": {
             "$ref": "#/components/schemas/CommandSpec"
           },
@@ -1989,13 +2638,25 @@
             "type": "string"
           },
           "stderr": {
-            "type": "string"
+            "type": "string",
+            "description": "Lossy UTF-8 stderr, capped. Prefer `stderrB64`."
+          },
+          "stderrB64": {
+            "type": "string",
+            "format": "byte",
+            "description": "Byte-exact stderr (base64), binary-safe and NOT truncated. Serializes as\n`stderrB64`."
           },
           "stderrTruncated": {
             "type": "boolean"
           },
           "stdout": {
-            "type": "string"
+            "type": "string",
+            "description": "Lossy UTF-8 stdout, capped (see `stdout_truncated`). Kept for old clients\nand log views; prefer `stdoutB64` for byte-exact, untruncated output."
+          },
+          "stdoutB64": {
+            "type": "string",
+            "format": "byte",
+            "description": "Byte-exact stdout (base64), binary-safe and NOT truncated. Preferred by\nclients that need fidelity (`smol cloud exec`). `rename_all=camelCase`\nserializes this as `stdoutB64`."
           },
           "stdoutTruncated": {
             "type": "boolean"
@@ -2016,6 +2677,13 @@
           "updatedAt"
         ],
         "properties": {
+          "arch": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The machine's actual CPU arch (`arm64`/`amd64`): the arch of the node it\nruns on, falling back to `source.arch` (a `.smolmachine`'s pinned arch)\nwhen the machine is unplaced or its node is gone. `None` only when neither\nis known. Lets the console show an arch badge for every machine, including\nones whose source pinned no arch. Populated by the server's `machine_info`."
+          },
           "autoStopSeconds": {
             "type": [
               "integer",
@@ -2039,6 +2707,17 @@
           "ephemeral": {
             "type": "boolean"
           },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "When [`Self::state`] is `\"error\"`, a human-readable reason the machine\nfailed — the latest control-plane error event (e.g. `\"start failed: …\"`,\n`\"auto-start failed: …\"`, or `\"machine stuck in creating state\"`). `null`\nfor machines that are not in an error state. Gives clients something\nactionable instead of a bare `error` with no explanation."
+          },
+          "forkable": {
+            "type": "boolean",
+            "description": "Whether this machine was created as a forkable golden — a live-RAM fork\nbase that `POST /v1/machines/:id/fork` can CoW-clone. Default false."
+          },
           "id": {
             "type": "string"
           },
@@ -2056,6 +2735,24 @@
           },
           "network": {
             "$ref": "#/components/schemas/MachineNetwork"
+          },
+          "ports": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MachinePort"
+            },
+            "description": "Published ports with their allocated node host ports."
+          },
+          "ready": {
+            "type": "boolean",
+            "description": "Whether the machine is READY to do work. `state == \"started\"` only means\nthe VM process launched on the node — the guest OS and your in-VM workload\nstill need a moment to boot. `ready` becomes true once the guest agent is\nreachable (an `exec`/`connect` will succeed) and, if the machine publishes\na port, that port is accepting connections. Wait for `ready` (poll\n`GET /v1/machines/:id`) before expecting an in-guest worker to have started\nor before connecting to it — do NOT act on `started` alone."
+          },
+          "readyAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "When the machine first became [`Self::ready`] (RFC3339), or `null` if not\nyet ready. Monotonic: once set it isn't cleared until a stop/restart."
           },
           "resources": {
             "$ref": "#/components/schemas/MachineResources"
@@ -2076,6 +2773,13 @@
           },
           "updatedAt": {
             "type": "string"
+          },
+          "url": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Public ingress URL for the machine's first published port, when the\nmachine is started and the control plane has a public base URL\nconfigured. `null` for stopped machines, machines with no published\nport, or when the deployment exposes no public base URL."
           },
           "workdir": {
             "type": [
@@ -2110,6 +2814,7 @@
         "oneOf": [
           {
             "type": "object",
+            "description": "No outbound access for the guest. The image PULL runs in-guest too, so a\n`blocked` machine whose image isn't already node-cached CANNOT fetch it and\nits start fails on an unreachable registry — opt into this deliberately.",
             "required": [
               "mode"
             ],
@@ -2124,6 +2829,7 @@
           },
           {
             "type": "object",
+            "description": "Unrestricted outbound access. This is the DEFAULT: it matches what the\n`smol` CLI already sends, and means a create that omits `network` (raw\nAPI/SDK) can pull remote images out of the box instead of failing the\nstart on an unreachable registry. Tighten with `blocked`/`allowCidrs`.",
             "required": [
               "mode"
             ],
@@ -2139,11 +2845,16 @@
           {
             "type": "object",
             "required": [
-              "cidrs",
               "mode"
             ],
             "properties": {
               "cidrs": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "hosts": {
                 "type": "array",
                 "items": {
                   "type": "string"
@@ -2158,6 +2869,30 @@
             }
           }
         ]
+      },
+      "MachinePort": {
+        "type": "object",
+        "description": "A machine-published port. On create, supply only `port` (the guest port the\nworkload listens on); the control plane allocates `hostPort` on the chosen\nnode at first start and routes ingress to it. Publishing a port implies the\nvirtio-net network backend on the node (TSI is outbound-only).",
+        "required": [
+          "port"
+        ],
+        "properties": {
+          "hostPort": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "Node host port allocated at placement (read-only; ignored on create).",
+            "minimum": 0
+          },
+          "port": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Guest port the workload listens on.",
+            "minimum": 0
+          }
+        }
       },
       "MachineResources": {
         "type": "object",
@@ -2236,6 +2971,13 @@
               "type"
             ],
             "properties": {
+              "arch": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "Requested CPU arch (\"arm64\"/\"amd64\"). Optional: an OCI image is\nusually multi-arch (the node pulls its own variant), so `None`\nmeans \"no constraint\" — but a caller that NEEDS a specific arch\n(e.g. x86-only binaries inside) can pin placement with it. Was\npreviously silently dropped by deserialization."
+              },
               "reference": {
                 "type": "string"
               },
@@ -2254,6 +2996,13 @@
               "type"
             ],
             "properties": {
+              "arch": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "Canonical CPU arch the packed artifact targets (\"arm64\"/\"amd64\").\nA `.smolmachine` is single-arch, so this becomes a hard placement\nconstraint. `None` (older clients) means \"no arch constraint\"."
+              },
               "reference": {
                 "type": "string"
               },
@@ -2266,6 +3015,55 @@
             }
           }
         ]
+      },
+      "MeResponse": {
+        "type": "object",
+        "description": "Identity self-discovery (`GET /v1/me`): who the caller is and where they\nmay push registry artifacts. Requires authentication but NO scopes — any\nidentity may ask who it is. This is how the CLI resolves a bare\n`myapp:v1` push reference to `tenants/<tenantId>/myapp:v1`.",
+        "required": [
+          "subject",
+          "scopes"
+        ],
+        "properties": {
+          "registryNamespace": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The OCI repository namespace this identity may push to\n(`tenants/<tenantId>`), ready to prefix onto a repo name."
+          },
+          "scopes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Scopes this identity holds."
+          },
+          "subject": {
+            "type": "string",
+            "description": "Acting principal: the JWT subject or the API key id."
+          },
+          "tenantId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Canonical tenant id, if the identity is tenant-scoped. `None` for\nadmin keys and identities without a provisioned tenant."
+          },
+          "tenantName": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Tenant display name (the IdP email/name captured at provisioning)."
+          },
+          "tenantStatus": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Tenant status (`active`, `waitlisted`, `suspended`)."
+          }
+        }
       },
       "NodeInfo": {
         "type": "object",
@@ -2302,6 +3100,27 @@
             "format": "int64",
             "minimum": 0
           },
+          "bootId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Runtime's per-process boot id, forwarded from the node's `/capacity`. A\nchange between heartbeats means the serve restarted (its warm pool wiped),\nwhich the control uses to prune the node's now-stale pool records. Absent on\nan older node/runtime that doesn't report it."
+          },
+          "csrPem": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "PEM-encoded certificate signing request, sent only at registration. When\npresent, the control plane signs it as the node's mTLS **server** cert\n(overriding the CSR's subject/SANs with the validated node id/addresses)\nand returns the cert in `RegisterResponse`. The node's private key never\nleaves it. Absent ⇒ control plane has no node-CA configured, or this is\nan older node; the registration still succeeds (cert fields stay empty)."
+          },
+          "diskCordonedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Set (RFC3339) when the control plane soft-cordons this node for DISK\npressure — its heartbeat-reported host-free disk dropped below the cordon\nthreshold, so it stops receiving NEW placements. SEPARATE from the\ndata-plane cordon: the node stays `status = \"ready\"` and is never reaped;\nits running machines are untouched. Cleared when free disk recovers past\nthe (higher, hysteretic) un-cordon threshold. `None` = not disk-cordoned."
+          },
           "id": {
             "type": "string"
           },
@@ -2322,6 +3141,12 @@
           },
           "registeredAt": {
             "type": "string"
+          },
+          "reservedDiskGb": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Sum of the (thin/nominal) local-SSD footprints reserved by the machines\nplaced on this node — the disk-overcommit ledger. Unlike `available_disk_gb`\n(overwritten by every heartbeat with the host's live free space), this is a\nreserve/release decrement ledger the scheduler gates admission on, so a node\ncan't be packed past `total_disk_gb * ratio`. Reconciled by the capacity\nself-heal. Default 0 (legacy rows / never reserved).",
+            "minimum": 0
           },
           "runtime": {
             "type": "string",
@@ -2364,6 +3189,120 @@
             "type": "integer",
             "format": "int64",
             "description": "Real memory usage in MB. Reported by the node from RSS of VM processes.\nSeparate from `available_memory_mb` (which is allocation-based bookkeeping).",
+            "minimum": 0
+          }
+        }
+      },
+      "PlanInfo": {
+        "type": "object",
+        "description": "A reusable plan: quota + per-unit rates (money in integer micros) + budget.",
+        "required": [
+          "id",
+          "name",
+          "maxGroups",
+          "maxCpus",
+          "maxMemoryMb",
+          "maxMachines",
+          "maxConcurrentMachines",
+          "rateCpuHourMicros",
+          "rateMemoryGbHourMicros",
+          "rateExecMicros",
+          "budgetPolicy",
+          "isDefault",
+          "createdAt"
+        ],
+        "properties": {
+          "budgetPolicy": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string"
+          },
+          "freeCreditMicros": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Recurring free credit applied to each billing period, in micros (e.g.\n5_000_000 = $5/month free). Discount applies after volume tiers.",
+            "minimum": 0
+          },
+          "id": {
+            "type": "string"
+          },
+          "isDefault": {
+            "type": "boolean"
+          },
+          "maxConcurrentMachines": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "maxCpus": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "maxEgressGb": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
+          },
+          "maxGroups": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "maxMachines": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "maxMemoryMb": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "monthlyBudgetMicros": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
+          },
+          "name": {
+            "type": "string"
+          },
+          "rateBaseHourMicros": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Per-machine-alive-hour \"slot\" fee in micros (e.g. 40_000 = $0.04/hr). Prices\nthe held VM slot on top of consumed CPU/RAM — not allocated resources.",
+            "minimum": 0
+          },
+          "rateCpuHourMicros": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "rateDiskGbHourMicros": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "rateEgressGbMicros": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "rateExecMicros": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "rateMemoryGbHourMicros": {
+            "type": "integer",
+            "format": "int64",
             "minimum": 0
           }
         }
@@ -2459,6 +3398,161 @@
           }
         }
       },
+      "TenantInfo": {
+        "type": "object",
+        "description": "A tenant (customer account). Quota override fields are `None` when inherited\nfrom the plan. See docs/product-backend-layer.md.",
+        "required": [
+          "id",
+          "name",
+          "status",
+          "createdAt"
+        ],
+        "properties": {
+          "createdAt": {
+            "type": "string"
+          },
+          "externalBillingId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "id": {
+            "type": "string"
+          },
+          "maxCpus": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "minimum": 0
+          },
+          "maxGroups": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "minimum": 0
+          },
+          "maxMemoryMb": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
+          },
+          "maxSandboxPools": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "minimum": 0
+          },
+          "name": {
+            "type": "string"
+          },
+          "planId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "status": {
+            "type": "string"
+          },
+          "updatedAt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "TenantMeter": {
+        "type": "object",
+        "description": "One tenant's metered usage for a period, in the shape a billing system\ningests (`GET /v1/billing/meters`).",
+        "required": [
+          "tenantId",
+          "cpuHours",
+          "memoryGbHours",
+          "execCount",
+          "cost"
+        ],
+        "properties": {
+          "cost": {
+            "$ref": "#/components/schemas/CostBreakdown"
+          },
+          "cpuHours": {
+            "type": "number",
+            "format": "double"
+          },
+          "diskGbHours": {
+            "type": "number",
+            "format": "double",
+            "description": "Disk gb·hours metered for the period."
+          },
+          "egressGb": {
+            "type": "number",
+            "format": "double",
+            "description": "Egress gb (networking, billed by gb total) for the period."
+          },
+          "execCount": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "externalBillingId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "memoryGbHours": {
+            "type": "number",
+            "format": "double"
+          },
+          "tenantId": {
+            "type": "string"
+          }
+        }
+      },
+      "UpdateTenantRequest": {
+        "type": "object",
+        "description": "Partial update — only present fields change.",
+        "properties": {
+          "externalBillingId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "freeCreditMicros": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Per-tenant free-credit override (micros). Present → this tenant's monthly\nfree allotment is set to exactly this, overriding its plan's. Absent →\nunchanged (still falls back to the plan). Admin-only.",
+            "minimum": 0
+          },
+          "planId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "status": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
       "UsageResponse": {
         "type": "object",
         "required": [
@@ -2468,24 +3562,23 @@
           "totalUptimeSeconds",
           "cpuHours",
           "memoryGbHours",
-          "machineCount",
-          "execCount",
-          "execDurationMs"
+          "diskGbHours",
+          "egressGb",
+          "machineCount"
         ],
         "properties": {
           "cpuHours": {
             "type": "number",
+            "format": "double",
+            "description": "The four metered-and-priced dimensions. Exec is intentionally absent: it\nis metered for the event timeline but priced at $0, so surfacing it as\n\"usage\" here would imply a charge that never happens."
+          },
+          "diskGbHours": {
+            "type": "number",
             "format": "double"
           },
-          "execCount": {
-            "type": "integer",
-            "format": "int32",
-            "minimum": 0
-          },
-          "execDurationMs": {
-            "type": "integer",
-            "format": "int64",
-            "minimum": 0
+          "egressGb": {
+            "type": "number",
+            "format": "double"
           },
           "from": {
             "type": "string"
@@ -2520,17 +3613,22 @@
           "nodeId",
           "sizeGb",
           "status",
-          "createdAt"
+          "createdAt",
+          "durability"
         ],
         "properties": {
-          "appInstanceId": {
+          "createdAt": {
+            "type": "string"
+          },
+          "durability": {
+            "type": "string",
+            "description": "`\"ephemeral\"` — lives on a single node's disk and is lost if that node\nfails (the default); `\"durable\"` — backed by a detachable disk that\nre-attaches to a live node on failover. Derived from the storage backend."
+          },
+          "groupInstanceId": {
             "type": [
               "string",
               "null"
             ]
-          },
-          "createdAt": {
-            "type": "string"
           },
           "id": {
             "type": "string"
@@ -2579,8 +3677,8 @@
       "description": "First-class machine lifecycle and exec"
     },
     {
-      "name": "apps",
-      "description": "Long-running app deployments"
+      "name": "groups",
+      "description": "Long-running group deployments"
     },
     {
       "name": "nodes",
@@ -2607,12 +3705,24 @@
       "description": "API key management"
     },
     {
+      "name": "tenants",
+      "description": "Customer accounts (product-backend)"
+    },
+    {
+      "name": "plans",
+      "description": "Quota + rate + budget plans"
+    },
+    {
+      "name": "billing",
+      "description": "Self-service account and metering"
+    },
+    {
       "name": "operations",
       "description": "Async operations"
     },
     {
       "name": "health",
-      "description": "Health and metrics"
+      "description": "Health, probes, and metrics"
     }
   ]
 }
