@@ -189,6 +189,62 @@ def test_rollout_ensure_rejects_different_existing_config():
         assert error.code == "CONFLICT"
 
 
+def test_rollout_ensure_registers_device_adapter_socket():
+    class CapturingClient(RolloutClient):
+        def _request(self, method, path, body=None):
+            assert method == "POST"
+            assert path == "/rollout-executors"
+            return body
+
+    client = CapturingClient("http://127.0.0.1:8080/api/v1", "qwen")
+    result = client.ensure_vllm_executor(
+        endpoint="http://127.0.0.1:8000",
+        adapter_root="/adapters",
+        device_adapter_socket="/run/smolvm/device-lora.sock",
+    )
+    assert result["deviceAdapterSocket"] == "/run/smolvm/device-lora.sock"
+
+
+def test_rollout_device_policy_normalizes_token_and_retries_ambiguity():
+    class RetryingClient(RolloutClient):
+        def __init__(self):
+            super().__init__("http://127.0.0.1:8080/api/v1", "qwen")
+            self.calls = []
+
+        def _request(self, method, path, body=None):
+            self.calls.append((method, path, body))
+            if len(self.calls) == 1:
+                raise RolloutError(0, "UNAVAILABLE", "response lost")
+            return {"source": "device"}
+
+    client = RetryingClient()
+    result = client.publish_device_policy(
+        "policy-a", "step-4", bytes(range(32)), retain_previous=True
+    )
+    assert result == {"source": "device"}
+    assert len(client.calls) == 2
+    assert client.calls[0] == client.calls[1]
+    method, path, body = client.calls[0]
+    assert method == "POST"
+    assert path == "/rollout-executors/qwen/device-policies"
+    assert body == {
+        "policy": "policy-a",
+        "version": "step-4",
+        "tensorBundleToken": bytes(range(32)).hex(),
+        "retainPrevious": True,
+    }
+
+
+def test_rollout_device_policy_rejects_invalid_token():
+    client = RolloutClient("http://127.0.0.1:8080/api/v1", "qwen")
+    for token in (b"short", "z" * 64, "00" * 31):
+        try:
+            client.publish_device_policy("policy", "version", token)
+            raise AssertionError("should reject an invalid token")
+        except ValueError:
+            pass
+
+
 if __name__ == "__main__":
     import traceback
 

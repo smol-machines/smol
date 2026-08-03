@@ -28,6 +28,7 @@ export interface RolloutPolicyInfo {
   version: string;
   adapterSha256: string;
   backendModel: string;
+  source: 'filesystem' | 'device';
   current: boolean;
   activeRequests: number;
   retiring: boolean;
@@ -38,6 +39,7 @@ export interface RolloutExecutorInfo {
   backend: 'vllm';
   endpoint: string;
   adapterRoot: string;
+  deviceAdapterSocket?: string;
   fallbackPool?: string;
   maxConcurrentRequests: number;
   maxQueueDepth: number;
@@ -52,6 +54,7 @@ export interface RolloutExecutorInfo {
 export interface EnsureRolloutExecutorOptions {
   endpoint: string;
   adapterRoot: string;
+  deviceAdapterSocket?: string;
   fallbackPool?: string;
   maxConcurrentRequests?: number;
   maxQueueDepth?: number;
@@ -255,6 +258,9 @@ export class RolloutClient {
       maxConcurrentRequests: options.maxConcurrentRequests ?? 32,
       maxQueueDepth: options.maxQueueDepth ?? 256,
       requestTimeoutSecs: options.requestTimeoutSecs ?? 300,
+      ...(options.deviceAdapterSocket === undefined
+        ? {}
+        : { deviceAdapterSocket: realpathSync(options.deviceAdapterSocket) }),
       ...(options.fallbackPool === undefined ? {} : { fallbackPool: options.fallbackPool }),
     };
     try {
@@ -267,6 +273,7 @@ export class RolloutClient {
       backend: current.backend,
       endpoint: current.endpoint,
       adapterRoot: current.adapterRoot,
+      deviceAdapterSocket: current.deviceAdapterSocket,
       fallbackPool: current.fallbackPool,
       maxConcurrentRequests: current.maxConcurrentRequests,
       maxQueueDepth: current.maxQueueDepth,
@@ -276,6 +283,9 @@ export class RolloutClient {
       backend: 'vllm',
       endpoint: desired.endpoint,
       adapterRoot: desired.adapterRoot,
+      deviceAdapterSocket: options.deviceAdapterSocket === undefined
+        ? undefined
+        : desired.deviceAdapterSocket,
       fallbackPool: options.fallbackPool,
       maxConcurrentRequests: desired.maxConcurrentRequests,
       maxQueueDepth: desired.maxQueueDepth,
@@ -320,6 +330,36 @@ export class RolloutClient {
       adapterSha256: adapterSha256(adapter),
       retainPrevious,
     });
+  }
+
+  async publishDevicePolicy(
+    policy: string,
+    version: string,
+    tensorBundleToken: string | Uint8Array,
+    retainPrevious = false,
+  ): Promise<RolloutPolicyInfo> {
+    let token: string;
+    if (typeof tensorBundleToken === 'string') {
+      if (!/^[0-9a-fA-F]{64}$/.test(tensorBundleToken)) {
+        throw new Error('tensor bundle token must be exactly 32 hexadecimal bytes');
+      }
+      token = tensorBundleToken.toLowerCase();
+    } else {
+      if (tensorBundleToken.byteLength !== 32) {
+        throw new Error('tensor bundle token must contain exactly 32 bytes');
+      }
+      token = Buffer.from(tensorBundleToken).toString('hex');
+    }
+    const path = `${this.executorPath}/device-policies`;
+    const body = { policy, version, tensorBundleToken: token, retainPrevious };
+    try {
+      return await this.request('POST', path, body);
+    } catch (error) {
+      if (!(error instanceof RolloutError) || error.status !== 0) throw error;
+      // The controller remembers the consumed token's digest, making an
+      // ambiguous transport retry idempotent for this exact publication.
+      return this.request('POST', path, body);
+    }
   }
 
   async retirePolicy(policy: string, version: string): Promise<void> {

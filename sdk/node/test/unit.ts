@@ -158,5 +158,76 @@ check('cliConfigApiKey: empty api_key counts as absent', () => {
   });
 });
 
-console.log(`\n${passed} passed, ${failed} failed`);
-if (failed > 0) process.exit(1);
+async function checkAsync(name: string, fn: () => Promise<void>) {
+  try {
+    await fn();
+    passed++;
+    console.log(`  ✓ ${name}`);
+  } catch (e) {
+    failed++;
+    console.log(`  ✗ ${name}: ${(e as Error).message}`);
+  }
+}
+
+async function finish() {
+  await checkAsync('publishes a device policy with a canonical token', async () => {
+    const requests: Array<{ url: string; init?: RequestInit }> = [];
+    const fetchMock: typeof fetch = async (input, init) => {
+      requests.push({ url: String(input), init });
+      return new Response(JSON.stringify({ source: 'device' }), {
+        status: 201,
+        headers: { 'content-type': 'application/json' },
+      });
+    };
+    const client = new RolloutClient('http://127.0.0.1:8080/api/v1', 'qwen', {
+      fetch: fetchMock,
+    });
+    const result = await client.publishDevicePolicy(
+      'policy-a',
+      'step-4',
+      Uint8Array.from({ length: 32 }, (_, index) => index),
+      true,
+    );
+    assert.strictEqual(result.source, 'device');
+    assert.strictEqual(requests.length, 1);
+    assert.strictEqual(
+      requests[0].url,
+      'http://127.0.0.1:8080/api/v1/rollout-executors/qwen/device-policies',
+    );
+    assert.deepStrictEqual(JSON.parse(String(requests[0].init?.body)), {
+      policy: 'policy-a',
+      version: 'step-4',
+      tensorBundleToken: Buffer.from(
+        Uint8Array.from({ length: 32 }, (_, index) => index),
+      ).toString('hex'),
+      retainPrevious: true,
+    });
+  });
+
+  await checkAsync('retries an ambiguous device publication once', async () => {
+    let calls = 0;
+    const fetchMock: typeof fetch = async () => {
+      calls++;
+      if (calls === 1) throw new Error('response lost');
+      return new Response(JSON.stringify({ source: 'device' }), { status: 201 });
+    };
+    const client = new RolloutClient('http://127.0.0.1:8080/api/v1', 'qwen', {
+      fetch: fetchMock,
+    });
+    await client.publishDevicePolicy('policy-a', 'step-4', 'ab'.repeat(32));
+    assert.strictEqual(calls, 2);
+  });
+
+  await checkAsync('rejects an invalid device publication token', async () => {
+    const client = new RolloutClient('http://127.0.0.1:8080/api/v1', 'qwen');
+    await assert.rejects(
+      client.publishDevicePolicy('policy-a', 'step-4', 'zz'.repeat(32)),
+      /exactly 32 hexadecimal bytes/,
+    );
+  });
+
+  console.log(`\n${passed} passed, ${failed} failed`);
+  if (failed > 0) process.exitCode = 1;
+}
+
+void finish();

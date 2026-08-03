@@ -60,6 +60,9 @@ struct EnsureExecutorCmd {
     /// Host directory containing publishable adapter directories.
     #[arg(long)]
     adapter_root: PathBuf,
+    /// Private Unix socket for device-resident LoRA handoff.
+    #[arg(long)]
+    device_adapter_socket: Option<PathBuf>,
     /// Ordinary isolated fork pool used for unsupported requests.
     #[arg(long)]
     fallback_pool: Option<String>,
@@ -137,11 +140,20 @@ impl RolloutCmd {
                     if !adapter_root.is_dir() {
                         anyhow::bail!("adapter root must be a directory");
                     }
+                    let device_adapter_socket = command
+                        .device_adapter_socket
+                        .as_ref()
+                        .map(|path| {
+                            path.canonicalize()
+                                .with_context(|| format!("resolve {}", path.display()))
+                        })
+                        .transpose()?;
                     let desired = json!({
                         "name": command.name,
                         "backend": "vllm",
                         "endpoint": command.endpoint,
                         "adapterRoot": adapter_root,
+                        "deviceAdapterSocket": device_adapter_socket,
                         "fallbackPool": command.fallback_pool,
                         "maxConcurrentRequests": command.max_concurrent_requests,
                         "maxQueueDepth": command.max_queue_depth,
@@ -324,6 +336,7 @@ fn ensure_same_config(current: &Value, desired: &Value, name: &str) -> Result<()
         "backend",
         "endpoint",
         "adapterRoot",
+        "deviceAdapterSocket",
         "fallbackPool",
         "maxConcurrentRequests",
         "maxQueueDepth",
@@ -431,5 +444,23 @@ mod tests {
         assert!(validate_api_url("http://localhost:9000/api/v1").is_ok());
         assert!(validate_api_url("http://10.0.0.1:9000/api/v1").is_err());
         assert!(validate_api_url("https://127.0.0.1:9000/api/v1").is_err());
+    }
+
+    #[test]
+    fn executor_config_compares_device_handoff_socket() {
+        let desired = json!({
+            "backend": "vllm",
+            "endpoint": "http://127.0.0.1:8000",
+            "adapterRoot": "/adapters",
+            "deviceAdapterSocket": "/run/smolvm/device-lora.sock",
+            "fallbackPool": null,
+            "maxConcurrentRequests": 32,
+            "maxQueueDepth": 256,
+            "requestTimeoutSecs": 300,
+        });
+        assert!(ensure_same_config(&desired, &desired, "qwen").is_ok());
+        let mut different = desired.clone();
+        different["deviceAdapterSocket"] = json!("/run/smolvm/other.sock");
+        assert!(ensure_same_config(&different, &desired, "qwen").is_err());
     }
 }
