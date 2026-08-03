@@ -1,4 +1,4 @@
-//! Build script for smolvm.
+//! Build script for the smol CLI.
 //!
 //! Handles finding and linking libkrun.
 //!

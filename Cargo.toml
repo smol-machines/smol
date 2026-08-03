@@ -36,7 +36,6 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 anyhow = "1"
 serde_json = "1"
 serde = { version = "1", features = ["derive"] }
-toml = "0.8"
 tempfile = "3"
 dirs = "5"
 smolvm-protocol = { path = "../crates/smolvm-protocol" }
@@ -54,12 +53,13 @@ tokio-tungstenite = { version = "0.28", default-features = false, features = ["c
 futures-util = "0.3"
 # Pin the rustls CryptoProvider for tokio-tungstenite's TLS (see main()).
 rustls = { version = "0.23", default-features = false, features = ["ring"] }
-chrono = { version = "0.4", features = ["serde"] }
 open = "5"
 base64 = "0.22"
 libc = "0.2"
 sha2 = "0.10"
 hex = "0.4"
 
-[build-dependencies]
-pkg-config = "0.3"
+[dev-dependencies]
+# Settings round-trip tests only; runtime TOML persistence lives in the engine's
+# `smolvm::settings`.
+toml = "0.8"
