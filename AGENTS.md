@@ -35,7 +35,7 @@ import { Machine } from 'smolmachines';
 const m = await Machine.create({ resources: { cpus: 2, memoryMb: 1024, network: true } });
 try {
   const r = await m.run('python:3.12', ['python', '-c', 'print(2 ** 10)']);
-  await m.writeFile('/tmp/in.txt', 'hi');
+  await m.writeFile('/workspace/in.txt', 'hi');
 } finally {
   await m.delete();
 }
@@ -100,6 +100,14 @@ Both SDKs expose the same surface (camelCase in Node, snake_case in Python).
 🔴 **`create()` waits until the guest agent is reachable.** A *cloud* machine
 reporting state `started` only means the VM launched — not that it can accept
 work. Use `create()`/`waitUntilReady()` rather than polling for `started`.
+
+🔴 **Write files where they survive: `/workspace`, not `/tmp`.** `/workspace`
+and the image filesystem are on the machine's storage disk and persist across
+`exec` calls and stop/start. `/tmp`, `/run`, and `/dev/shm` are in memory: they
+keep their contents while the machine runs, but are empty after it stops and
+starts — including an automatic idle stop. Keep credentials, configuration, and
+any state a later command reads out of `/tmp`, and do not point a config path at
+a symlink into `/tmp`.
 
 ## CLI Structure
 
