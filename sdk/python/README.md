@@ -96,6 +96,17 @@ automatically groups workers from the same fork batch into a bounded cohort.
 Pass `auto_fork_cohort=False` only when the application already supplies an
 explicit `cohort_id`, `cohort_size`, and `cohort_max_wait_ms`.
 
+Optional framework adapters are explicit imports, so the base SDK remains free
+of PyTorch, PEFT, Transformers, Unsloth, and vLLM dependencies:
+
+```python
+from smol.integrations import (
+    UnslothVllmExecutor,
+    add_transformers_forkpoint,
+    publish_peft_adapter,
+)
+```
+
 The vLLM backend must bind to loopback, enable runtime LoRA updates, and reserve
 one spare CPU LoRA slot so a new version can load before the old version drains.
 

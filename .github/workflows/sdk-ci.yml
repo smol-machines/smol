@@ -137,6 +137,12 @@ jobs:
         run: python tests/test_unit.py
       - name: Device-resident rollout handoff
         run: python tests/test_device_handoff.py
+      - name: Optional rollout framework adapters
+        run: |
+          python tests/test_integrations.py
+          python tests/test_peft.py
+          python tests/test_transformers.py
+          python tests/test_unsloth_vllm.py
       - name: Cloud-transport tests (mock /v1 server; pure Python)
         run: python tests/test_cloud_mock.py
       - name: Cloud start-failure surfacing (mock /v1 server; pure Python)
