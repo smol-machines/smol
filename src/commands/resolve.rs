@@ -76,19 +76,6 @@ pub struct MachineRef {
     pub memory_mib: Option<u32>,
 }
 
-impl MachineRef {
-    /// The display handle: prefer the name, fall back to the id.
-    #[allow(dead_code)] // used by verbs wired in follow-ups (see docs/unified-machine-cli.md)
-    pub fn display_name(&self) -> &str {
-        self.name.as_deref().unwrap_or(&self.id)
-    }
-
-    /// True if a bare user reference selects this machine.
-    fn matches_bare(&self, reference: &str) -> bool {
-        self.id == reference || self.name.as_deref() == Some(reference)
-    }
-}
-
 /// A parsed reference: an optional forced location plus the bare name-or-id.
 struct ParsedRef<'a> {
     forced: Option<Location>,
@@ -198,79 +185,6 @@ pub fn list_all(target: Target) -> Result<Listing> {
     }
 
     Ok(Listing { machines, cloud_available })
-}
-
-/// Resolve a user reference to exactly one machine under `target`.
-///
-/// Errors, with actionable text, when the reference matches nothing or is
-/// ambiguous (a bare name present in both backends). A `local/`/`cloud/` prefix
-/// or a `mach-…` id removes the ambiguity, as does a `--local`/`--cloud` flag.
-///
-/// Not yet called: this is the wiring target for the remaining verbs (exec,
-/// shell, start, stop, rm, logs, status, cp, fork) per `docs/unified-machine-cli.md`.
-#[allow(dead_code)]
-pub fn resolve(reference: &str, target: Target) -> Result<MachineRef> {
-    let parsed = parse_ref(reference);
-
-    // A forced location (prefix or mach- id) narrows the effective target, and
-    // must not conflict with an explicit flag.
-    let effective = match (parsed.forced, target) {
-        (Some(Location::Local), Target::Cloud) | (Some(Location::Cloud), Target::Local) => {
-            bail!(
-                "reference '{reference}' forces a location that conflicts with the \
-                 --local/--cloud flag"
-            )
-        }
-        (Some(loc), _) => match loc {
-            Location::Local => Target::Local,
-            Location::Cloud => Target::Cloud,
-        },
-        (None, t) => t,
-    };
-
-    let listing = list_all(effective)?;
-    let mut hits: Vec<MachineRef> = listing
-        .machines
-        .into_iter()
-        .filter(|m| m.matches_bare(parsed.bare))
-        .collect();
-
-    match hits.len() {
-        0 => {
-            if effective != Target::Local && !listing.cloud_available {
-                bail!(
-                    "machine '{}' not found locally; cloud was not searched \
-                     (not logged in — run 'smol auth login')",
-                    parsed.bare
-                );
-            }
-            bail!("machine '{}' not found", parsed.bare)
-        }
-        1 => Ok(hits.pop().unwrap()),
-        _ => {
-            // Ambiguous only when the hits straddle both backends; qualify.
-            let locals = hits.iter().filter(|m| m.location == Location::Local).count();
-            let clouds = hits.len() - locals;
-            if locals > 0 && clouds > 0 {
-                bail!(
-                    "'{name}' is ambiguous — it exists both locally and in the cloud. \
-                     Qualify it as 'local/{name}' or 'cloud/{name}'.",
-                    name = parsed.bare
-                )
-            }
-            // Same-backend duplicate (e.g. two cloud rows share a name): prefer id
-            // match if the reference was an id, else it's genuinely ambiguous.
-            if let Some(exact) = hits.iter().find(|m| m.id == parsed.bare) {
-                return Ok(exact.clone());
-            }
-            bail!(
-                "'{}' matches {} machines in the same backend; use the machine id to \
-                 disambiguate",
-                parsed.bare,
-                hits.len()
-            )
-        }
-    }
 }
 
 /// Does a local machine with this name exist? Cheap, offline registry lookup.
@@ -407,18 +321,6 @@ pub fn route(reference: Option<&str>, target: Target) -> Result<(Location, Strin
 mod tests {
     use super::*;
 
-    fn m(loc: Location, name: &str, id: &str) -> MachineRef {
-        MachineRef {
-            location: loc,
-            name: Some(name.to_string()),
-            id: id.to_string(),
-            state: "running".into(),
-            source: None,
-            cpus: None,
-            memory_mib: None,
-        }
-    }
-
     #[test]
     fn parses_location_prefixes() {
         assert_eq!(parse_ref("local/foo").forced, Some(Location::Local));
@@ -435,14 +337,6 @@ mod tests {
         assert_eq!(Target::from_flags(true, false).unwrap(), Target::Local);
         assert_eq!(Target::from_flags(false, true).unwrap(), Target::Cloud);
         assert_eq!(Target::from_flags(false, false).unwrap(), Target::Auto);
-    }
-
-    #[test]
-    fn bare_match_prefers_id_or_name() {
-        let cloud = m(Location::Cloud, "codex-box", "mach-b0bc");
-        assert!(cloud.matches_bare("codex-box"));
-        assert!(cloud.matches_bare("mach-b0bc"));
-        assert!(!cloud.matches_bare("other"));
     }
 
     #[test]
@@ -513,19 +407,5 @@ mod tests {
     fn route_rejects_prefix_flag_conflict() {
         assert!(route(Some("cloud/foo"), Target::Local).is_err());
         assert!(route(Some("local/foo"), Target::Cloud).is_err());
-    }
-
-    #[test]
-    fn display_name_falls_back_to_id() {
-        let unnamed = MachineRef {
-            location: Location::Cloud,
-            name: None,
-            id: "mach-5bb1".into(),
-            state: "stopped".into(),
-            source: None,
-            cpus: None,
-            memory_mib: None,
-        };
-        assert_eq!(unnamed.display_name(), "mach-5bb1");
     }
 }
