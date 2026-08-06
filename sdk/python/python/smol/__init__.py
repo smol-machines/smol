@@ -46,6 +46,12 @@ from .errors import (
     wrap_native_error,
 )
 from .async_machine import AsyncEpisode, AsyncMachine
+from .device_handoff import (
+    DeviceAdapterBundle,
+    DeviceAdapterServer,
+    DeviceTensor,
+    publish_device_adapter,
+)
 from .machine import Episode, Machine
 from .rollout import RolloutClient, RolloutError, adapter_sha256
 from .types import (
@@ -84,4 +90,8 @@ __all__ = [
     "RolloutClient",
     "RolloutError",
     "adapter_sha256",
+    "DeviceAdapterBundle",
+    "DeviceAdapterServer",
+    "DeviceTensor",
+    "publish_device_adapter",
 ]

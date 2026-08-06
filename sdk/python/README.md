@@ -90,6 +90,12 @@ result = rollouts.generate(
 )
 ```
 
+Inside a forked rollout worker, no configuration is required: `RolloutClient()`
+discovers its authenticated node assignment from `/etc/smolvm/fork-env` and
+automatically groups workers from the same fork batch into a bounded cohort.
+Pass `auto_fork_cohort=False` only when the application already supplies an
+explicit `cohort_id`, `cohort_size`, and `cohort_max_wait_ms`.
+
 The vLLM backend must bind to loopback, enable runtime LoRA updates, and reserve
 one spare CPU LoRA slot so a new version can load before the old version drains.
 

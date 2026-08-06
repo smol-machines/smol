@@ -1,8 +1,11 @@
 """Pure-unit tests — no VM boot, no network. Mirrors the Node ``test/unit.ts``."""
 
+import json
+import os
 import sys
 import tempfile
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "python"))
 
@@ -243,6 +246,174 @@ def test_rollout_device_policy_rejects_invalid_token():
             raise AssertionError("should reject an invalid token")
         except ValueError:
             pass
+
+
+class RecordingRolloutClient(RolloutClient):
+    def __init__(self, **options):
+        super().__init__("http://127.0.0.1:8080/api/v1", "qwen", **options)
+        self.recorded = None
+
+    def _request(self, method, path, body=None):
+        self.recorded = (method, path, body)
+        return {"ok": True}
+
+
+def test_rollout_discovers_lease_and_authenticates_without_arguments():
+    with tempfile.TemporaryDirectory() as directory:
+        assignment = Path(directory) / "fork-env"
+        assignment.write_text(
+            "SMOLVM_ROLLOUT_URL=http://100.96.0.1:10081/api/v1/rollout-executors/fused\n"
+            "SMOLVM_ROLLOUT_TOKEN=lease-id.secret\n"
+            "SMOLVM_ROLLOUT_EXECUTOR=fused\n"
+            "SMOLVM_ROLLOUT_POLICY=experiment-a\n"
+            "SMOLVM_FORK_BATCH_ID=batch-a\n"
+            "SMOLVM_FORK_BATCH_SIZE=2\n",
+            encoding="utf-8",
+        )
+        with mock.patch.dict(os.environ, {}, clear=True):
+            client = RolloutClient(fork_env_path=assignment)
+        assert client.api_url == "http://100.96.0.1:10081/api/v1"
+        assert client.executor == "fused"
+        assert client.bearer_token == "lease-id.secret"
+        assert client.lease_policy == "experiment-a"
+
+        with mock.patch("urllib.request.urlopen") as urlopen:
+            response = urlopen.return_value.__enter__.return_value
+            response.read.return_value = b"{}"
+            client.generate(
+                idempotency_key="request",
+                policy="experiment-a",
+                prompts=["hello"],
+                max_tokens=1,
+            )
+            request = urlopen.call_args.args[0]
+            assert request.get_header("Authorization") == "Bearer lease-id.secret"
+            cohort = json.loads(request.data)["cohort"]
+            assert cohort["id"].startswith("fork-")
+            assert cohort["size"] == 2
+            assert cohort["maxWaitMs"] == 250
+
+
+def test_rollout_lease_environment_overrides_assignment():
+    with tempfile.TemporaryDirectory() as directory:
+        assignment = Path(directory) / "fork-env"
+        assignment.write_text(
+            "SMOLVM_ROLLOUT_URL=http://host/api/v1/rollout-executors/file\n"
+            "SMOLVM_ROLLOUT_TOKEN=file-token\n"
+            "SMOLVM_ROLLOUT_EXECUTOR=file\n"
+            "SMOLVM_ROLLOUT_POLICY=file-policy\n",
+            encoding="utf-8",
+        )
+        environment = {
+            "SMOLVM_ROLLOUT_URL": "http://host/api/v1/rollout-executors/env",
+            "SMOLVM_ROLLOUT_TOKEN": "env-token",
+            "SMOLVM_ROLLOUT_EXECUTOR": "env",
+            "SMOLVM_ROLLOUT_POLICY": "env-policy",
+        }
+        with mock.patch.dict(os.environ, environment, clear=True):
+            client = RolloutClient(fork_env_path=assignment)
+        assert client.executor == "env"
+        assert client.bearer_token == "env-token"
+        assert client.lease_policy == "env-policy"
+
+
+def test_rollout_incomplete_lease_assignment_fails_closed():
+    with tempfile.TemporaryDirectory() as directory:
+        assignment = Path(directory) / "fork-env"
+        assignment.write_text("SMOLVM_ROLLOUT_TOKEN=secret\n", encoding="utf-8")
+        with mock.patch.dict(os.environ, {}, clear=True):
+            try:
+                RolloutClient(fork_env_path=assignment)
+                raise AssertionError("should reject an incomplete assignment")
+            except RuntimeError as error:
+                assert "missing" in str(error)
+
+
+def test_rollout_explicit_cohort_is_validated_and_encoded():
+    client = RecordingRolloutClient()
+    common = {
+        "idempotency_key": "request-1",
+        "policy": "policy-1",
+        "prompts": ["hello"],
+        "max_tokens": 8,
+    }
+    client.generate(
+        **common,
+        cohort_id="training-step-1",
+        cohort_size=4,
+        cohort_max_wait_ms=250,
+    )
+    assert client.recorded[2]["cohort"] == {
+        "id": "training-step-1",
+        "size": 4,
+        "maxWaitMs": 250,
+    }
+    for invalid in (
+        {"cohort_id": "training-step-1"},
+        {"cohort_max_wait_ms": 250},
+        {"cohort_id": "training-step-1", "cohort_size": 0},
+    ):
+        try:
+            client.job(**common, **invalid)
+            raise AssertionError("should reject an invalid cohort")
+        except ValueError:
+            pass
+
+
+def test_rollout_automatic_cohorts_are_aligned_retry_stable_and_optional():
+    environment = {
+        "SMOLVM_FORK_BATCH_ID": "batch-1",
+        "SMOLVM_FORK_BATCH_SIZE": "2",
+    }
+    common = {
+        "policy": "policy-1",
+        "prompts": ["hello"],
+        "max_tokens": 8,
+    }
+    with mock.patch.dict(os.environ, environment, clear=True):
+        first = RecordingRolloutClient()
+        second = RecordingRolloutClient()
+        first.generate(idempotency_key="learner-0-step-0", **common)
+        second.generate(idempotency_key="learner-1-step-0", **common)
+        first_cohort = first.recorded[2]["cohort"]
+        assert first_cohort == second.recorded[2]["cohort"]
+        assert first_cohort["size"] == 2
+        assert first_cohort["maxWaitMs"] == 250
+
+        first.generate(idempotency_key="learner-0-step-0", **common)
+        assert first.recorded[2]["cohort"] == first_cohort
+        first.generate(idempotency_key="learner-0-step-1", **common)
+        second.generate(idempotency_key="learner-1-step-1", **common)
+        assert first.recorded[2]["cohort"] == second.recorded[2]["cohort"]
+        assert first.recorded[2]["cohort"] != first_cohort
+
+        disabled = RecordingRolloutClient(auto_fork_cohort=False)
+        disabled.generate(idempotency_key="uncoordinated", **common)
+        assert "cohort" not in disabled.recorded[2]
+
+
+def test_rollout_automatic_cohorts_partition_large_batches():
+    common = {
+        "policy": "policy-1",
+        "prompts": ["hello"],
+        "max_tokens": 8,
+    }
+    cohorts = []
+    for index in (0, 255, 256, 299):
+        environment = {
+            "SMOLVM_FORK_BATCH_ID": "batch-large",
+            "SMOLVM_FORK_BATCH_SIZE": "300",
+            "SMOLVM_FORK_INDEX": str(index),
+        }
+        with mock.patch.dict(os.environ, environment, clear=True):
+            client = RecordingRolloutClient()
+            client.generate(idempotency_key=f"learner-{index}", **common)
+            cohorts.append(client.recorded[2]["cohort"])
+    assert cohorts[0] == cohorts[1]
+    assert cohorts[0]["size"] == 256
+    assert cohorts[2] == cohorts[3]
+    assert cohorts[2]["size"] == 44
+    assert cohorts[0]["id"] != cohorts[2]["id"]
 
 
 if __name__ == "__main__":

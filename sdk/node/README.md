@@ -110,6 +110,11 @@ const result = await rollouts.generate({
 });
 ```
 
+Inside a forked rollout worker, `new RolloutClient()` discovers its authenticated
+node assignment from `/etc/smolvm/fork-env` and automatically groups workers
+from the same fork batch into a bounded cohort. Set `autoForkCohort: false` only
+when the application already supplies an explicit `cohort`.
+
 The client targets the loopback rollout API on a CUDA node; it publishes
 content-verified LoRA versions and submits cross-policy cohorts without exposing
 vLLM's unrestricted adapter loader.

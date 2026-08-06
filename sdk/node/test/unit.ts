@@ -226,6 +226,87 @@ async function finish() {
     );
   });
 
+  await checkAsync('discovers a rollout lease and cohort without constructor wiring', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'smol-rollout-lease-'));
+    const assignment = join(dir, 'fork-env');
+    writeFileSync(
+      assignment,
+      'SMOLVM_ROLLOUT_URL=http://100.96.0.1:10081/api/v1/rollout-executors/fused\n'
+        + 'SMOLVM_ROLLOUT_TOKEN=lease-id.secret\n'
+        + 'SMOLVM_ROLLOUT_EXECUTOR=fused\n'
+        + 'SMOLVM_ROLLOUT_POLICY=experiment-a\n'
+        + 'SMOLVM_FORK_BATCH_ID=batch-a\n'
+        + 'SMOLVM_FORK_BATCH_SIZE=2\n',
+    );
+    const requests: Array<{ url: string; init?: RequestInit }> = [];
+    const fetchMock: typeof fetch = async (input, init) => {
+      requests.push({ url: String(input), init });
+      return new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } });
+    };
+    try {
+      const client = new RolloutClient(undefined, undefined, {
+        forkEnvPath: assignment,
+        fetch: fetchMock,
+      });
+      assert.strictEqual(client.apiUrl, 'http://100.96.0.1:10081/api/v1');
+      assert.strictEqual(client.executor, 'fused');
+      assert.strictEqual(client.leasePolicy, 'experiment-a');
+      await client.generate({
+        idempotencyKey: 'request',
+        policy: client.leasePolicy as string,
+        prompts: ['hello'],
+        sampling: { maxTokens: 1 },
+      });
+      assert.strictEqual(new Headers(requests[0].init?.headers).get('authorization'), 'Bearer lease-id.secret');
+      const body = JSON.parse(String(requests[0].init?.body));
+      assert.match(body.cohort.id, /^fork-[0-9a-f]{32}$/);
+      assert.deepStrictEqual(
+        { size: body.cohort.size, maxWaitMs: body.cohort.maxWaitMs },
+        { size: 2, maxWaitMs: 250 },
+      );
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  await checkAsync('automatically aligns batch-fork cohorts and preserves explicit cohorts', async () => {
+    const previousId = process.env.SMOLVM_FORK_BATCH_ID;
+    const previousSize = process.env.SMOLVM_FORK_BATCH_SIZE;
+    process.env.SMOLVM_FORK_BATCH_ID = 'batch-a';
+    process.env.SMOLVM_FORK_BATCH_SIZE = '2';
+    const bodies: unknown[] = [];
+    const fetchMock: typeof fetch = async (_input, init) => {
+      bodies.push(JSON.parse(String(init?.body)));
+      return new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } });
+    };
+    try {
+      const first = new RolloutClient('http://host/api/v1', 'fused', { fetch: fetchMock });
+      const second = new RolloutClient('http://host/api/v1', 'fused', { fetch: fetchMock });
+      const common = { policy: 'policy', prompts: ['hello'], sampling: { maxTokens: 1 } };
+      await first.generate({ ...common, idempotencyKey: 'learner-0-step-0' });
+      await second.generate({ ...common, idempotencyKey: 'learner-1-step-0' });
+      assert.deepStrictEqual(
+        (bodies[0] as { cohort: unknown }).cohort,
+        (bodies[1] as { cohort: unknown }).cohort,
+      );
+      const explicit = first.job({
+        ...common,
+        idempotencyKey: 'explicit',
+        cohort: { id: 'controller-round', size: 2, maxWaitMs: 100 },
+      });
+      assert.deepStrictEqual(explicit.cohort, {
+        id: 'controller-round',
+        size: 2,
+        maxWaitMs: 100,
+      });
+    } finally {
+      if (previousId === undefined) delete process.env.SMOLVM_FORK_BATCH_ID;
+      else process.env.SMOLVM_FORK_BATCH_ID = previousId;
+      if (previousSize === undefined) delete process.env.SMOLVM_FORK_BATCH_SIZE;
+      else process.env.SMOLVM_FORK_BATCH_SIZE = previousSize;
+    }
+  });
+
   console.log(`\n${passed} passed, ${failed} failed`);
   if (failed > 0) process.exitCode = 1;
 }

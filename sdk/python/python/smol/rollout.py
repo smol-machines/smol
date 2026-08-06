@@ -7,11 +7,26 @@ import json
 import os
 import ssl
 import struct
+import threading
 import urllib.error
 import urllib.parse
 import urllib.request
+from collections import OrderedDict
 from pathlib import Path
-from typing import Any, Iterable, Optional, Sequence, Union
+from typing import Any, Dict, Iterable, Optional, Sequence, Tuple, Union
+
+
+_FORK_ENV_PATH = Path("/etc/smolvm/fork-env")
+_ROLLOUT_URL_ENV = "SMOLVM_ROLLOUT_URL"
+_ROLLOUT_TOKEN_ENV = "SMOLVM_ROLLOUT_TOKEN"
+_ROLLOUT_EXECUTOR_ENV = "SMOLVM_ROLLOUT_EXECUTOR"
+_ROLLOUT_POLICY_ENV = "SMOLVM_ROLLOUT_POLICY"
+_ROLLOUT_LEASE_KEYS = (
+    _ROLLOUT_URL_ENV,
+    _ROLLOUT_TOKEN_ENV,
+    _ROLLOUT_EXECUTOR_ENV,
+    _ROLLOUT_POLICY_ENV,
+)
 
 
 class RolloutError(RuntimeError):
@@ -22,6 +37,58 @@ class RolloutError(RuntimeError):
         self.status = status
         self.code = code
         self.message = message
+
+
+def _read_fork_env(path: Path) -> Dict[str, str]:
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except FileNotFoundError:
+        return {}
+    except OSError as error:
+        raise RuntimeError(f"cannot read smolvm fork assignment {path}: {error}") from error
+
+    values: Dict[str, str] = {}
+    for number, line in enumerate(lines, start=1):
+        if not line or line.startswith("#"):
+            continue
+        key, separator, value = line.partition("=")
+        if not separator or not key:
+            raise RuntimeError(f"invalid smolvm fork assignment at {path}:{number}")
+        if key in values:
+            raise RuntimeError(f"duplicate {key} in smolvm fork assignment {path}")
+        values[key] = value
+    return values
+
+
+def _lease_configuration(path: Path) -> Tuple[str, str, str, str, Dict[str, str]]:
+    values = _read_fork_env(path)
+    for key in _ROLLOUT_LEASE_KEYS:
+        if key in os.environ:
+            values[key] = os.environ[key]
+    missing = [key for key in _ROLLOUT_LEASE_KEYS if not values.get(key)]
+    if missing:
+        raise RuntimeError(
+            "smolvm rollout lease configuration is unavailable: missing "
+            + ", ".join(missing)
+        )
+
+    url = values[_ROLLOUT_URL_ENV].rstrip("/")
+    executor = values[_ROLLOUT_EXECUTOR_ENV]
+    suffix = f"/rollout-executors/{executor}"
+    if not url.endswith(suffix):
+        raise RuntimeError(
+            f"{_ROLLOUT_URL_ENV} does not match {_ROLLOUT_EXECUTOR_ENV}"
+        )
+    api_url = url[: -len(suffix)]
+    if not api_url.startswith(("http://", "https://")):
+        raise RuntimeError(f"{_ROLLOUT_URL_ENV} must be an HTTP URL")
+    return (
+        api_url,
+        executor,
+        values[_ROLLOUT_TOKEN_ENV],
+        values[_ROLLOUT_POLICY_ENV],
+        values,
+    )
 
 
 def adapter_sha256(directory: Union[str, os.PathLike]) -> str:
@@ -71,20 +138,126 @@ def _segment(value: str) -> str:
 
 
 class RolloutClient:
-    """Synchronous client for the framework generation boundary."""
+    """Synchronous client for the framework generation boundary.
+
+    Inside a prepared smol fork, no constructor arguments are required. The
+    client discovers its lease-scoped endpoint and policy from the assignment
+    file and automatically coordinates direct batch forks for backend fusion.
+    """
 
     def __init__(
         self,
-        api_url: str,
-        executor: str,
+        api_url: Optional[str] = None,
+        executor: Optional[str] = None,
         *,
+        bearer_token: Optional[str] = None,
+        fork_env_path: Union[str, os.PathLike] = _FORK_ENV_PATH,
         timeout: float = 300.0,
         ssl_context: Optional[ssl.SSLContext] = None,
+        auto_fork_cohort: bool = True,
+        auto_fork_cohort_max_wait_ms: Optional[int] = 250,
     ) -> None:
+        lease_policy = None
+        fork_assignment: Dict[str, str] = {}
+        if api_url is None and executor is None:
+            (
+                api_url,
+                executor,
+                discovered_token,
+                lease_policy,
+                fork_assignment,
+            ) = _lease_configuration(Path(fork_env_path))
+            if bearer_token is not None and bearer_token != discovered_token:
+                raise ValueError("bearer_token conflicts with the smolvm lease credential")
+            bearer_token = discovered_token
+        elif api_url is None or executor is None:
+            raise TypeError("api_url and executor must be provided together")
+        if not isinstance(auto_fork_cohort, bool):
+            raise ValueError("auto_fork_cohort must be a boolean")
+        if auto_fork_cohort_max_wait_ms is not None and (
+            not isinstance(auto_fork_cohort_max_wait_ms, int)
+            or isinstance(auto_fork_cohort_max_wait_ms, bool)
+            or not 1 <= auto_fork_cohort_max_wait_ms <= 60_000
+        ):
+            raise ValueError(
+                "auto_fork_cohort_max_wait_ms must be between 1 and 60000"
+            )
         self.api_url = api_url.rstrip("/")
         self.executor = executor
+        self.bearer_token = bearer_token
+        self.lease_policy = lease_policy
         self.timeout = timeout
         self.ssl_context = ssl_context
+        self.auto_fork_cohort = auto_fork_cohort
+        self.auto_fork_cohort_max_wait_ms = auto_fork_cohort_max_wait_ms
+        self._fork_assignment = fork_assignment
+        self._fork_cohort_lock = threading.Lock()
+        self._fork_cohort_round = 0
+        self._fork_cohorts: "OrderedDict[str, Tuple[str, int, Optional[int]]]" = (
+            OrderedDict()
+        )
+
+    def _automatic_fork_cohort(
+        self, idempotency_key: str
+    ) -> Optional[Tuple[str, int, Optional[int]]]:
+        if not self.auto_fork_cohort:
+            return None
+        batch_id = os.environ.get(
+            "SMOLVM_FORK_BATCH_ID", self._fork_assignment.get("SMOLVM_FORK_BATCH_ID")
+        )
+        batch_size_text = os.environ.get(
+            "SMOLVM_FORK_BATCH_SIZE",
+            self._fork_assignment.get("SMOLVM_FORK_BATCH_SIZE"),
+        )
+        if batch_id is None and batch_size_text is None:
+            return None
+        if not batch_id or batch_size_text is None:
+            raise ValueError(
+                "SMOLVM_FORK_BATCH_ID and SMOLVM_FORK_BATCH_SIZE must be set together"
+            )
+        try:
+            batch_size = int(batch_size_text)
+        except ValueError as error:
+            raise ValueError("SMOLVM_FORK_BATCH_SIZE must be an integer") from error
+        if not 2 <= batch_size <= 1024:
+            raise ValueError("SMOLVM_FORK_BATCH_SIZE must be between 2 and 1024")
+
+        group_index = 0
+        group_size = batch_size
+        if batch_size > 256:
+            fork_index_text = os.environ.get(
+                "SMOLVM_FORK_INDEX", self._fork_assignment.get("SMOLVM_FORK_INDEX")
+            )
+            try:
+                fork_index = int(fork_index_text or "")
+            except ValueError as error:
+                raise ValueError(
+                    "SMOLVM_FORK_INDEX is required for batches larger than 256"
+                ) from error
+            if not 0 <= fork_index < batch_size:
+                raise ValueError("SMOLVM_FORK_INDEX is outside the fork batch")
+            group_index = fork_index // 256
+            group_size = min(256, batch_size - group_index * 256)
+
+        with self._fork_cohort_lock:
+            cached = self._fork_cohorts.get(idempotency_key)
+            if cached is not None:
+                self._fork_cohorts.move_to_end(idempotency_key)
+                return cached
+            round_index = self._fork_cohort_round
+            self._fork_cohort_round += 1
+            digest = hashlib.sha256(
+                f"{batch_id}\0{self.executor}\0{group_index}\0{round_index}".encode()
+            ).hexdigest()
+            cohort = (
+                f"fork-{digest[:32]}",
+                group_size,
+                self.auto_fork_cohort_max_wait_ms,
+            )
+            self._fork_cohorts[idempotency_key] = cohort
+            if len(self._fork_cohorts) > 1024:
+                self._fork_cohorts.popitem(last=False)
+            return cohort
 
     def _request(
         self,
@@ -93,11 +266,14 @@ class RolloutClient:
         body: Optional[dict[str, Any]] = None,
     ) -> Any:
         data = None if body is None else json.dumps(body, separators=(",", ":")).encode()
+        headers = {"content-type": "application/json"}
+        if self.bearer_token is not None:
+            headers["authorization"] = f"Bearer {self.bearer_token}"
         request = urllib.request.Request(
             f"{self.api_url}{path}",
             data=data,
             method=method,
-            headers={"content-type": "application/json"},
+            headers=headers,
         )
         try:
             with urllib.request.urlopen(
@@ -286,6 +462,9 @@ class RolloutClient:
         version: Optional[str] = None,
         n: int = 1,
         deadline_ms: Optional[int] = None,
+        cohort_id: Optional[str] = None,
+        cohort_size: Optional[int] = None,
+        cohort_max_wait_ms: Optional[int] = None,
         **sampling: Any,
     ) -> dict[str, Any]:
         """Build a generation job for ``generate`` or a fused cohort."""
@@ -317,11 +496,39 @@ class RolloutClient:
             job["version"] = version
         if deadline_ms is not None:
             job["deadlineMs"] = deadline_ms
+        if (cohort_id is None) != (cohort_size is None):
+            raise ValueError("cohort_id and cohort_size must be set together")
+        if cohort_id is None and cohort_max_wait_ms is not None:
+            raise ValueError("cohort_max_wait_ms requires a cohort")
+        if cohort_id is not None:
+            if not cohort_id:
+                raise ValueError("cohort_id cannot be empty")
+            if not isinstance(cohort_size, int) or isinstance(cohort_size, bool):
+                raise ValueError("cohort_size must be an integer")
+            if not 1 <= cohort_size <= 256:
+                raise ValueError("cohort_size must be between 1 and 256")
+            if cohort_max_wait_ms is not None and (
+                not isinstance(cohort_max_wait_ms, int)
+                or isinstance(cohort_max_wait_ms, bool)
+                or not 1 <= cohort_max_wait_ms <= 60_000
+            ):
+                raise ValueError("cohort_max_wait_ms must be between 1 and 60000")
+            job["cohort"] = {"id": cohort_id, "size": cohort_size}
+            if cohort_max_wait_ms is not None:
+                job["cohort"]["maxWaitMs"] = cohort_max_wait_ms
         return job
 
     def generate(self, **job: Any) -> dict[str, Any]:
         """Generate through one policy, returning exact token IDs and logprobs."""
 
+        if not {"cohort_id", "cohort_size", "cohort_max_wait_ms"}.intersection(job):
+            cohort = self._automatic_fork_cohort(job.get("idempotency_key", ""))
+            if cohort is not None:
+                (
+                    job["cohort_id"],
+                    job["cohort_size"],
+                    job["cohort_max_wait_ms"],
+                ) = cohort
         return self._request("POST", f"{self._executor_path}/generate", self.job(**job))
 
     def generate_batch(self, jobs: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
