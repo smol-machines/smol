@@ -74,10 +74,7 @@ export interface RawExec {
 /** Byte-exact exec output from a cloud response: prefer the base64 field
  *  (binary-safe, untruncated), fall back to the UTF-8 bytes of the lossy text
  *  when a control predates it or the value is malformed. */
-function decodeExecBytes(
-  b64: unknown,
-  text: string,
-): Uint8Array {
+function decodeExecBytes(b64: unknown, text: string): Uint8Array {
   if (typeof b64 === "string") {
     try {
       return new Uint8Array(Buffer.from(b64, "base64"));
@@ -153,8 +150,7 @@ function generateName(): string {
  *  defaulting to `~/.config`). Tiny line parse so the SDK stays
  *  dependency-free; returns undefined when the file or key is absent. */
 export function cliConfigApiKey(): string | undefined {
-  const base =
-    process.env.XDG_CONFIG_HOME || join(homedir(), ".config");
+  const base = process.env.XDG_CONFIG_HOME || join(homedir(), ".config");
   let text: string;
   try {
     text = readFileSync(join(base, "smolvm", "config.toml"), "utf8");
@@ -188,6 +184,17 @@ function toNativeExecOptions(
   };
 }
 
+/** Whether a machine wants outbound network, from either place it can be asked.
+ *
+ * `resources.network` is canonical; a top-level `network` is the shape callers
+ * reach for first. Reading only the canonical one meant the other was dropped in
+ * silence, so a config that plainly asked for network produced a machine without
+ * it and no error to explain why. `resources.network` still wins when both are
+ * present, so no existing config changes meaning. */
+export function resolveNetwork(config: MachineConfig): boolean | undefined {
+  return config.resources?.network ?? config.network;
+}
+
 export function toNativeConfig(
   name: string,
   config: MachineConfig,
@@ -204,16 +211,19 @@ export function toNativeConfig(
       readOnly: m.readOnly ?? m.readonly,
     })),
     ports: config.ports?.map((p) => ({ host: p.host, guest: p.guest })),
-    resources: config.resources && {
-      cpus: config.resources.cpus,
-      memoryMib: config.resources.memoryMb,
-      network: config.resources.network,
-      storageGib: config.resources.storageGb,
-      overlayGib: config.resources.overlayGb,
-      gpu: config.resources.gpu,
-      gpuVramMib: config.resources.gpuVramMib,
-      cuda: config.resources.cuda,
-    },
+    resources:
+      config.resources || config.network !== undefined
+        ? {
+            cpus: config.resources?.cpus,
+            memoryMib: config.resources?.memoryMb,
+            network: resolveNetwork(config),
+            storageGib: config.resources?.storageGb,
+            overlayGib: config.resources?.overlayGb,
+            gpu: config.resources?.gpu,
+            gpuVramMib: config.resources?.gpuVramMib,
+            cuda: config.resources?.cuda,
+          }
+        : undefined,
   };
 }
 
@@ -451,11 +461,15 @@ class LocalTransport implements Transport {
   }
 
   async heartbeatLease(): Promise<void> {
-    throw new NotSupportedError("heartbeatLease() is a cloud-only lease feature.");
+    throw new NotSupportedError(
+      "heartbeatLease() is a cloud-only lease feature.",
+    );
   }
 
   async completeLease(): Promise<void> {
-    throw new NotSupportedError("completeLease() is a cloud-only lease feature.");
+    throw new NotSupportedError(
+      "completeLease() is a cloud-only lease feature.",
+    );
   }
 
   async getLease(): Promise<Record<string, unknown>> {
@@ -630,7 +644,11 @@ async function waitForReady(
       );
     }
     // Back-compat: `ready` absent entirely → old server, gate on state.
-    if (m && m.ready === undefined && (state === "started" || state === "running"))
+    if (
+      m &&
+      m.ready === undefined &&
+      (state === "started" || state === "running")
+    )
       return;
     // A machine with NO published port never flips `ready` on control planes
     // whose readiness gates on a port accepting a connection — it would hang the
@@ -984,7 +1002,9 @@ class CloudTransport implements Transport {
     // Clones come back already forked/started; wait for each in parallel so every
     // returned handle is usable.
     await Promise.all(clones.map((c) => waitForReady(this.conn, c.id)));
-    return clones.map((c) => new CloudTransport(this.conn, c.name ?? c.id, c.id));
+    return clones.map(
+      (c) => new CloudTransport(this.conn, c.name ?? c.id, c.id),
+    );
   }
 
   async assign(
@@ -1006,7 +1026,8 @@ class CloudTransport implements Transport {
       body.ports = opts.ports.map((p) => ({ port: p.guest, hostPort: p.host }));
     }
     if (opts.ttlSecs !== undefined) body.ttlSecs = opts.ttlSecs;
-    if (opts.heartbeatSecs !== undefined) body.heartbeatSecs = opts.heartbeatSecs;
+    if (opts.heartbeatSecs !== undefined)
+      body.heartbeatSecs = opts.heartbeatSecs;
     const resp = await cloudFetch<{
       machineId: string;
       ownerToken: string;
@@ -1188,7 +1209,7 @@ export async function makeTransport(
               hosts: config.resources.allowHosts ?? [],
             },
           }
-        : config.resources?.network
+        : resolveNetwork(config)
           ? { network: { mode: "open" as const } }
           : {}),
       // Publish ports: supply only the guest port; the control plane allocates
@@ -1242,7 +1263,10 @@ export async function makeTransport(
         await waitForReady(cloudConn, id);
       } catch (e) {
         if (startError !== undefined && e instanceof SmolError)
-          throw new SmolError(e.code, `${e.message} (start failed: ${startError})`);
+          throw new SmolError(
+            e.code,
+            `${e.message} (start failed: ${startError})`,
+          );
         throw e;
       }
     } catch (e) {
@@ -1259,7 +1283,10 @@ export async function makeTransport(
   // and the image entrypoint) — a cloud concept; the embedded engine runs no
   // workload at create, and its create spec has no field for them. Reject
   // rather than silently drop (mirrors the mounts-on-cloud gate above).
-  if ((config.env && Object.keys(config.env).length) || config.workdir !== undefined) {
+  if (
+    (config.env && Object.keys(config.env).length) ||
+    config.workdir !== undefined
+  ) {
     throw new NotSupportedError(
       "machine-level env/workdir apply to the machine's workload and are cloud-only; " +
         "on the local target pass { env, workdir } per exec instead.",
@@ -1327,11 +1354,9 @@ export async function connectTransport(
     m = await cloudFetch<MachineInfo>(cloudConn, "GET", `/v1/machines/${id}`);
   } catch (e) {
     if (!/404/.test(String(e))) throw e;
-    const listed = await cloudFetch<{ machines?: MachineInfo[] } | MachineInfo[]>(
-      cloudConn,
-      "GET",
-      "/v1/machines",
-    );
+    const listed = await cloudFetch<
+      { machines?: MachineInfo[] } | MachineInfo[]
+    >(cloudConn, "GET", "/v1/machines");
     const all = Array.isArray(listed) ? listed : (listed.machines ?? []);
     const hit = all.find((x) => x.name === id || x.id === id);
     if (!hit) throw e;

@@ -111,6 +111,11 @@ export interface MachineConfig {
   ports?: PortSpec[];
   /** Resource allocation. */
   resources?: ResourceSpec;
+  /** Enable outbound network access. An alias for `resources.network`, which
+   *  takes precedence when both are set. Accepted here because it is the
+   *  shape callers reach for first, and was previously ignored without a
+   *  word — a machine that asked for network quietly got none. */
+  network?: boolean;
   /** Keep the machine record after the process exits (default: false). (local) */
   persistent?: boolean;
   /** Auto-stop the machine after N idle seconds. (cloud) */

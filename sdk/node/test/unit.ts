@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { wrapNativeError, SmolError } from '../errors';
 import { adapterSha256, RolloutClient } from '../rollout';
-import { cliConfigApiKey, encodePath, toNativeConfig } from '../transport';
+import { cliConfigApiKey, encodePath, resolveNetwork, toNativeConfig } from '../transport';
 
 let passed = 0;
 let failed = 0;
@@ -231,3 +231,33 @@ async function finish() {
 }
 
 void finish();
+
+// --- network: asked for at either level, honoured at both ---
+check('a top-level network is honoured instead of dropped', () => {
+  // This is the config people write first. It used to be ignored outright, so
+  // the machine came up with no network and nothing said why.
+  assert.strictEqual(resolveNetwork({ image: 'alpine', network: true }), true);
+  assert.strictEqual(
+    toNativeConfig('m', { image: 'alpine', network: true }).resources?.network,
+    true,
+  );
+});
+
+check('resources.network still wins when both are given', () => {
+  assert.strictEqual(
+    resolveNetwork({ image: 'alpine', network: true, resources: { network: false } }),
+    false,
+  );
+});
+
+check('the canonical resources.network is unchanged', () => {
+  assert.strictEqual(
+    toNativeConfig('m', { image: 'alpine', resources: { network: true } }).resources?.network,
+    true,
+  );
+});
+
+check('asking for neither leaves network unset', () => {
+  assert.strictEqual(resolveNetwork({ image: 'alpine' }), undefined);
+  assert.strictEqual(toNativeConfig('m', { image: 'alpine' }).resources, undefined);
+});
