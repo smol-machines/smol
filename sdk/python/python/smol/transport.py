@@ -164,6 +164,8 @@ def _native_exec_options(opts: Optional[ExecOptions]) -> Optional[dict]:
 
 def _native_config(name: str, config: MachineConfig) -> dict:
     cfg: dict[str, Any] = {"name": name, "persistent": config.persistent}
+    if config.image is not None:
+        cfg["image"] = config.image
     if config.mounts:
         cfg["mounts"] = [
             {"source": m.source, "target": m.target, "read_only": m.effective_read_only}

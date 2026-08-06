@@ -82,6 +82,14 @@ check('omits cuda when unset (engine default applies)', () => {
   const cfg = toNativeConfig('m', { resources: { cpus: 2 } });
   assert.strictEqual(cfg.resources?.cuda, undefined);
 });
+check('forwards the base image to the native machine', () => {
+  const cfg = toNativeConfig('m', { image: 'python:3.12-slim' });
+  assert.strictEqual(cfg.image, 'python:3.12-slim');
+});
+check('omits the base image when unset', () => {
+  const cfg = toNativeConfig('m', {});
+  assert.strictEqual(cfg.image, undefined);
+});
 
 check('rollout adapter digest matches the engine contract', () => {
   const dir = mkdtempSync(join(tmpdir(), 'smol-rollout-unit-'));

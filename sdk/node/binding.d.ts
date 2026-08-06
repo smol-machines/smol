@@ -18,6 +18,8 @@ export interface RuntimeAssets {
 export interface MachineConfig {
   /** Unique machine name. Used as the VM identifier. */
   name: string
+  /** OCI image to boot, when creating an image-backed machine. */
+  image?: string
   /** Host directories to mount into the VM. */
   mounts?: Array<HostMountConfig>
   /** Port mappings from host to guest. */

@@ -243,6 +243,10 @@ impl Machine {
             Some(v) if !v.is_none() => v.extract()?,
             _ => false,
         };
+        let image: Option<String> = match config.get_item("image")? {
+            Some(v) if !v.is_none() => Some(v.extract()?),
+            _ => None,
+        };
 
         // Map the Python `resources` dict → engine `VmResources` (mirrors
         // smol-node's `to_vm_resources`). `network`/`cpus`/`memory_mib` are
@@ -353,6 +357,7 @@ impl Machine {
             mounts,
             ports,
             resources,
+            image,
             persistent,
             runtime_managed: false,
         };

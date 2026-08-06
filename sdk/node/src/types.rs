@@ -32,6 +32,8 @@ pub struct RuntimeAssets {
 pub struct MachineConfig {
     /// Unique machine name. Used as the VM identifier.
     pub name: String,
+    /// OCI image to boot, when creating an image-backed machine.
+    pub image: Option<String>,
     /// Host directories to mount into the VM.
     pub mounts: Option<Vec<HostMountConfig>>,
     /// Port mappings from host to guest.

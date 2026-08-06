@@ -135,6 +135,15 @@ def test_native_config_omits_gpu_when_unset():
     assert "gpu_vram_mib" not in res
 
 
+def test_native_config_forwards_image():
+    cfg = MachineConfig(image="python:3.12-slim")
+    assert _native_config("m", cfg)["image"] == "python:3.12-slim"
+
+
+def test_native_config_omits_image_when_unset():
+    assert "image" not in _native_config("m", MachineConfig())
+
+
 def test_rollout_adapter_digest_matches_engine_contract():
     with tempfile.TemporaryDirectory() as directory:
         root = Path(directory)

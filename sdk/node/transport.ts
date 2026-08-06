@@ -201,6 +201,7 @@ export function toNativeConfig(
 ): NativeMachineConfig {
   return {
     name,
+    image: config.image,
     persistent: config.persistent,
     mounts: config.mounts?.map((m) => ({
       source: m.source,

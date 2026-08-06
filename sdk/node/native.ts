@@ -43,6 +43,7 @@ export interface NativeResources {
 
 export interface NativeMachineConfig {
   name: string;
+  image?: string | undefined;
   mounts?: NativeHostMount[] | undefined;
   ports?: NativePortMapping[] | undefined;
   resources?: NativeResources | undefined;
