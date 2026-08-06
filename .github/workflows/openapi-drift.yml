@@ -1,0 +1,131 @@
+name: OpenAPI drift
+
+# Guards the two tracked codegen artifacts against the smolfleet control plane:
+#
+#   sdk/node/openapi/smolfleet.json   (spec snapshot)
+#   sdk/node/generated/smolfleet.ts   (generated types)
+#
+# Both are produced by sdk/node/scripts/gen-openapi.sh from the `smolfleet
+# openapi` subcommand. This job regenerates them and fails if the result differs
+# from what is committed.
+#
+# WHY A SCHEDULE, not just PR triggers: the drift this job exists to catch came
+# from the SERVER, not from this repo — smolfleet renamed /v1/apps/* to
+# /v1/groups/* and the committed client kept the dead paths. A PR trigger here
+# only fires when the SDK changes, so it would never have caught that. The cron
+# is the part that actually closes the hole; the PR trigger just gives fast
+# feedback when someone edits the generator or the artifacts.
+#
+# ACCESS: smol-machines/smolcloud (the control plane) is PRIVATE, so unlike the
+# public smolvm engine the default GITHUB_TOKEN cannot clone it, and fork PRs
+# get no secrets at all. The job therefore needs a PAT in the SMOLCLOUD_TOKEN
+# secret with read access to that repo, and skips loudly (never silently, and
+# never red) when the secret is unavailable.
+
+on:
+  schedule:
+    # 07:00 UTC daily — catches server-side drift with no SDK change involved.
+    - cron: "0 7 * * *"
+  pull_request:
+    paths:
+      - "sdk/node/openapi/**"
+      - "sdk/node/generated/**"
+      - "sdk/node/scripts/gen-openapi.sh"
+      - ".github/workflows/openapi-drift.yml"
+  push:
+    branches: [main]
+    paths:
+      - "sdk/node/openapi/**"
+      - "sdk/node/generated/**"
+      - "sdk/node/scripts/gen-openapi.sh"
+      - ".github/workflows/openapi-drift.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: openapi-drift-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  drift:
+    name: Regenerate and compare
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # A fork PR (or a repo with the secret unset) cannot reach the private
+      # control plane. Report that as a neutral, visible skip rather than a
+      # failure an outside contributor has no way to fix.
+      - name: Check control-plane access
+        id: access
+        env:
+          SMOLCLOUD_TOKEN: ${{ secrets.SMOLCLOUD_TOKEN }}
+        run: |
+          if [ -n "$SMOLCLOUD_TOKEN" ]; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "::notice title=OpenAPI drift not checked::SMOLCLOUD_TOKEN is unavailable (fork PR or unset secret), so the generated client was NOT verified against the control plane. A maintainer run on the base repo — or the nightly schedule — covers this."
+          fi
+
+      - name: Checkout smolcloud (control plane)
+        if: steps.access.outputs.available == 'true'
+        uses: actions/checkout@v4
+        with:
+          repository: smol-machines/smolcloud
+          token: ${{ secrets.SMOLCLOUD_TOKEN }}
+          path: smolcloud
+
+      - uses: dtolnay/rust-toolchain@stable
+        if: steps.access.outputs.available == 'true'
+
+      - name: Cache cargo
+        if: steps.access.outputs.available == 'true'
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            smolcloud/target/
+          key: smolfleet-openapi-${{ hashFiles('smolcloud/Cargo.lock') }}
+          restore-keys: smolfleet-openapi-
+
+      # Debug, not release: the emitted spec is identical and this is only a
+      # comparison, so there is no reason to pay for an optimized build.
+      - name: Build smolfleet
+        if: steps.access.outputs.available == 'true'
+        working-directory: smolcloud
+        run: cargo build --bin smolfleet
+
+      - uses: actions/setup-node@v4
+        if: steps.access.outputs.available == 'true'
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: sdk/node/package-lock.json
+
+      - name: Install SDK dependencies
+        if: steps.access.outputs.available == 'true'
+        working-directory: sdk/node
+        run: npm ci
+
+      - name: Regenerate the client
+        if: steps.access.outputs.available == 'true'
+        working-directory: sdk/node
+        env:
+          SMOLFLEET_BIN: ${{ github.workspace }}/smolcloud/target/debug/smolfleet
+        run: npm run gen:openapi
+
+      - name: Fail if the committed client is stale
+        if: steps.access.outputs.available == 'true'
+        run: |
+          if ! git diff --exit-code -- \
+              sdk/node/openapi/smolfleet.json \
+              sdk/node/generated/smolfleet.ts; then
+            echo "::error title=Generated cloud client is stale::sdk/node/openapi/smolfleet.json and/or sdk/node/generated/smolfleet.ts do not match the current smolfleet API. Regenerate with: cd sdk/node && npm run gen:openapi — then commit the result. The diff above is what changed on the server."
+            exit 1
+          fi
+          echo "Generated cloud client matches the control plane."

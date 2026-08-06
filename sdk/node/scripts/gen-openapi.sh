@@ -22,18 +22,28 @@ find_bin() {
   if [[ -n "${SMOLFLEET_BIN:-}" && -x "${SMOLFLEET_BIN}" ]]; then
     echo "$SMOLFLEET_BIN"; return
   fi
-  local repo="$SDK_DIR/../../../smolfleet"
-  for prof in release debug; do
-    if [[ -x "$repo/target/$prof/smolfleet" ]]; then
-      echo "$repo/target/$prof/smolfleet"; return
+  # The control plane lives in the `smolcloud` repo; `smolfleet` is the binary
+  # (and the historical repo name). Check both so a checkout under either name
+  # resolves — an unresolvable path here used to fail silently, which is how the
+  # /v1/apps → /v1/groups rename drifted past the committed client.
+  local siblings="$SDK_DIR/../../.."
+  local repos=("$siblings/smolcloud" "$siblings/smolfleet")
+  local repo
+  for repo in "${repos[@]}"; do
+    for prof in release debug; do
+      if [[ -x "$repo/target/$prof/smolfleet" ]]; then
+        echo "$repo/target/$prof/smolfleet"; return
+      fi
+    done
+  done
+  for repo in "${repos[@]}"; do
+    if [[ -d "$repo" ]]; then
+      echo "building smolfleet (debug) in $repo…" >&2
+      (cd "$repo" && cargo build --bin smolfleet >&2)
+      echo "$repo/target/debug/smolfleet"; return
     fi
   done
-  if [[ -d "$repo" ]]; then
-    echo "building smolfleet (debug)…" >&2
-    (cd "$repo" && cargo build --bin smolfleet >&2)
-    echo "$repo/target/debug/smolfleet"; return
-  fi
-  echo "ERROR: smolfleet binary not found. Set SMOLFLEET_BIN or place the repo at $repo" >&2
+  echo "ERROR: smolfleet binary not found. Set SMOLFLEET_BIN, or place the control-plane repo at one of: ${repos[*]}" >&2
   exit 1
 }
 
