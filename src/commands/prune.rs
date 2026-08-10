@@ -96,7 +96,11 @@ impl PruneCmd {
                 // Bare VM: nothing depends on the cache, so purge all.
                 let total_size: u64 = images.iter().map(|i| i.size).sum();
                 if self.dry_run {
-                    println!("Would remove {} images ({})", images.len(), format_bytes(total_size));
+                    println!(
+                        "Would remove {} images ({})",
+                        images.len(),
+                        format_bytes(total_size)
+                    );
                     for image in &images {
                         println!(
                             "  - {} ({}, {} layers)",
@@ -108,14 +112,21 @@ impl PruneCmd {
                 } else {
                     println!("Removing all cached images...");
                     let freed = client.garbage_collect(false, true)?;
-                    println!("Removed {} images, freed {}", images.len(), format_bytes(freed));
+                    println!(
+                        "Removed {} images, freed {}",
+                        images.len(),
+                        format_bytes(freed)
+                    );
                 }
             }
         } else if self.dry_run {
             println!("Scanning for unreferenced layers...");
             let would_free = client.garbage_collect(true, false)?;
             if would_free > 0 {
-                println!("Would free {} of unreferenced layers", format_bytes(would_free));
+                println!(
+                    "Would free {} of unreferenced layers",
+                    format_bytes(would_free)
+                );
             } else {
                 println!("No unreferenced layers to remove.");
             }

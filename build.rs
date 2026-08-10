@@ -255,7 +255,10 @@ fn link_libkrun() {
             if lib_path.exists() {
                 let canonical = std::fs::canonicalize(dir_str)
                     .unwrap_or_else(|_| std::path::PathBuf::from(dir_str));
-                println!("cargo:warning=Using bundled libkrun from {}", canonical.display());
+                println!(
+                    "cargo:warning=Using bundled libkrun from {}",
+                    canonical.display()
+                );
                 println!("cargo:rustc-link-search=native={}", canonical.display());
                 link_krun();
                 // Relative rpaths for portable distribution layout
@@ -265,7 +268,10 @@ fn link_libkrun() {
                 println!("cargo:rustc-link-arg=-Wl,-rpath,{}", canonical.display());
                 // Embed the lib dir so the launcher can preload libkrunfw at runtime.
                 // This is read by launcher.rs via option_env!("SMOLVM_BUNDLED_LIB_DIR").
-                println!("cargo:rustc-env=SMOLVM_BUNDLED_LIB_DIR={}", canonical.display());
+                println!(
+                    "cargo:rustc-env=SMOLVM_BUNDLED_LIB_DIR={}",
+                    canonical.display()
+                );
                 return;
             }
         }

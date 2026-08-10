@@ -217,7 +217,9 @@ impl MonitorCmd {
                 let exit_code = manager.child_pid().and_then(smolvm::process::try_wait);
                 println!(
                     "  machine exited (exit code: {})",
-                    exit_code.map(|c| c.to_string()).unwrap_or_else(|| "unknown".into())
+                    exit_code
+                        .map(|c| c.to_string())
+                        .unwrap_or_else(|| "unknown".into())
                 );
 
                 if let Ok(db) = SmolvmDb::open() {

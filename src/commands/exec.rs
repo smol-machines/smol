@@ -417,7 +417,8 @@ impl ExecCmd {
                                 exit_code = serde_json::from_str::<serde_json::Value>(&payload)
                                     .ok()
                                     .and_then(|v| v.get("exitCode").and_then(|c| c.as_i64()))
-                                    .unwrap_or(0) as i32;
+                                    .unwrap_or(0)
+                                    as i32;
                             }
                             _ => {}
                         }

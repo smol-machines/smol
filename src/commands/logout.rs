@@ -61,7 +61,9 @@ mod tests {
     fn logged_in_to_cloud() -> SmolSettings {
         let mut settings = SmolSettings::default();
         let registry = smolvm::registry::SMOLMACHINES_REGISTRY;
-        settings.machines.set_identity_token(registry, "access-token");
+        settings
+            .machines
+            .set_identity_token(registry, "access-token");
         settings.cloud.api_key = Some("access-token".to_string());
         settings.cloud.refresh_token = Some("refresh-token".to_string());
         settings.cloud.token_expires_at = Some(1700000000);
@@ -71,7 +73,10 @@ mod tests {
     #[test]
     fn logout_clears_parallel_cloud_session() {
         let mut settings = logged_in_to_cloud();
-        assert!(revoke(&mut settings, smolvm::registry::SMOLMACHINES_REGISTRY));
+        assert!(revoke(
+            &mut settings,
+            smolvm::registry::SMOLMACHINES_REGISTRY
+        ));
         // Both stores must be empty — a lingering refresh token is the bug.
         assert!(!settings
             .machines
@@ -88,7 +93,10 @@ mod tests {
         let mut settings = SmolSettings::default();
         settings.cloud.api_key = Some("access-token".to_string());
         settings.cloud.refresh_token = Some("refresh-token".to_string());
-        assert!(revoke(&mut settings, smolvm::registry::SMOLMACHINES_REGISTRY));
+        assert!(revoke(
+            &mut settings,
+            smolvm::registry::SMOLMACHINES_REGISTRY
+        ));
         assert!(settings.cloud.api_key.is_none());
         assert!(settings.cloud.refresh_token.is_none());
     }
@@ -100,13 +108,19 @@ mod tests {
         assert!(revoke(&mut settings, "ghcr.io"));
         // The cloud session belongs to smolmachines, not GHCR.
         assert_eq!(settings.cloud.api_key.as_deref(), Some("access-token"));
-        assert_eq!(settings.cloud.refresh_token.as_deref(), Some("refresh-token"));
+        assert_eq!(
+            settings.cloud.refresh_token.as_deref(),
+            Some("refresh-token")
+        );
     }
 
     #[test]
     fn logout_when_not_logged_in_reports_nothing_cleared() {
         let mut settings = SmolSettings::default();
-        assert!(!revoke(&mut settings, smolvm::registry::SMOLMACHINES_REGISTRY));
+        assert!(!revoke(
+            &mut settings,
+            smolvm::registry::SMOLMACHINES_REGISTRY
+        ));
         assert!(!revoke(&mut settings, "ghcr.io"));
     }
 }

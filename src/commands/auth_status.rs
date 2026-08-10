@@ -69,7 +69,11 @@ impl AuthStatusCmd {
 
         // API keys are opaque (`smk_…`); a user session is an Auth0 JWT.
         let is_api_key = key.starts_with("smk_");
-        let kind = if is_api_key { "API key" } else { "user session" };
+        let kind = if is_api_key {
+            "API key"
+        } else {
+            "user session"
+        };
 
         match fetch_me(&endpoint, key) {
             Ok(me) => {

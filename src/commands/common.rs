@@ -118,21 +118,22 @@ pub fn parse_cli_secret_refs(
     use std::collections::BTreeMap;
 
     let mut refs: BTreeMap<String, SecretRef> = BTreeMap::new();
-    let mut add = |flag: &str, spec: &str, make: &dyn Fn(&str) -> SecretRef| -> anyhow::Result<()> {
-        let (key, value) = spec
-            .split_once('=')
-            .ok_or_else(|| anyhow::anyhow!("{flag}: expected KEY=VALUE, got '{spec}'"))?;
-        if key.is_empty() {
-            anyhow::bail!("{flag}: empty secret name in '{spec}'");
-        }
-        let r = make(value);
-        validate_ref(&r, ResolutionScope::TrustedLocal)
-            .map_err(|e| anyhow::anyhow!("{flag}: secret '{key}': {e}"))?;
-        if refs.insert(key.to_string(), r).is_some() {
-            anyhow::bail!("{flag}: secret '{key}' specified more than once");
-        }
-        Ok(())
-    };
+    let mut add =
+        |flag: &str, spec: &str, make: &dyn Fn(&str) -> SecretRef| -> anyhow::Result<()> {
+            let (key, value) = spec
+                .split_once('=')
+                .ok_or_else(|| anyhow::anyhow!("{flag}: expected KEY=VALUE, got '{spec}'"))?;
+            if key.is_empty() {
+                anyhow::bail!("{flag}: empty secret name in '{spec}'");
+            }
+            let r = make(value);
+            validate_ref(&r, ResolutionScope::TrustedLocal)
+                .map_err(|e| anyhow::anyhow!("{flag}: secret '{key}': {e}"))?;
+            if refs.insert(key.to_string(), r).is_some() {
+                anyhow::bail!("{flag}: secret '{key}' specified more than once");
+            }
+            Ok(())
+        };
     for spec in secret_env {
         add("--secret-env", spec, &|v| env_ref(v))?;
     }
@@ -150,8 +151,10 @@ pub fn resolve_cli_secrets(
     secret_file: &[String],
 ) -> anyhow::Result<Vec<(String, String)>> {
     let refs = parse_cli_secret_refs(secret_env, secret_file)?;
-    let resolved =
-        smolvm::secrets::resolve_refs_to_env(&refs, smolvm::secrets::ResolutionScope::TrustedLocal)?;
+    let resolved = smolvm::secrets::resolve_refs_to_env(
+        &refs,
+        smolvm::secrets::ResolutionScope::TrustedLocal,
+    )?;
     Ok(smolvm::secrets::expose_into_env(resolved))
 }
 
@@ -344,7 +347,9 @@ fn resolve_smolmachines_cloud_token(
     let refresh_token = match &cloud.refresh_token {
         Some(rt) => rt.clone(),
         None => {
-            eprintln!("warning: cloud session is expired. Run `smol auth login` to re-authenticate.");
+            eprintln!(
+                "warning: cloud session is expired. Run `smol auth login` to re-authenticate."
+            );
             return Ok(Some(ResolvedCredential::Identity(token)));
         }
     };
@@ -461,7 +466,10 @@ pub fn ensure_connected(name: &str) -> anyhow::Result<(AgentManager, AgentClient
     let manager = get_manager(name)?;
 
     if manager.try_connect_existing().is_none() {
-        anyhow::bail!("machine '{}' is not running. Use 'smol machine start' first.", name);
+        anyhow::bail!(
+            "machine '{}' is not running. Use 'smol machine start' first.",
+            name
+        );
     }
 
     let socket = manager.vsock_socket();

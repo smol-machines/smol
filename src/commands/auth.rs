@@ -131,7 +131,9 @@ pub async fn device_flow(no_browser: bool) -> Result<TokenResponse> {
         bail!("device authorization failed ({}): {}", status, body);
     }
 
-    let device_auth: DeviceAuthResponse = resp.json().await
+    let device_auth: DeviceAuthResponse = resp
+        .json()
+        .await
         .context("failed to parse device authorization response")?;
 
     // Step 2: Display instructions
@@ -179,7 +181,9 @@ pub async fn device_flow(no_browser: bool) -> Result<TokenResponse> {
             .context("failed to poll token endpoint")?;
 
         if resp.status().is_success() {
-            let token_resp: TokenResponse = resp.json().await
+            let token_resp: TokenResponse = resp
+                .json()
+                .await
                 .context("failed to parse token response")?;
             return Ok(token_resp);
         }
@@ -428,7 +432,10 @@ mod tests {
         apply_refreshed_smolmachines_tokens(&mut settings, &new);
 
         assert_eq!(settings.cloud.api_key.as_deref(), Some("synced_jwt"));
-        assert_eq!(settings.cloud.refresh_token.as_deref(), Some("synced_refresh"));
+        assert_eq!(
+            settings.cloud.refresh_token.as_deref(),
+            Some("synced_refresh")
+        );
         assert!(settings.cloud.token_expires_at.is_some());
 
         let entry = settings

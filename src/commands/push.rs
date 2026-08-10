@@ -118,8 +118,7 @@ fn register_in_catalog(
     // platforms, so a later single-arch push doesn't narrow the catalog entry.
     let (digest, platforms) = rt.block_on(async {
         let (bytes, digest) = reg_client.get_manifest_raw(repo, tag).await?;
-        let platforms =
-            index_platforms(&bytes).unwrap_or_else(|| vec![result.platform.clone()]);
+        let platforms = index_platforms(&bytes).unwrap_or_else(|| vec![result.platform.clone()]);
         anyhow::Ok((digest, platforms))
     })?;
 

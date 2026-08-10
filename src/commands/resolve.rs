@@ -99,15 +99,27 @@ struct ParsedRef<'a> {
 /// `mach-` is unambiguously cloud even without a prefix.
 fn parse_ref(reference: &str) -> ParsedRef<'_> {
     if let Some(rest) = reference.strip_prefix("local/") {
-        return ParsedRef { forced: Some(Location::Local), bare: rest };
+        return ParsedRef {
+            forced: Some(Location::Local),
+            bare: rest,
+        };
     }
     if let Some(rest) = reference.strip_prefix("cloud/") {
-        return ParsedRef { forced: Some(Location::Cloud), bare: rest };
+        return ParsedRef {
+            forced: Some(Location::Cloud),
+            bare: rest,
+        };
     }
     if reference.starts_with("mach-") {
-        return ParsedRef { forced: Some(Location::Cloud), bare: reference };
+        return ParsedRef {
+            forced: Some(Location::Cloud),
+            bare: reference,
+        };
     }
-    ParsedRef { forced: None, bare: reference }
+    ParsedRef {
+        forced: None,
+        bare: reference,
+    }
 }
 
 /// Enumerate local machines from the on-disk config. Synchronous, never fails
@@ -197,7 +209,10 @@ pub fn list_all(target: Target) -> Result<Listing> {
         cloud_available = false;
     }
 
-    Ok(Listing { machines, cloud_available })
+    Ok(Listing {
+        machines,
+        cloud_available,
+    })
 }
 
 /// Resolve a user reference to exactly one machine under `target`.
@@ -249,7 +264,10 @@ pub fn resolve(reference: &str, target: Target) -> Result<MachineRef> {
         1 => Ok(hits.pop().unwrap()),
         _ => {
             // Ambiguous only when the hits straddle both backends; qualify.
-            let locals = hits.iter().filter(|m| m.location == Location::Local).count();
+            let locals = hits
+                .iter()
+                .filter(|m| m.location == Location::Local)
+                .count();
             let clouds = hits.len() - locals;
             if locals > 0 && clouds > 0 {
                 bail!(
@@ -473,7 +491,10 @@ mod tests {
             (Location::Cloud, "mach-abc123".to_string())
         );
         // No reference → local default, offline.
-        assert_eq!(locate(None, Target::Auto).unwrap(), (Location::Local, "default".to_string()));
+        assert_eq!(
+            locate(None, Target::Auto).unwrap(),
+            (Location::Local, "default".to_string())
+        );
     }
 
     #[test]
@@ -506,7 +527,10 @@ mod tests {
             (Location::Cloud, "mach-abc123".to_string())
         );
         // No reference → local default, offline.
-        assert_eq!(route(None, Target::Auto).unwrap(), (Location::Local, "default".to_string()));
+        assert_eq!(
+            route(None, Target::Auto).unwrap(),
+            (Location::Local, "default".to_string())
+        );
     }
 
     #[test]

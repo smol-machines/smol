@@ -69,7 +69,9 @@ impl LsCmd {
                     id_short,
                     truncate(&m.state, 10),
                     m.cpus.map(|c| c.to_string()).unwrap_or_else(|| "-".into()),
-                    m.memory_mib.map(|mb| format!("{mb} MiB")).unwrap_or_else(|| "-".into()),
+                    m.memory_mib
+                        .map(|mb| format!("{mb} MiB"))
+                        .unwrap_or_else(|| "-".into()),
                     truncate(m.source.as_deref().unwrap_or("-"), 22),
                 );
             }

@@ -39,7 +39,10 @@ impl DownCmd {
                 println!("Stopped machine: {}", name);
             }
             None => {
-                println!("No machine '{}' found (was it started with 'smol file up'?)", name);
+                println!(
+                    "No machine '{}' found (was it started with 'smol file up'?)",
+                    name
+                );
             }
         }
 

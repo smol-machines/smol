@@ -121,10 +121,7 @@ impl LogsCmd {
             // lifecycle feed instead.
             let resp = http
                 .get(format!("{}/v1/machines/{}/logs", endpoint, id))
-                .query(&[
-                    ("follow", follow.to_string()),
-                    ("tail", tail.to_string()),
-                ])
+                .query(&[("follow", follow.to_string()), ("tail", tail.to_string())])
                 .send()
                 .await?;
 
@@ -168,8 +165,14 @@ impl LogsCmd {
                         return Ok(());
                     }
                     for event in &events {
-                        let ts = event.get("createdAt").and_then(|v| v.as_str()).unwrap_or("-");
-                        let level = event.get("level").and_then(|v| v.as_str()).unwrap_or("info");
+                        let ts = event
+                            .get("createdAt")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("-");
+                        let level = event
+                            .get("level")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("info");
                         let msg = event.get("message").and_then(|v| v.as_str()).unwrap_or("");
                         println!("{} [{}] {}", ts, level, msg);
                     }
@@ -196,10 +199,11 @@ fn print_console_line(raw: &str) {
     let payload = line.strip_prefix("data: ").unwrap_or(line);
     if let Ok(v) = serde_json::from_str::<serde_json::Value>(payload) {
         // `message` is either top-level or nested under tracing's `fields`.
-        let msg = v
-            .get("message")
-            .and_then(|m| m.as_str())
-            .or_else(|| v.get("fields").and_then(|f| f.get("message")).and_then(|m| m.as_str()));
+        let msg = v.get("message").and_then(|m| m.as_str()).or_else(|| {
+            v.get("fields")
+                .and_then(|f| f.get("message"))
+                .and_then(|m| m.as_str())
+        });
         if let Some(msg) = msg {
             let ts = v.get("timestamp").and_then(|t| t.as_str());
             let level = v.get("level").and_then(|l| l.as_str()).unwrap_or("INFO");

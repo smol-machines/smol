@@ -482,6 +482,9 @@ pub enum CloudSubcommand {
     /// Scale a machine on smolfleet
     Scale(crate::commands::scale::ScaleCmd),
 
+    /// Read back the output of a detached run (`smol cloud exec --detach`)
+    Logs(CloudLogsArgs),
+
     /// Open an interactive shell on a deployed cloud machine
     #[command(visible_alias = "sh")]
     Shell {
@@ -536,9 +539,12 @@ pub struct CloudExportArgs {
 impl CloudExportArgs {
     /// The machine name, from `-n/--name` or the positional.
     fn machine(&self) -> Result<String> {
-        self.name_flag.clone().or_else(|| self.name.clone()).ok_or_else(|| {
-            anyhow::anyhow!("a machine name is required, e.g. `smol cloud export -n myapp`")
-        })
+        self.name_flag
+            .clone()
+            .or_else(|| self.name.clone())
+            .ok_or_else(|| {
+                anyhow::anyhow!("a machine name is required, e.g. `smol cloud export -n myapp`")
+            })
     }
 }
 
@@ -557,9 +563,12 @@ pub struct CloudShareArgs {
 impl CloudShareArgs {
     /// The machine name, from `-n/--name` or the positional.
     fn machine(&self) -> Result<String> {
-        self.name_flag.clone().or_else(|| self.name.clone()).ok_or_else(|| {
-            anyhow::anyhow!("a machine name is required, e.g. `smol cloud share -n myapp`")
-        })
+        self.name_flag
+            .clone()
+            .or_else(|| self.name.clone())
+            .ok_or_else(|| {
+                anyhow::anyhow!("a machine name is required, e.g. `smol cloud share -n myapp`")
+            })
     }
 }
 
@@ -585,6 +594,73 @@ pub struct CloudExecArgs {
     /// Command timeout in seconds (default 600)
     #[arg(long, value_name = "SECONDS")]
     pub timeout: Option<u64>,
+
+    /// Start the command and return immediately, leaving it running in the
+    /// machine. Its output is appended to a log under /workspace, which
+    /// survives stop/start; read it back with `smol cloud logs`.
+    ///
+    /// Long agent runs are the reason this exists: a detached command keeps
+    /// going when the terminal closes, the network drops, or the laptop
+    /// sleeps, none of which a normal exec survives.
+    #[arg(short = 'd', long)]
+    pub detach: bool,
+
+    /// Log file for a detached run (default: /workspace/.smol/logs/<name>.log).
+    #[arg(long, value_name = "PATH", requires = "detach")]
+    pub log: Option<String>,
+}
+
+/// Arguments for `smol cloud logs` (read back a detached run's output).
+#[derive(Args, Debug)]
+pub struct CloudLogsArgs {
+    /// Machine name (default: "default")
+    #[arg(short = 'n', long, value_name = "NAME")]
+    pub name: Option<String>,
+
+    /// Log file to read (default: /workspace/.smol/logs/<name>.log)
+    #[arg(long, value_name = "PATH")]
+    pub log: Option<String>,
+
+    /// Follow the log as it grows, like `tail -f`. Ctrl-C stops watching; the
+    /// detached command keeps running.
+    #[arg(short = 'f', long)]
+    pub follow: bool,
+
+    /// Show only the last N lines (default 200; ignored with --follow)
+    #[arg(long, value_name = "N", default_value_t = 200)]
+    pub tail: u32,
+}
+
+/// Where a detached run's output goes when `--log` is not given. Under
+/// /workspace so it outlives stop/start — /tmp is a tmpfs and is emptied.
+fn default_log_path(machine: &str) -> String {
+    format!("/workspace/.smol/logs/{machine}.log")
+}
+
+/// Single-quote a string for `sh -c`, so a command carrying spaces, quotes or
+/// globs reaches the guest exactly as typed.
+fn shell_quote(s: &str) -> String {
+    format!("'{}'", s.replace('\'', r"'\''"))
+}
+
+/// The shell program that starts `command` detached and returns at once.
+///
+/// `setsid` puts it in its own session so it is not in the exec's process
+/// group and cannot be signalled when that connection goes away; stdin is
+/// closed and stdout/stderr are appended to `log` so nothing is written to a
+/// terminal that will not exist. The pid is echoed for the caller to report.
+fn detached_program(command: &[String], log: &str) -> String {
+    let cmd = command
+        .iter()
+        .map(|a| shell_quote(a))
+        .collect::<Vec<_>>()
+        .join(" ");
+    let log_q = shell_quote(log);
+    format!(
+        "mkdir -p \"$(dirname {log_q})\" && \
+         {{ setsid nohup {cmd} >> {log_q} 2>&1 < /dev/null & }} && \
+         echo \"$!\""
+    )
 }
 
 impl CloudCmd {
@@ -609,21 +685,67 @@ impl CloudCmd {
                 local: false,
             }
             .run(),
-            CloudSubcommand::Exec(a) => crate::commands::exec::ExecCmd {
-                name: a.name,
-                command: a.command,
-                interactive: false,
-                tty: false,
-                stream: false,
-                env: a.env,
-                workdir: a.workdir,
-                secret_env: vec![],
-                secret_file: vec![],
-                timeout: a.timeout,
-                cloud: true,
-                local: false,
+            CloudSubcommand::Logs(a) => {
+                let machine = a.name.clone().unwrap_or_else(|| "default".to_string());
+                let log = a.log.clone().unwrap_or_else(|| default_log_path(&machine));
+                let log_q = shell_quote(&log);
+                // --follow needs a PTY: tail -f never exits, so without one the
+                // exec would sit on its timeout and print nothing until then.
+                let (program, tty) = if a.follow {
+                    (format!("tail -n {} -f {log_q}", a.tail), true)
+                } else {
+                    (format!("cat {log_q}"), false)
+                };
+                crate::commands::exec::ExecCmd {
+                    name: a.name,
+                    command: vec!["/bin/sh".to_string(), "-c".to_string(), program],
+                    interactive: a.follow,
+                    tty,
+                    stream: false,
+                    env: vec![],
+                    workdir: None,
+                    secret_env: vec![],
+                    secret_file: vec![],
+                    timeout: None,
+                    cloud: true,
+                    local: false,
+                }
+                .run()
             }
-            .run(),
+            CloudSubcommand::Exec(a) => {
+                let detached = a.detach;
+                let machine = a.name.clone().unwrap_or_else(|| "default".to_string());
+                let log = a.log.clone().unwrap_or_else(|| default_log_path(&machine));
+                let command = if detached {
+                    vec![
+                        "/bin/sh".to_string(),
+                        "-c".to_string(),
+                        detached_program(&a.command, &log),
+                    ]
+                } else {
+                    a.command
+                };
+                let result = crate::commands::exec::ExecCmd {
+                    name: a.name,
+                    command,
+                    interactive: false,
+                    tty: false,
+                    stream: false,
+                    env: a.env,
+                    workdir: a.workdir,
+                    secret_env: vec![],
+                    secret_file: vec![],
+                    timeout: a.timeout,
+                    cloud: true,
+                    local: false,
+                }
+                .run();
+                if detached && result.is_ok() {
+                    eprintln!("detached; output is appended to {log} in the machine");
+                    eprintln!("  follow it:  smol cloud logs -n {machine} --follow");
+                }
+                result
+            }
             CloudSubcommand::Export(a) => export_machine(a),
             CloudSubcommand::Share(a) => share_machine(a),
             CloudSubcommand::Unshare(a) => unshare_machine(a),
@@ -637,36 +759,42 @@ impl CloudCmd {
 /// node build + push the artifact; the bytes never transit the control plane.
 fn export_machine(args: CloudExportArgs) -> Result<()> {
     let tag = args.tag.clone();
-    run_cloud_command(Some(args.machine()?), move |http, endpoint, id| async move {
-        eprintln!("Exporting machine (builds + pushes a .smolmachine; the machine must be stopped)...");
-        let resp = http
-            .post(format!("{}/v1/machines/{}/export", endpoint, id))
-            .json(&serde_json::json!({ "tag": tag }))
-            .send()
-            .await?;
-        let resp = check_response(resp, "export machine").await?;
+    run_cloud_command(
+        Some(args.machine()?),
+        move |http, endpoint, id| async move {
+            eprintln!("Exporting machine (builds + pushes a .smolmachine; the machine must be stopped)...");
+            let resp = http
+                .post(format!("{}/v1/machines/{}/export", endpoint, id))
+                .json(&serde_json::json!({ "tag": tag }))
+                .send()
+                .await?;
+            let resp = check_response(resp, "export machine").await?;
 
-        #[derive(serde::Deserialize)]
-        #[serde(rename_all = "camelCase")]
-        struct ExportResp {
-            reference: String,
-            digest: String,
-            size_bytes: u64,
-            #[serde(default)]
-            platforms: Vec<String>,
-        }
-        let out: ExportResp = resp.json().await?;
+            #[derive(serde::Deserialize)]
+            #[serde(rename_all = "camelCase")]
+            struct ExportResp {
+                reference: String,
+                digest: String,
+                size_bytes: u64,
+                #[serde(default)]
+                platforms: Vec<String>,
+            }
+            let out: ExportResp = resp.json().await?;
 
-        println!("Exported {}", out.reference);
-        println!("  digest    {}", out.digest);
-        println!("  size      {:.1} MiB", out.size_bytes as f64 / (1024.0 * 1024.0));
-        if !out.platforms.is_empty() {
-            println!("  platforms {}", out.platforms.join(", "));
-        }
-        println!();
-        println!("Re-deploy anywhere:  smol cloud deploy {}", out.reference);
-        Ok(())
-    })
+            println!("Exported {}", out.reference);
+            println!("  digest    {}", out.digest);
+            println!(
+                "  size      {:.1} MiB",
+                out.size_bytes as f64 / (1024.0 * 1024.0)
+            );
+            if !out.platforms.is_empty() {
+                println!("  platforms {}", out.platforms.join(", "));
+            }
+            println!();
+            println!("Re-deploy anywhere:  smol cloud deploy {}", out.reference);
+            Ok(())
+        },
+    )
 }
 
 /// `smol cloud share <machine>` — mint a per-machine anonymous share link. The
@@ -674,49 +802,55 @@ fn export_machine(args: CloudExportArgs) -> Result<()> {
 /// machine's published app without a smolmachines account. Re-running mints a
 /// fresh token (the previous link stops working).
 fn share_machine(args: CloudShareArgs) -> Result<()> {
-    run_cloud_command(Some(args.machine()?), move |http, endpoint, id| async move {
-        let resp = http
-            .post(format!("{}/v1/machines/{}/share", endpoint, id))
-            .send()
-            .await?;
-        let resp = check_response(resp, "share machine").await?;
+    run_cloud_command(
+        Some(args.machine()?),
+        move |http, endpoint, id| async move {
+            let resp = http
+                .post(format!("{}/v1/machines/{}/share", endpoint, id))
+                .send()
+                .await?;
+            let resp = check_response(resp, "share machine").await?;
 
-        #[derive(serde::Deserialize)]
-        struct ShareResp {
-            token: String,
-            #[serde(default)]
-            url: Option<String>,
-        }
-        let out: ShareResp = resp.json().await?;
+            #[derive(serde::Deserialize)]
+            struct ShareResp {
+                token: String,
+                #[serde(default)]
+                url: Option<String>,
+            }
+            let out: ShareResp = resp.json().await?;
 
-        match out.url {
-            Some(url) => {
-                println!("Anonymous share link (anyone with this URL can reach the app):");
-                println!("  {url}");
+            match out.url {
+                Some(url) => {
+                    println!("Anonymous share link (anyone with this URL can reach the app):");
+                    println!("  {url}");
+                }
+                None => {
+                    // No apps domain configured or the name isn't DNS-safe — surface
+                    // the raw token so the caller can still attach it as `?t=`.
+                    println!("Share token minted (attach as `?t=` on the app URL):");
+                    println!("  {}", out.token);
+                }
             }
-            None => {
-                // No apps domain configured or the name isn't DNS-safe — surface
-                // the raw token so the caller can still attach it as `?t=`.
-                println!("Share token minted (attach as `?t=` on the app URL):");
-                println!("  {}", out.token);
-            }
-        }
-        println!();
-        println!("Revoke with:  smol cloud unshare");
-        Ok(())
-    })
+            println!();
+            println!("Revoke with:  smol cloud unshare");
+            Ok(())
+        },
+    )
 }
 
 /// `smol cloud unshare <machine>` — revoke the machine's anonymous share link.
 /// The existing URL immediately stops granting access.
 fn unshare_machine(args: CloudShareArgs) -> Result<()> {
-    run_cloud_command(Some(args.machine()?), move |http, endpoint, id| async move {
-        let resp = http
-            .delete(format!("{}/v1/machines/{}/share", endpoint, id))
-            .send()
-            .await?;
-        check_response(resp, "unshare machine").await?;
-        println!("Share link revoked.");
-        Ok(())
-    })
+    run_cloud_command(
+        Some(args.machine()?),
+        move |http, endpoint, id| async move {
+            let resp = http
+                .delete(format!("{}/v1/machines/{}/share", endpoint, id))
+                .send()
+                .await?;
+            check_response(resp, "unshare machine").await?;
+            println!("Share link revoked.");
+            Ok(())
+        },
+    )
 }

@@ -25,7 +25,9 @@ impl InitCmd {
             Some("python") => TEMPLATE_PYTHON.to_string(),
             Some("node") => TEMPLATE_NODE.to_string(),
             Some("go") => TEMPLATE_GO.to_string(),
-            Some(name) => anyhow::bail!("unknown template: '{}'. Available: python, node, go", name),
+            Some(name) => {
+                anyhow::bail!("unknown template: '{}'. Available: python, node, go", name)
+            }
             None => {
                 let image = self.image.as_deref().unwrap_or("alpine");
                 format!(

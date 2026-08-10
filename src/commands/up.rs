@@ -200,7 +200,10 @@ impl UpCmd {
                 if let Some(mr) = r.max_retries {
                     record.restart.max_retries = mr;
                 }
-                if let Some(secs) = r.max_backoff.as_deref().and_then(smolfile::parse_duration_secs)
+                if let Some(secs) = r
+                    .max_backoff
+                    .as_deref()
+                    .and_then(smolfile::parse_duration_secs)
                 {
                     record.restart.max_backoff_secs = secs;
                 }

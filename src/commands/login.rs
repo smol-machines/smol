@@ -53,9 +53,7 @@ impl LoginCmd {
         let rt = tokio::runtime::Runtime::new()?;
         let token_response = rt.block_on(auth::device_flow(self.no_browser))?;
 
-        let expires_at = token_response
-            .expires_in
-            .map(auth::expires_at_from_now);
+        let expires_at = token_response.expires_in.map(auth::expires_at_from_now);
 
         store_token(
             &registry,
@@ -64,7 +62,6 @@ impl LoginCmd {
             expires_at,
         )
     }
-
 }
 
 fn store_token(
@@ -87,7 +84,9 @@ fn store_token(
         // identity_token (the exchange path), exactly like the silent-refresh
         // path does. Storing it as a direct-bearer password (the old behavior)
         // made every push 401 with zot's opaque "UNSUPPORTED" error.
-        settings.machines.set_identity_token(registry, &access_token);
+        settings
+            .machines
+            .set_identity_token(registry, &access_token);
         if let Some(entry) = settings.machines.registries.get_mut(registry) {
             entry.refresh_token = refresh_token.clone();
             entry.expires_at = expires_at;

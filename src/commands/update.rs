@@ -109,7 +109,10 @@ impl UpdateCmd {
                 .ports
                 .iter()
                 .filter(|&&(h, g)| {
-                    !self.remove_port.iter().any(|rm| rm.host == h && rm.guest == g)
+                    !self
+                        .remove_port
+                        .iter()
+                        .any(|rm| rm.host == h && rm.guest == g)
                 })
                 .map(|&(h, g)| PortMapping::new(h, g))
                 .collect();
@@ -121,15 +124,19 @@ impl UpdateCmd {
                     final_ports.push(*p);
                 }
             }
-            PortMapping::check_duplicates(&final_ports)
-                .map_err(|e| anyhow::anyhow!("{e}"))?;
+            PortMapping::check_duplicates(&final_ports).map_err(|e| anyhow::anyhow!("{e}"))?;
         }
 
         // Expand physical disks before the DB write so a failure leaves the
         // record untouched.
         let mut changes: Vec<String> = Vec::new();
         if self.storage.is_some() || self.overlay.is_some() {
-            changes.extend(expand_disks(&self.name, &record, self.storage, self.overlay)?);
+            changes.extend(expand_disks(
+                &self.name,
+                &record,
+                self.storage,
+                self.overlay,
+            )?);
         }
 
         db.update_vm(&self.name, |r| {
@@ -158,7 +165,11 @@ impl UpdateCmd {
             }
             for m in &new_mounts {
                 let tuple = m.to_storage_tuple();
-                if !r.mounts.iter().any(|(s, t, _)| *s == tuple.0 && *t == tuple.1) {
+                if !r
+                    .mounts
+                    .iter()
+                    .any(|(s, t, _)| *s == tuple.0 && *t == tuple.1)
+                {
                     changes.push(format!(
                         "  added volume: {}:{}{}",
                         tuple.0,
@@ -262,12 +273,16 @@ fn expand_disks(
 
     if let Some(s) = new_storage_gb {
         if s < cur_storage {
-            anyhow::bail!("storage disk cannot be shrunk from {cur_storage} GiB to {s} GiB (expand only)");
+            anyhow::bail!(
+                "storage disk cannot be shrunk from {cur_storage} GiB to {s} GiB (expand only)"
+            );
         }
     }
     if let Some(o) = new_overlay_gb {
         if o < cur_overlay {
-            anyhow::bail!("overlay disk cannot be shrunk from {cur_overlay} GiB to {o} GiB (expand only)");
+            anyhow::bail!(
+                "overlay disk cannot be shrunk from {cur_overlay} GiB to {o} GiB (expand only)"
+            );
         }
     }
 
