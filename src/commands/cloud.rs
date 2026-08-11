@@ -689,19 +689,22 @@ impl CloudCmd {
                 let machine = a.name.clone().unwrap_or_else(|| "default".to_string());
                 let log = a.log.clone().unwrap_or_else(|| default_log_path(&machine));
                 let log_q = shell_quote(&log);
-                // --follow needs a PTY: tail -f never exits, so without one the
-                // exec would sit on its timeout and print nothing until then.
-                let (program, tty) = if a.follow {
-                    (format!("tail -n {} -f {log_q}", a.tail), true)
+                // --follow streams: `tail -f` never exits, so a buffered exec
+                // would print nothing until its timeout. Use the streaming
+                // transport, NOT the interactive one — the PTY endpoint takes a
+                // single executable and joins argv into it, so a command with
+                // arguments is looked up as one long filename and fails.
+                let program = if a.follow {
+                    format!("tail -n {} -f {log_q}", a.tail)
                 } else {
-                    (format!("cat {log_q}"), false)
+                    format!("cat {log_q}")
                 };
                 crate::commands::exec::ExecCmd {
                     name: a.name,
                     command: vec!["/bin/sh".to_string(), "-c".to_string(), program],
-                    interactive: a.follow,
-                    tty,
-                    stream: false,
+                    interactive: false,
+                    tty: false,
+                    stream: a.follow,
                     env: vec![],
                     workdir: None,
                     secret_env: vec![],
