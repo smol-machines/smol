@@ -725,7 +725,14 @@ impl CloudCmd {
                 } else {
                     a.command
                 };
-                let result = crate::commands::exec::ExecCmd {
+                // Say where the output went BEFORE handing off: `ExecCmd::run`
+                // exits the process with the command's status and never returns,
+                // so anything printed after it would never run.
+                if detached {
+                    eprintln!("detached; output is appended to {log} in the machine");
+                    eprintln!("  follow it:  smol cloud logs -n {machine} --follow");
+                }
+                crate::commands::exec::ExecCmd {
                     name: a.name,
                     command,
                     interactive: false,
@@ -739,12 +746,7 @@ impl CloudCmd {
                     cloud: true,
                     local: false,
                 }
-                .run();
-                if detached && result.is_ok() {
-                    eprintln!("detached; output is appended to {log} in the machine");
-                    eprintln!("  follow it:  smol cloud logs -n {machine} --follow");
-                }
-                result
+                .run()
             }
             CloudSubcommand::Export(a) => export_machine(a),
             CloudSubcommand::Share(a) => share_machine(a),
