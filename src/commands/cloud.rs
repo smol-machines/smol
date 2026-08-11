@@ -608,6 +608,19 @@ pub struct CloudExecArgs {
     /// Log file for a detached run (default: /workspace/.smol/logs/<name>.log).
     #[arg(long, value_name = "PATH", requires = "detach")]
     pub log: Option<String>,
+
+    /// Inject a secret from a host env var (GUEST_VAR=HOST_VAR), resolved on
+    /// the host for this run and never persisted. This is how an unattended
+    /// agent gets its API key: `--secret-env ANTHROPIC_API_KEY=ANTHROPIC_API_KEY`.
+    /// A detached command inherits it, so the key is never written to the log
+    /// or stored on the machine.
+    #[arg(long = "secret-env", value_name = "GUEST_VAR=HOST_VAR")]
+    pub secret_env: Vec<String>,
+
+    /// Inject a secret from a host file (GUEST_VAR=/abs/path), resolved on the
+    /// host for this run and never persisted.
+    #[arg(long = "secret-file", value_name = "GUEST_VAR=PATH")]
+    pub secret_file: Vec<String>,
 }
 
 /// Arguments for `smol cloud logs` (read back a detached run's output).
@@ -728,6 +741,17 @@ impl CloudCmd {
                 } else {
                     a.command
                 };
+                // Resolve --secret-env/--secret-file HERE and pass them as this
+                // run's env. The cloud transports do not carry secret refs (only
+                // the local path resolves them downstream), so forwarding the
+                // refs alone would drop them silently — an unattended agent
+                // would start with no key and only fail once it called out.
+                let mut env = a.env;
+                env.extend(
+                    crate::commands::common::resolve_cli_secrets(&a.secret_env, &a.secret_file)?
+                        .into_iter()
+                        .map(|(k, v)| format!("{k}={v}")),
+                );
                 // Say where the output went BEFORE handing off: `ExecCmd::run`
                 // exits the process with the command's status and never returns,
                 // so anything printed after it would never run.
@@ -741,10 +765,10 @@ impl CloudCmd {
                     interactive: false,
                     tty: false,
                     stream: false,
-                    env: a.env,
+                    env: env,
                     workdir: a.workdir,
-                    secret_env: vec![],
-                    secret_file: vec![],
+                    secret_env: a.secret_env,
+                    secret_file: a.secret_file,
                     timeout: a.timeout,
                     cloud: true,
                     local: false,
