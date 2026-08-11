@@ -765,7 +765,7 @@ impl CloudCmd {
                     interactive: false,
                     tty: false,
                     stream: false,
-                    env: env,
+                    env,
                     workdir: a.workdir,
                     secret_env: a.secret_env,
                     secret_file: a.secret_file,
