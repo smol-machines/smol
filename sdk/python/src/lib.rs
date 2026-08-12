@@ -352,6 +352,21 @@ impl Machine {
             }
         }
 
+        let mut env = Vec::new();
+        if let Some(value) = config.get_item("env")? {
+            if !value.is_none() {
+                let values = value.downcast::<PyDict>()?;
+                for (key, value) in values.iter() {
+                    env.push((key.extract()?, value.extract()?));
+                }
+            }
+        }
+        let workdir = config
+            .get_item("workdir")?
+            .filter(|value| !value.is_none())
+            .map(|value| value.extract())
+            .transpose()?;
+
         let spec = MachineSpec {
             name: name.clone(),
             mounts,
@@ -361,7 +376,10 @@ impl Machine {
             persistent,
             runtime_managed: false,
         };
-        runtime().map_err(err)?.create_machine(spec).map_err(err)?;
+        runtime()
+            .map_err(err)?
+            .create_machine_with_workload(spec, env, workdir)
+            .map_err(err)?;
         Ok(Self { name })
     }
 
@@ -381,6 +399,17 @@ impl Machine {
 
     fn state(&self) -> PyResult<String> {
         Ok(runtime().map_err(err)?.state(&self.name))
+    }
+
+    fn host_port(&self, guest_port: u16) -> PyResult<Option<u16>> {
+        runtime()
+            .map_err(err)?
+            .host_port(&self.name, guest_port)
+            .map_err(err)
+    }
+
+    fn guest_ports(&self) -> PyResult<Vec<u16>> {
+        runtime().map_err(err)?.guest_ports(&self.name).map_err(err)
     }
 
     fn start(&self) -> PyResult<()> {

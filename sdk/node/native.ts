@@ -44,6 +44,8 @@ export interface NativeResources {
 export interface NativeMachineConfig {
   name: string;
   image?: string | undefined;
+  env?: NativeEnvVar[] | undefined;
+  workdir?: string | undefined;
   mounts?: NativeHostMount[] | undefined;
   ports?: NativePortMapping[] | undefined;
   resources?: NativeResources | undefined;
@@ -81,6 +83,8 @@ export interface NapiMachine {
   readonly pid?: number;
   readonly isRunning: boolean;
   state(): string;
+  hostPort(guestPort: number): number | null;
+  guestPorts(): number[];
   start(): Promise<void>;
   startForkable(): Promise<void>;
   fork(name: string, ports?: NativePortMapping[]): Promise<NapiMachine>;

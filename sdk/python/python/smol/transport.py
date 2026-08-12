@@ -17,6 +17,7 @@ import atexit
 import base64
 import json
 import os
+import socket
 import time
 import urllib.error
 import urllib.request
@@ -166,6 +167,10 @@ def _native_config(name: str, config: MachineConfig) -> dict:
     cfg: dict[str, Any] = {"name": name, "persistent": config.persistent}
     if config.image is not None:
         cfg["image"] = config.image
+    if config.env:
+        cfg["env"] = dict(config.env)
+    if config.workdir is not None:
+        cfg["workdir"] = config.workdir
     if config.mounts:
         cfg["mounts"] = [
             {"source": m.source, "target": m.target, "read_only": m.effective_read_only}
@@ -253,21 +258,52 @@ class LocalTransport:
         return str(self._inner.state())
 
     def ready(self) -> bool:
-        # A local machine is created already started; "running" means usable.
-        return str(self._inner.state()) == "running"
+        if str(self._inner.state()) != "running":
+            return False
+        for guest_port in self._inner.guest_ports():
+            host_port = self._inner.host_port(guest_port)
+            if host_port is None:
+                return False
+            try:
+                with socket.create_connection(("127.0.0.1", host_port), timeout=0.25) as probe:
+                    # The host forwarder accepts before a guest listener exists.
+                    # An unavailable guest immediately resets/closes the relay;
+                    # a connection stable for 100ms proves it is really ready.
+                    probe.settimeout(0.1)
+                    try:
+                        if probe.recv(1, socket.MSG_PEEK) == b"":
+                            return False
+                    except TimeoutError:
+                        pass
+            except OSError:
+                return False
+        return True
 
     def ready_at(self) -> Optional[str]:
         # No readiness timestamp for the embedded engine.
         return None
 
     def wait_until_ready(self, timeout_s: float = 120.0, interval_s: float = 1.0) -> None:
-        # Local create()/start() blocks on the boot, so it is already ready.
-        return None
+        deadline = time.monotonic() + timeout_s
+        while time.monotonic() <= deadline:
+            if self.ready():
+                return
+            time.sleep(interval_s)
+        raise SmolError(
+            "TIMEOUT", f"machine '{self.name}' did not become ready within {timeout_s:g}s"
+        )
 
     def endpoint(self, port: int, path: Optional[str] = None) -> PortEndpoint:
-        raise NotSupportedError(
-            "endpoint() is a cloud connect-bridge feature; the local target has "
-            "no control plane. Publish a port and reach it on the host directly."
+        host_port = self._inner.host_port(port)
+        if host_port is None:
+            raise InvalidConfigError(
+                f"guest port {port} is not published by local machine '{self.name}'"
+            )
+        suffix = f"/{(path or '').lstrip('/')}" if path else ""
+        return PortEndpoint(
+            http_url=f"http://127.0.0.1:{host_port}{suffix}",
+            ws_url=f"ws://127.0.0.1:{host_port}{suffix}",
+            headers={},
         )
 
     def request(
@@ -278,10 +314,13 @@ class LocalTransport:
         data: Optional[bytes] = None,
         timeout_s: float = CLOUD_TIMEOUT_S,
     ) -> bytes:
-        raise NotSupportedError(
-            "request() is a cloud connect-bridge feature; the local target has "
-            "no control plane. Publish a port and reach it on the host directly."
-        )
+        ep = self.endpoint(port, path)
+        request = urllib.request.Request(ep.http_url, data=data, method=method)
+        try:
+            with urllib.request.urlopen(request, timeout=timeout_s) as response:
+                return response.read()
+        except (urllib.error.URLError, OSError) as error:
+            raise SmolError("NETWORK_ERROR", str(error)) from error
 
     def url(self) -> Optional[str]:
         # Local machines have no public ingress URL — that's a cloud feature.
@@ -359,6 +398,7 @@ class LocalTransport:
         except Exception as e:  # noqa: BLE001
             raise wrap_native_error(e) from e
         _live_local.add(self)
+        self.wait_until_ready()
 
     def delete(self) -> None:
         _live_local.discard(self)
@@ -376,7 +416,16 @@ class LocalTransport:
         except Exception as e:  # noqa: BLE001
             raise wrap_native_error(e) from e
         # LocalTransport.__init__ registers the clone for atexit cleanup.
-        return LocalTransport(clone_inner)
+        clone = LocalTransport(clone_inner)
+        try:
+            clone.wait_until_ready()
+        except BaseException:
+            try:
+                clone.delete()
+            except Exception:  # noqa: BLE001 - preserve the readiness failure
+                pass
+            raise
+        return clone
 
     def fork_batch(
         self,
@@ -1185,30 +1234,31 @@ def make_transport(config: MachineConfig, conn: Optional[ConnectOptions] = None)
             raise
         return CloudTransport(base_url, api_key, machine_id, name)
 
-    # Local embedded engine via the native extension.
-    # Machine-level env/workdir configure the machine's WORKLOAD (init commands
-    # and the image entrypoint) — a cloud concept; the embedded engine runs no
-    # workload at create, and its create spec has no field for them. Reject
-    # rather than silently drop (mirrors the mounts-on-cloud gate above).
-    if config.env or config.workdir is not None:
-        raise NotSupportedError(
-            "machine-level env/workdir apply to the machine's workload and are "
-            "cloud-only; on the local target pass ExecOptions(env=..., "
-            "workdir=...) per command instead."
-        )
+    # Local embedded engine. Image machines launch their default workload before
+    # create returns, with env/workdir applied just like the cloud target.
     native = _load_native()
     name = config.name or _generate_name()
+    transport: Optional[LocalTransport] = None
     try:
         inner = native.Machine(_native_config(name, config))
+        transport = LocalTransport(inner)
         # A forkable golden boots with memfd-backed guest RAM + a control socket
         # so it can be cloned with Machine.fork (local live-RAM fork).
         if config.forkable:
             inner.start_forkable()
         else:
             inner.start()
-    except Exception as e:  # noqa: BLE001
-        raise wrap_native_error(e) from e
-    return LocalTransport(inner)
+        transport.wait_until_ready()
+        return transport
+    except BaseException as e:
+        if transport is not None:
+            try:
+                transport.delete()
+            except Exception:  # noqa: BLE001 - preserve the start/readiness failure
+                pass
+        if isinstance(e, Exception):
+            raise wrap_native_error(e) from e
+        raise
 
 
 def connect_transport(machine_id: str, conn: Optional[ConnectOptions] = None) -> Transport:
@@ -1226,7 +1276,9 @@ def connect_transport(machine_id: str, conn: Optional[ConnectOptions] = None) ->
         # Local: start-or-reconnect to the named machine via the native engine.
         native = _load_native()
         try:
-            return LocalTransport(native.Machine.connect(machine_id))
+            transport = LocalTransport(native.Machine.connect(machine_id))
+            transport.wait_until_ready()
+            return transport
         except Exception as e:  # noqa: BLE001
             raise wrap_native_error(e) from e
     # As in make_transport: the CLI-login fallback applies only once the cloud

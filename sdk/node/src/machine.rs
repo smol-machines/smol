@@ -75,6 +75,13 @@ impl NapiMachine {
             .map(|r| r.to_vm_resources())
             .unwrap_or_default();
 
+        let env = config
+            .env
+            .unwrap_or_default()
+            .into_iter()
+            .map(|item| (item.key, item.value))
+            .collect();
+        let workdir = config.workdir;
         let spec = MachineSpec {
             name: config.name.clone(),
             mounts,
@@ -85,7 +92,10 @@ impl NapiMachine {
             runtime_managed: false,
         };
 
-        runtime().into_napi()?.create_machine(spec).into_napi()?;
+        runtime()
+            .into_napi()?
+            .create_machine_with_workload(spec, env, workdir)
+            .into_napi()?;
 
         Ok(Self { name: config.name })
     }
@@ -165,6 +175,21 @@ impl NapiMachine {
         runtime()
             .map(|runtime| runtime.state(&self.name))
             .unwrap_or_else(|_| "stopped".to_string())
+    }
+
+    /// Return the host port forwarding to a published guest port.
+    #[napi]
+    pub fn host_port(&self, guest_port: u16) -> napi::Result<Option<u16>> {
+        runtime()
+            .into_napi()?
+            .host_port(&self.name, guest_port)
+            .into_napi()
+    }
+
+    /// Return every published guest port.
+    #[napi]
+    pub fn guest_ports(&self) -> napi::Result<Vec<u16>> {
+        runtime().into_napi()?.guest_ports(&self.name).into_napi()
     }
 
     /// Start the machine VM. Boots via fork + libkrun, waits for agent ready,

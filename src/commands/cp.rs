@@ -9,6 +9,7 @@
 
 use super::{cloud, common};
 use clap::Args;
+use smolvm::agent::RunConfig;
 
 #[derive(Args, Debug)]
 pub struct CpCmd {
@@ -60,6 +61,26 @@ impl CpCmd {
 
         let (manager, mut client) = common::ensure_connected(&handle)?;
         manager.detach();
+
+        // Image machines expose their container rootfs through a persistent
+        // overlay. A fork clone inherits that overlay from its golden, so enter
+        // the inherited owner before file operations instead of addressing a
+        // new, empty overlay under the clone's name. A no-op container run both
+        // mounts the overlay and makes it active for the subsequent file RPCs.
+        if let Some(record) = smolvm::db::SmolvmDb::open()
+            .ok()
+            .and_then(|db| db.get_vm(&handle).ok().flatten())
+        {
+            if let Some(image) = record.image.as_ref() {
+                let owner =
+                    smolvm::workload::persistent_overlay_owner(&handle, record.golden.as_deref());
+                client.run_non_interactive(
+                    RunConfig::new(image, vec!["/bin/true".to_string()])
+                        .with_persistent_overlay(Some(owner)),
+                )?;
+            }
+        }
+
         if is_upload {
             // Stream the file in chunks so large files don't get read entirely
             // into memory or exceed the protocol frame cap.

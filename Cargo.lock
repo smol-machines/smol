@@ -2304,7 +2304,7 @@ dependencies = [
 
 [[package]]
 name = "smolfile"
-version = "1.6.13"
+version = "1.7.5"
 dependencies = [
  "serde",
  "smolvm-protocol",
@@ -2329,7 +2329,7 @@ dependencies = [
 
 [[package]]
 name = "smolvm"
-version = "1.6.13"
+version = "1.7.5"
 dependencies = [
  "async-stream",
  "axum",
@@ -2338,6 +2338,7 @@ dependencies = [
  "clap",
  "dirs",
  "futures-util",
+ "getrandom 0.3.4",
  "hex",
  "humantime",
  "ipnet",
@@ -2349,6 +2350,7 @@ dependencies = [
  "notify",
  "parking_lot",
  "pkg-config",
+ "reqwest",
  "rusqlite",
  "rustls",
  "rustls-pemfile",
@@ -2383,7 +2385,7 @@ dependencies = [
 
 [[package]]
 name = "smolvm-cuda"
-version = "1.6.13"
+version = "1.7.5"
 dependencies = [
  "libc",
  "libloading",
@@ -2391,7 +2393,7 @@ dependencies = [
 
 [[package]]
 name = "smolvm-network"
-version = "1.6.13"
+version = "1.7.5"
 dependencies = [
  "crossbeam-queue",
  "humantime",
@@ -2404,7 +2406,7 @@ dependencies = [
 
 [[package]]
 name = "smolvm-pack"
-version = "1.6.13"
+version = "1.7.5"
 dependencies = [
  "crc32fast",
  "dirs",
@@ -2423,7 +2425,7 @@ dependencies = [
 
 [[package]]
 name = "smolvm-protocol"
-version = "1.6.13"
+version = "1.7.5"
 dependencies = [
  "base64",
  "serde",
@@ -2433,7 +2435,7 @@ dependencies = [
 
 [[package]]
 name = "smolvm-registry"
-version = "1.6.13"
+version = "1.7.5"
 dependencies = [
  "bytes",
  "dirs",

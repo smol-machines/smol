@@ -8,6 +8,29 @@ use smolvm::data::storage::HostMount;
 use smolvm::smolfile::{self, Smolfile};
 use std::path::PathBuf;
 
+fn resolve_fork_config(
+    fork: smolvm::smolfile::ForkConfig,
+    cuda: bool,
+) -> anyhow::Result<(bool, Option<u32>, Option<u64>)> {
+    if fork.pool_size == Some(0) {
+        anyhow::bail!("Smolfile [fork] pool_size must be greater than zero");
+    }
+    if fork.cuda_vram_limit_mib == Some(0) {
+        anyhow::bail!("Smolfile [fork] cuda_vram_limit_mib must be greater than zero");
+    }
+    if fork.pool_size.is_some() && !cuda {
+        anyhow::bail!("Smolfile [fork] pool_size requires cuda = true or auto_graph = true");
+    }
+    if fork.cuda_vram_limit_mib.is_some() && fork.pool_size.is_none() {
+        anyhow::bail!("Smolfile [fork] cuda_vram_limit_mib requires pool_size");
+    }
+    Ok((
+        fork.enabled.unwrap_or(false) || fork.pool_size.is_some(),
+        fork.pool_size,
+        fork.cuda_vram_limit_mib,
+    ))
+}
+
 #[derive(Args, Debug)]
 pub struct UpCmd {
     /// Run in background
@@ -76,6 +99,10 @@ impl UpCmd {
         let net = sf.net.unwrap_or(false) || !ports.is_empty();
         let gpu = sf.gpu.unwrap_or(false);
         let gpu_vram_mib = sf.gpu_vram;
+        let auto_graph = sf.auto_graph.unwrap_or(false);
+        let cuda = sf.cuda.unwrap_or(false) || auto_graph;
+        let (forkable, cuda_fork_pool_size, cuda_vram_limit_mib) =
+            resolve_fork_config(sf.fork.unwrap_or_default(), cuda)?;
 
         // Resolve [network] section for egress policy
         let network_config = sf.network.unwrap_or_default();
@@ -111,7 +138,7 @@ impl UpCmd {
             gpu,
             gpu_vram_mib,
             rosetta: sf.rosetta.unwrap_or(false),
-            cuda: sf.cuda.unwrap_or(false),
+            cuda,
             dns: None,
         };
 
@@ -131,6 +158,9 @@ impl UpCmd {
         // Merge env: top-level + [dev]
         let mut all_env = sf.env.clone();
         all_env.extend(dev.env.clone());
+        if auto_graph {
+            smolvm::util::enable_cuda_auto_graph_env_specs(&mut all_env);
+        }
         let env = smolvm::util::parse_env_list(&all_env);
 
         // Workdir: [dev].workdir > top-level workdir
@@ -187,7 +217,10 @@ impl UpCmd {
             // all have record fields the engine's own Smolfile path wires — mirror
             // it here so `file up` honors them.
             record.rosetta = sf.rosetta;
-            record.cuda = sf.cuda.unwrap_or(false);
+            record.cuda = cuda;
+            record.forkable = forkable;
+            record.cuda_fork_pool_size = cuda_fork_pool_size;
+            record.cuda_vram_limit_mib = cuda_vram_limit_mib;
             record.docker_socket = sf.docker_socket.unwrap_or(false);
 
             // Wire [restart] policy into record.
@@ -240,7 +273,10 @@ impl UpCmd {
         let features = LaunchFeatures {
             ssh_agent_socket,
             dns_filter_hosts,
-            cuda: sf.cuda.unwrap_or(false),
+            cuda,
+            forkable,
+            cuda_fork_pool_size,
+            cuda_vram_limit_mib,
             expose_docker: sf.docker_socket.unwrap_or(false),
             ..Default::default()
         };
@@ -295,6 +331,22 @@ impl UpCmd {
             }
         }
 
+        // Image machines are services, not just image caches: launch the image
+        // workload before `file up` reports success so published ports become
+        // useful and a later fork inherits the live process.
+        if sf.image.is_some() {
+            let record = smolvm::db::SmolvmDb::open()?
+                .get_vm(&name)?
+                .ok_or_else(|| anyhow::anyhow!("machine record disappeared during start"))?;
+            let mut client = smolvm::AgentClient::connect_with_retry(manager.vsock_socket())?;
+            if let Err(error) =
+                smolvm::workload::launch_image_workload(&mut client, &name, &record, env.clone())
+            {
+                let _ = manager.stop();
+                return Err(error.into());
+            }
+        }
+
         // Update DB state. Mark init as completed so a later start doesn't re-run
         // it (init effects now persist in the overlay).
         let pid_start_time = pid.and_then(smolvm::process::process_start_time);
@@ -315,5 +367,36 @@ impl UpCmd {
 
         manager.detach();
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn pool_size_implies_forkable_launch() {
+        let fork = smolvm::smolfile::ForkConfig {
+            enabled: None,
+            pool_size: Some(8),
+            cuda_vram_limit_mib: Some(6144),
+        };
+        assert_eq!(
+            resolve_fork_config(fork, true).unwrap(),
+            (true, Some(8), Some(6144))
+        );
+    }
+
+    #[test]
+    fn cuda_pool_validation_matches_the_engine() {
+        let fork = smolvm::smolfile::ForkConfig {
+            enabled: None,
+            pool_size: Some(8),
+            cuda_vram_limit_mib: None,
+        };
+        assert!(resolve_fork_config(fork, false)
+            .unwrap_err()
+            .to_string()
+            .contains("requires cuda"));
     }
 }

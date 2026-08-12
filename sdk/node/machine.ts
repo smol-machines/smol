@@ -133,18 +133,15 @@ export class Machine {
     return this.transport.waitUntilReady(opts);
   }
 
-  /** An authenticated endpoint (URL + headers) to reach a PUBLISHED guest port
-   *  through the control plane's connect bridge — no Cloudflare/localhost.run
-   *  tunnel, no public exposure, no egress allow-list. Have the in-VM worker
-   *  LISTEN on the port and connect *inbound*: plug `wsUrl` into a WebSocket
-   *  client (passing `headers`) or `httpUrl` into `fetch`. The machine must
-   *  publish the port (`ports: [{ guest }]` at create). (cloud) */
+  /** An endpoint (URL + any required headers) for a PUBLISHED guest port.
+   *  Local machines resolve to their current localhost host-port mapping;
+   *  cloud machines use the authenticated connect bridge. */
   endpoint(port: number, path?: string): PortEndpoint {
     return this.transport.endpoint(port, path);
   }
 
-  /** Convenience: an authenticated HTTP request to a published guest port via
-   *  the connect bridge. Returns the raw `fetch` `Response`. (cloud)
+  /** Convenience HTTP request to a published guest port. Returns the raw
+   *  `fetch` `Response` on local and cloud targets.
    *
    *  @param port  a published GUEST port the in-VM service listens on
    *  @param path  optional path on that service (e.g. `"healthz"`)

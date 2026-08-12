@@ -20,6 +20,10 @@ export interface MachineConfig {
   name: string
   /** OCI image to boot, when creating an image-backed machine. */
   image?: string
+  /** Environment for the image workload launched at machine start. */
+  env?: Array<EnvVar>
+  /** Working directory for the image workload. */
+  workdir?: string
   /** Host directories to mount into the VM. */
   mounts?: Array<HostMountConfig>
   /** Port mappings from host to guest. */
@@ -35,7 +39,7 @@ export interface HostMountConfig {
   source: string
   /** Absolute path inside the guest. */
   target: string
-  /** Mount as read-only (default: true). */
+  /** Mount as read-only (default: false — writable, matching the CLI). */
   readOnly?: boolean
 }
 /** A port mapping from host to guest. */
@@ -61,7 +65,11 @@ export interface VmResourcesConfig {
   gpu?: boolean
   /** GPU VRAM in MiB (default: engine default when GPU is enabled). */
   gpuVramMib?: number
-  /** Run the guest's unmodified CUDA/PyTorch code on the host's NVIDIA GPU by remoting CUDA calls over vsock (distinct from `gpu`, which is Vulkan). Local target only (default: false). */
+  /**
+   * Run the guest's unmodified CUDA/PyTorch code on the host's NVIDIA GPU by
+   * remoting CUDA calls over vsock (distinct from `gpu`, which is Vulkan; no
+   * CUDA toolkit needed in the image). Local target only (default: false).
+   */
   cuda?: boolean
 }
 /** Options for executing a command. */
@@ -147,6 +155,10 @@ export declare class NapiMachine {
   get isRunning(): boolean
   /** Get the current machine state: "stopped", "starting", "running", or "stopping". */
   state(): string
+  /** Return the host port forwarding to a published guest port. */
+  hostPort(guestPort: number): number | null
+  /** Return every published guest port. */
+  guestPorts(): Array<number>
   /**
    * Start the machine VM. Boots via fork + libkrun, waits for agent ready,
    * then connects the vsock client.

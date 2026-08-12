@@ -34,6 +34,10 @@ pub struct MachineConfig {
     pub name: String,
     /// OCI image to boot, when creating an image-backed machine.
     pub image: Option<String>,
+    /// Environment for the image workload launched at machine start.
+    pub env: Option<Vec<EnvVar>>,
+    /// Working directory for the image workload.
+    pub workdir: Option<String>,
     /// Host directories to mount into the VM.
     pub mounts: Option<Vec<HostMountConfig>>,
     /// Port mappings from host to guest.

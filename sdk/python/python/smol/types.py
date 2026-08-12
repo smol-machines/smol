@@ -100,11 +100,10 @@ class MachineConfig:
     """Start as a live-RAM fork base (cloud) so the machine can be cloned with
     :meth:`Machine.fork`. The golden and its clones are pinned to one node."""
     env: Optional[dict[str, str]] = None
-    """Environment variables for the machine's workload (init commands and the
-    entrypoint), set at create. Cloud target only."""
+    """Environment variables for the image workload launched at create."""
     workdir: Optional[str] = None
-    """Working directory for the machine's workload, set at create. Overrides
-    the image's own workdir. Cloud target only."""
+    """Working directory for the image workload, set at create. Overrides the
+    image's own workdir."""
 
 
 @dataclass
@@ -178,10 +177,8 @@ class ConnectOptions:
 
 @dataclass
 class PortEndpoint:
-    """An authenticated way to reach a PUBLISHED guest port through the control
-    plane's connect bridge — no tunnel, no public exposure. Returned by
-    :meth:`Machine.endpoint`. Plug ``ws_url`` into a WebSocket client or
-    ``http_url`` into an HTTP client, sending ``headers`` so it authenticates."""
+    """A way to reach a PUBLISHED guest port. Local endpoints use the current
+    localhost host-port mapping; cloud endpoints use the authenticated bridge."""
 
     http_url: str
     """``https://…/v1/machines/:id/connect/:port[/path]`` — for HTTP requests."""

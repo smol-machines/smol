@@ -125,11 +125,10 @@ export interface MachineConfig {
   /** Start as a live-RAM fork base (cloud) so the machine can be cloned with
    *  `Machine.fork`. The golden and its clones are pinned to one node. */
   forkable?: boolean;
-  /** Environment variables for the machine's workload (init commands and the
-   *  entrypoint), set at create. (cloud) */
+  /** Environment variables for the image workload launched at create. */
   env?: Record<string, string>;
-  /** Working directory for the machine's workload, set at create. Overrides
-   *  the image's own workdir. (cloud) */
+  /** Working directory for the image workload, set at create. Overrides
+   *  the image's own workdir. */
   workdir?: string;
 }
 
@@ -200,10 +199,9 @@ export interface WaitReadyOptions {
   intervalMs?: number;
 }
 
-/** An authenticated way to reach a PUBLISHED guest port through the control
- *  plane's connect bridge — no tunnel, no public exposure. Returned by
- *  `Machine.endpoint(port)`. Plug `wsUrl` into a WebSocket client or `httpUrl`
- *  into `fetch`, passing `headers` so the request authenticates. */
+/** A way to reach a PUBLISHED guest port. Local endpoints use the current
+ *  localhost host-port mapping; cloud endpoints use the authenticated connect
+ *  bridge. */
 export interface PortEndpoint {
   /** `https://…/v1/machines/:id/connect/:port[/path]` — for HTTP requests. */
   httpUrl: string;

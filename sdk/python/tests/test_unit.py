@@ -144,6 +144,17 @@ def test_native_config_omits_image_when_unset():
     assert "image" not in _native_config("m", MachineConfig())
 
 
+def test_native_config_forwards_image_workload_env_and_workdir():
+    cfg = MachineConfig(
+        image="example/service:latest",
+        env={"SESSION": "golden"},
+        workdir="/workspace",
+    )
+    native = _native_config("m", cfg)
+    assert native["env"] == {"SESSION": "golden"}
+    assert native["workdir"] == "/workspace"
+
+
 def test_rollout_adapter_digest_matches_engine_contract():
     with tempfile.TemporaryDirectory() as directory:
         root = Path(directory)

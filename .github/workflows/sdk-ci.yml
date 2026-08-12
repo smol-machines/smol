@@ -119,6 +119,7 @@ jobs:
           unset SMOLVM_BOOT_BINARY SMOLVM_LIB_DIR SMOLVM_AGENT_ROOTFS SMOLVM_AGENT_ROOTFS_TAR LD_LIBRARY_PATH
           bun test/e2e.ts
           bun test/bun-package-e2e.ts
+          bun test/fork-service-e2e.ts
 
   python-check:
     name: Python · unit + cloud-mock

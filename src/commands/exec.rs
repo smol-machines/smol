@@ -6,6 +6,16 @@ use smolvm::agent::{AgentManager, ExecEvent, RunConfig};
 use smolvm::db::SmolvmDb;
 use std::time::Duration;
 
+fn persistent_overlay_owner(
+    machine_name: &str,
+    record: Option<&smolvm::config::VmRecord>,
+) -> String {
+    smolvm::workload::persistent_overlay_owner(
+        machine_name,
+        record.and_then(|record| record.golden.as_deref()),
+    )
+}
+
 /// Windows stand-in for a SIGWINCH stream: `recv()` never completes, so the
 /// terminal-resize select arm stays inert (Windows has no resize signal).
 #[cfg(not(unix))]
@@ -139,6 +149,7 @@ impl ExecCmd {
         // Computed before the streaming branch so streamed execs on an image
         // machine also run in the persistent container overlay (see below).
         let record_image = record.as_ref().and_then(|r| r.image.clone());
+        let overlay_owner = persistent_overlay_owner(&name, record.as_ref());
 
         // Bind each of the machine's mounts into the exec's container:
         // (tag, guest_target, read_only), tag `smolvm{i}` in the VM's virtiofs
@@ -195,7 +206,7 @@ impl ExecCmd {
                     .with_workdir(self.workdir.clone())
                     .with_timeout(timeout)
                     .with_mounts(mount_bindings.clone())
-                    .with_persistent_overlay(Some(name.clone()));
+                    .with_persistent_overlay(Some(overlay_owner.clone()));
                 client.run_streaming_with(config, on_event)?;
             } else {
                 // Bare VM: stream directly against the guest.
@@ -217,7 +228,7 @@ impl ExecCmd {
                     .with_timeout(timeout)
                     .with_tty(self.tty)
                     .with_mounts(mount_bindings.clone())
-                    .with_persistent_overlay(Some(name.clone()));
+                    .with_persistent_overlay(Some(overlay_owner.clone()));
                 let exit_code = client.run_interactive(config)?;
                 manager.detach();
                 std::process::exit(exit_code);
@@ -228,7 +239,7 @@ impl ExecCmd {
                 .with_workdir(self.workdir.clone())
                 .with_timeout(timeout)
                 .with_mounts(mount_bindings)
-                .with_persistent_overlay(Some(name.clone()));
+                .with_persistent_overlay(Some(overlay_owner));
             let (exit_code, stdout, stderr) = client.run_non_interactive(config)?;
             print_and_exit(
                 &manager,
@@ -614,7 +625,7 @@ fn exec_exit_code(result: &serde_json::Value) -> i32 {
 
 #[cfg(test)]
 mod exec_exit_code_tests {
-    use super::exec_exit_code;
+    use super::{exec_exit_code, persistent_overlay_owner};
     use serde_json::json;
 
     #[test]
@@ -630,5 +641,15 @@ mod exec_exit_code_tests {
         // GAP3 fix (was unwrap_or(1), breaking $? on a succeeding command).
         assert_eq!(exec_exit_code(&json!({"stdout": "ok\n"})), 0);
         assert_eq!(exec_exit_code(&json!({})), 0);
+    }
+
+    #[test]
+    fn clone_exec_uses_the_inherited_golden_overlay() {
+        let mut record =
+            smolvm::config::VmRecord::new("clone".into(), 1, 512, vec![], vec![], false);
+        record.golden = Some("golden".into());
+
+        assert_eq!(persistent_overlay_owner("clone", Some(&record)), "golden");
+        assert_eq!(persistent_overlay_owner("ordinary", None), "ordinary");
     }
 }

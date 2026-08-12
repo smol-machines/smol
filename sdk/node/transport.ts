@@ -8,6 +8,7 @@
  */
 
 import { readFileSync } from "node:fs";
+import { createConnection } from "node:net";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import {
@@ -136,6 +137,32 @@ function resolveBatchNames(
   return Array.from({ length: count }, (_, i) => `${prefix}-${i + 1}`);
 }
 
+function localTcpReady(port: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    const socket = createConnection({ host: "127.0.0.1", port });
+    let settled = false;
+    let connected = false;
+    const finish = (ready: boolean) => {
+      if (settled) return;
+      settled = true;
+      socket.destroy();
+      resolve(ready);
+    };
+    socket.setTimeout(250);
+    socket.once("timeout", () => finish(connected));
+    // The host forwarder listens before the guest service does, so a completed
+    // host connect alone is a false-positive: the relay immediately resets it
+    // when nothing is bound in the guest. A connection that remains stable for
+    // this short window proves the guest listener is actually accepting.
+    socket.once("connect", () => {
+      connected = true;
+      socket.setTimeout(100);
+      socket.once("close", () => finish(false));
+    });
+    socket.once("error", () => finish(false));
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Shared helpers
 // ---------------------------------------------------------------------------
@@ -202,6 +229,10 @@ export function toNativeConfig(
   return {
     name,
     image: config.image,
+    env:
+      config.env &&
+      Object.entries(config.env).map(([key, value]) => ({ key, value })),
+    workdir: config.workdir,
     persistent: config.persistent,
     mounts: config.mounts?.map((m) => ({
       source: m.source,
@@ -281,8 +312,15 @@ class LocalTransport implements Transport {
   }
 
   async ready(): Promise<boolean> {
-    // A local machine is created already started; "running" means usable.
-    return (await this.inner.state()) === "running";
+    if ((await this.inner.state()) !== "running") return false;
+    const mappings = this.inner
+      .guestPorts()
+      .map((guest) => this.inner.hostPort(guest));
+    if (mappings.some((host) => host == null)) return false;
+    const ready = await Promise.all(
+      mappings.map((host) => localTcpReady(host as number)),
+    );
+    return ready.every(Boolean);
   }
 
   async readyAt(): Promise<string | null> {
@@ -290,15 +328,33 @@ class LocalTransport implements Transport {
     return null;
   }
 
-  async waitUntilReady(_opts?: WaitReadyOptions): Promise<void> {
-    // Local create()/start() awaits the boot, so the machine is already ready.
+  async waitUntilReady(opts?: WaitReadyOptions): Promise<void> {
+    const timeoutMs = opts?.timeoutMs ?? 120_000;
+    const intervalMs = opts?.intervalMs ?? 1_000;
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() <= deadline) {
+      if (await this.ready()) return;
+      await new Promise((resolve) => setTimeout(resolve, intervalMs));
+    }
+    throw new SmolError(
+      "TIMEOUT",
+      `machine '${this.name}' did not become ready within ${timeoutMs}ms`,
+    );
   }
 
-  endpoint(_port: number, _path?: string): PortEndpoint {
-    throw new NotSupportedError(
-      "endpoint() is a cloud connect-bridge feature; the local target has no " +
-        "control plane. Publish a port and reach it on the host directly.",
-    );
+  endpoint(port: number, path = ""): PortEndpoint {
+    const hostPort = this.inner.hostPort(port);
+    if (hostPort == null) {
+      throw new InvalidConfigError(
+        `guest port ${port} is not published by local machine '${this.name}'`,
+      );
+    }
+    const suffix = path ? `/${path.replace(/^\/+/, "")}` : "";
+    return {
+      httpUrl: `http://127.0.0.1:${hostPort}${suffix}`,
+      wsUrl: `ws://127.0.0.1:${hostPort}${suffix}`,
+      headers: {},
+    };
   }
 
   async url(): Promise<string | null> {
@@ -405,6 +461,7 @@ class LocalTransport implements Transport {
       throw wrapNativeError(e);
     }
     liveLocal.add(this);
+    await this.waitUntilReady();
   }
 
   async delete(): Promise<void> {
@@ -423,10 +480,13 @@ class LocalTransport implements Transport {
       host: p.host,
       guest: p.guest,
     }));
+    let clone: LocalTransport | undefined;
     try {
-      const cloneInner = await this.inner.fork(name, nativePorts);
-      return new LocalTransport(cloneInner); // ctor registers for cleanup
+      clone = new LocalTransport(await this.inner.fork(name, nativePorts));
+      await clone.waitUntilReady();
+      return clone; // ctor registers for cleanup
     } catch (e) {
+      await clone?.delete().catch(() => {});
       throw wrapNativeError(e);
     }
   }
@@ -1279,23 +1339,13 @@ export async function makeTransport(
     return new CloudTransport(cloudConn, name, id);
   }
 
-  // Local embedded engine.
-  // Machine-level env/workdir configure the machine's WORKLOAD (init commands
-  // and the image entrypoint) — a cloud concept; the embedded engine runs no
-  // workload at create, and its create spec has no field for them. Reject
-  // rather than silently drop (mirrors the mounts-on-cloud gate above).
-  if (
-    (config.env && Object.keys(config.env).length) ||
-    config.workdir !== undefined
-  ) {
-    throw new NotSupportedError(
-      "machine-level env/workdir apply to the machine's workload and are cloud-only; " +
-        "on the local target pass { env, workdir } per exec instead.",
-    );
-  }
+  // Local embedded engine. Image machines launch their default workload before
+  // create resolves, with env/workdir applied just like the cloud target.
   const name = config.name ?? generateName();
+  let transport: LocalTransport | undefined;
   try {
     const inner = new (getNapiMachine())(toNativeConfig(name, config));
+    transport = new LocalTransport(inner);
     // A forkable golden boots with memfd-backed guest RAM + a control socket so
     // it can be cloned with Machine.fork (local live-RAM fork).
     if (config.forkable) {
@@ -1303,8 +1353,10 @@ export async function makeTransport(
     } else {
       await inner.start();
     }
-    return new LocalTransport(inner);
+    await transport.waitUntilReady();
+    return transport;
   } catch (e) {
+    await transport?.delete().catch(() => {});
     throw wrapNativeError(e);
   }
 }
@@ -1326,7 +1378,9 @@ export async function connectTransport(
   if (!useCloud) {
     // Local: start-or-reconnect to the named machine via the native engine.
     try {
-      return new LocalTransport(getNapiMachine().connect(id));
+      const transport = new LocalTransport(getNapiMachine().connect(id));
+      await transport.waitUntilReady();
+      return transport;
     } catch (e) {
       throw wrapNativeError(e);
     }

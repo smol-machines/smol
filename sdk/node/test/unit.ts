@@ -90,6 +90,15 @@ check('omits the base image when unset', () => {
   const cfg = toNativeConfig('m', {});
   assert.strictEqual(cfg.image, undefined);
 });
+check('forwards image workload env and workdir to the local engine', () => {
+  const cfg = toNativeConfig('m', {
+    image: 'example/service:latest',
+    env: { SESSION: 'golden' },
+    workdir: '/workspace',
+  });
+  assert.deepStrictEqual(cfg.env, [{ key: 'SESSION', value: 'golden' }]);
+  assert.strictEqual(cfg.workdir, '/workspace');
+});
 
 check('rollout adapter digest matches the engine contract', () => {
   const dir = mkdtempSync(join(tmpdir(), 'smol-rollout-unit-'));
