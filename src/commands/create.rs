@@ -61,6 +61,15 @@ pub struct CreateCmd {
     #[arg(short = 'p', long = "port", value_parser = PortMapping::parse, value_name = "HOST:GUEST")]
     pub port: Vec<PortMapping>,
 
+    /// Attach metadata to the machine (repeatable), e.g.
+    /// `--label owner=ci --label sandbox=agent-7`.
+    ///
+    /// Never interpreted: labels exist so a process managing many machines can
+    /// recognise its own later, instead of encoding that into the name. Read
+    /// them back with `smol machine ls --json`.
+    #[arg(long = "label", value_name = "KEY=VALUE")]
+    pub label: Vec<String>,
+
     /// Enable outbound network access
     #[arg(long)]
     pub net: bool,
@@ -194,6 +203,7 @@ impl CreateCmd {
         record.gpu = if self.gpu { Some(true) } else { None };
         record.gpu_vram_mib = smolvm::data::resources::validate_gpu_vram_mib(self.gpu_vram)
             .map_err(|e| anyhow::anyhow!("--gpu-vram: {}", e))?;
+        record.labels = smolvm::util::parse_labels(&self.label)?;
         record.cuda = self.cuda;
 
         let mut config = SmolvmConfig::load()?;

@@ -74,6 +74,9 @@ pub struct MachineRef {
     pub source: Option<String>,
     pub cpus: Option<u32>,
     pub memory_mib: Option<u32>,
+    /// Caller metadata set with `--label`. Empty for cloud machines, which have
+    /// no equivalent yet.
+    pub labels: std::collections::BTreeMap<String, String>,
 }
 
 impl MachineRef {
@@ -136,6 +139,7 @@ fn list_local() -> Result<Vec<MachineRef>> {
             source: record.image.clone(),
             cpus: Some(record.cpus as u32),
             memory_mib: Some(record.mem),
+            labels: record.labels.clone(),
         })
         .collect())
 }
@@ -178,6 +182,9 @@ fn list_cloud() -> Result<Option<Vec<MachineRef>>> {
                 source: m.source.and_then(|s| s.reference),
                 cpus: m.resources.as_ref().and_then(|r| r.cpus),
                 memory_mib: m.resources.and_then(|r| r.memory_mb),
+                // The cloud API carries no labels yet; empty rather than absent
+                // so the JSON shape is identical for both locations.
+                labels: Default::default(),
             })
             .collect(),
     ))
@@ -434,6 +441,7 @@ mod tests {
             source: None,
             cpus: None,
             memory_mib: None,
+            labels: Default::default(),
         }
     }
 
@@ -549,6 +557,7 @@ mod tests {
             source: None,
             cpus: None,
             memory_mib: None,
+            labels: Default::default(),
         };
         assert_eq!(unnamed.display_name(), "mach-5bb1");
     }

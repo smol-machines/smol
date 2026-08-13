@@ -40,6 +40,9 @@ impl LsCmd {
                         "cpus": m.cpus,
                         "memory_mib": m.memory_mib,
                         "source": m.source,
+                        // Without this labels are write-only: a caller could set
+                        // them and never read them back.
+                        "labels": m.labels,
                     })
                 })
                 .collect();
