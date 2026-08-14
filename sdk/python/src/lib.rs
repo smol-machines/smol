@@ -375,6 +375,7 @@ impl Machine {
             image,
             persistent,
             runtime_managed: false,
+            ..Default::default()
         };
         runtime()
             .map_err(err)?

@@ -90,6 +90,7 @@ impl NapiMachine {
             image: config.image.clone(),
             persistent: config.persistent.unwrap_or(false),
             runtime_managed: false,
+            ..Default::default()
         };
 
         runtime()
