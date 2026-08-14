@@ -22,6 +22,7 @@ pub mod ls;
 pub mod machine;
 pub mod machines;
 pub mod monitor;
+pub mod new;
 pub mod pack;
 pub mod prune;
 pub mod pull;

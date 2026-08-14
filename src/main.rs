@@ -27,6 +27,9 @@ enum Commands {
     /// Run a command in an ephemeral VM (cleaned up after exit)
     Run(commands::run::RunCmd),
 
+    /// Scaffold a new project: app code, Smolfile, and a README (templates: flask, node)
+    New(commands::new::NewCmd),
+
     /// Manage machines: create, start, stop, rm, ls, status, exec, shell, logs, cp, fork
     Machine(commands::machine::MachineCmd),
 
@@ -152,6 +155,7 @@ fn main() {
 
     let result = match cli.command {
         Commands::Run(cmd) => cmd.run(),
+        Commands::New(cmd) => cmd.run(),
         Commands::Machine(cmd) => cmd.run(),
         Commands::File(cmd) => cmd.run(),
         Commands::Pack(cmd) => cmd.run(),
