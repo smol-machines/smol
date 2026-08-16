@@ -145,15 +145,6 @@ impl PackCreateCmd {
                 cpus: 2,
                 memory_mib: 512,
                 network: true,
-                storage_gib: None,
-                overlay_gib: None,
-                allowed_cidrs: None,
-                network_backend: None,
-                gpu: false,
-                gpu_vram_mib: None,
-                rosetta: false,
-                cuda: false,
-                dns: None,
                 ..Default::default()
             },
         )?;

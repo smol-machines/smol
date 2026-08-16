@@ -134,12 +134,10 @@ impl UpCmd {
             } else {
                 Some(allowed_cidrs)
             },
-            network_backend: None,
             gpu,
             gpu_vram_mib,
             rosetta: sf.rosetta.unwrap_or(false),
             cuda,
-            dns: None,
             ..Default::default()
         };
 
