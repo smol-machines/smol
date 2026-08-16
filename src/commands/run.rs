@@ -113,6 +113,7 @@ impl RunCmd {
             rosetta: false,
             cuda: self.cuda,
             dns: None,
+            ..Default::default()
         };
 
         // Resolve the image: a registry reference is pulled in-guest, while a

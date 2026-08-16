@@ -154,6 +154,7 @@ impl PackCreateCmd {
                 rosetta: false,
                 cuda: false,
                 dns: None,
+                ..Default::default()
             },
         )?;
 

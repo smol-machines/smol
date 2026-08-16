@@ -140,6 +140,7 @@ impl UpCmd {
             rosetta: sf.rosetta.unwrap_or(false),
             cuda,
             dns: None,
+            ..Default::default()
         };
 
         // Resolve [auth] for SSH agent
