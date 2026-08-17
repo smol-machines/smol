@@ -212,6 +212,16 @@ class Machine:
         """
         return Machine(self._t.fork(name, ports))
 
+    def branch(self, name: str, ports: Optional[list[PortSpec]] = None) -> "Machine":
+        """Branch a rollback-isolated clone from this checkpoint — the RL/agent
+        name for :meth:`fork`. The branch inherits the checkpoint's warm RAM *and*
+        disk via copy-on-write, explores independently, and is discarded when
+        done; the next branch starts from the same checkpoint, so both memory and
+        filesystem are rolled back for free. Requires this machine to be a
+        checkpoint (``MachineConfig(checkpoint=True)``). Alias of :meth:`fork`.
+        """
+        return self.fork(name, ports)
+
     def fork_batch(
         self,
         count: Optional[int] = None,
@@ -243,6 +253,23 @@ class Machine:
                 count, names=names, name_prefix=name_prefix, ports=ports
             )
         ]
+
+    def branch_batch(
+        self,
+        count: Optional[int] = None,
+        *,
+        names: Optional[list[str]] = None,
+        name_prefix: Optional[str] = None,
+        ports: Optional[list[PortSpec]] = None,
+    ) -> "list[Machine]":
+        """Branch MANY rollback-isolated clones from this checkpoint in one call —
+        the RL/agent name for :meth:`fork_batch` (tree-search fan-out / GRPO group
+        sampling). Each branch is a live-RAM + disk CoW clone of the checkpoint.
+        Alias of :meth:`fork_batch`.
+        """
+        return self.fork_batch(
+            count, names=names, name_prefix=name_prefix, ports=ports
+        )
 
     def assign(
         self,

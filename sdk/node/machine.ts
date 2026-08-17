@@ -69,6 +69,10 @@ export class Machine {
     config: MachineConfig = {},
     conn: ConnectOptions = {},
   ): Promise<Machine> {
+    // `checkpoint: true` is the RL/agent-facing name for `forkable: true` — a
+    // machine you branch rollback-isolated clones from. Normalize it here so
+    // the rest of the stack only ever sees `forkable`.
+    if (config.checkpoint) config = { ...config, forkable: true };
     return new Machine(await makeTransport(config, conn));
   }
 
@@ -241,6 +245,16 @@ export class Machine {
     return new Machine(await this.transport.fork(name, ports));
   }
 
+  /** Branch a rollback-isolated clone from this checkpoint — the RL/agent name
+   *  for `fork()`. The branch inherits the checkpoint's warm RAM *and* disk via
+   *  copy-on-write, explores independently, and is discarded when done; the next
+   *  branch starts from the same checkpoint, so both memory and filesystem are
+   *  rolled back for free. Requires this machine to be a checkpoint
+   *  (`MachineConfig({ checkpoint: true })`). Alias of {@link fork}. */
+  branch(name: string, ports?: PortSpec[]): Promise<Machine> {
+    return this.fork(name, ports);
+  }
+
   /** Fork this forkable machine into MANY clones in one call — the RL fan-out
    *  primitive (GRPO group sampling / eval-task fan-out). Each clone is a live-RAM
    *  CoW fork off this golden, like `fork()`. On the cloud target the batch is
@@ -259,6 +273,19 @@ export class Machine {
   async forkBatch(opts: ForkBatchOptions): Promise<Machine[]> {
     const clones = await this.transport.forkBatch(opts);
     return clones.map((t) => new Machine(t));
+  }
+
+  /** Branch MANY rollback-isolated clones from this checkpoint in one call — the
+   *  RL/agent name for `forkBatch()` (tree-search fan-out / GRPO group sampling).
+   *  Each branch is a live-RAM + disk CoW clone of the checkpoint. Alias of
+   *  {@link forkBatch}.
+   *
+   *  ```ts
+   *  const ckpt = await Machine.create({ image, checkpoint: true });
+   *  const branches = await ckpt.branchBatch({ count: 32, namePrefix: "rollout" });
+   *  ``` */
+  branchBatch(opts: ForkBatchOptions): Promise<Machine[]> {
+    return this.forkBatch(opts);
   }
 
   /** Assign an RL episode: fork + provision a clone of this forkable golden under

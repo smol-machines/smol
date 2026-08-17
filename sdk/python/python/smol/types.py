@@ -99,11 +99,20 @@ class MachineConfig:
     forkable: bool = False
     """Start as a live-RAM fork base (cloud) so the machine can be cloned with
     :meth:`Machine.fork`. The golden and its clones are pinned to one node."""
+    checkpoint: bool = False
+    """RL/agent-facing alias for :attr:`forkable`: mark this machine as a
+    checkpoint you branch rollback-isolated clones from (:meth:`Machine.branch`)."""
     env: Optional[dict[str, str]] = None
     """Environment variables for the image workload launched at create."""
     workdir: Optional[str] = None
     """Working directory for the image workload, set at create. Overrides the
     image's own workdir."""
+
+    def __post_init__(self) -> None:
+        # `checkpoint=True` is the RL/agent name for `forkable=True`; fold it in
+        # so the rest of the stack only ever reads `forkable`.
+        if self.checkpoint:
+            self.forkable = True
 
 
 @dataclass

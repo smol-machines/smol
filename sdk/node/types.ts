@@ -125,6 +125,9 @@ export interface MachineConfig {
   /** Start as a live-RAM fork base (cloud) so the machine can be cloned with
    *  `Machine.fork`. The golden and its clones are pinned to one node. */
   forkable?: boolean;
+  /** RL/agent-facing alias for `forkable`: mark this machine as a checkpoint
+   *  you branch rollback-isolated clones from (`Machine.branch`). */
+  checkpoint?: boolean;
   /** Environment variables for the image workload launched at create. */
   env?: Record<string, string>;
   /** Working directory for the image workload, set at create. Overrides
