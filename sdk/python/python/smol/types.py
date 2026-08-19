@@ -15,6 +15,7 @@ __all__ = [
     "ImageInfo",
     "ConnectOptions",
     "MachineState",
+    "MachineUsageReport",
     "PortEndpoint",
 ]
 
@@ -121,6 +122,13 @@ class ExecOptions:
     workdir: Optional[str] = None
     timeout: Optional[int] = None
     """Timeout in seconds."""
+    output: Optional[Literal["text", "b64", "both"]] = None
+    """Cloud target only: which output encodings the server returns. The default
+    carries both the capped UTF-8 text fields and the byte-exact base64 fields;
+    ``"text"`` or ``"b64"`` halves the response payload by dropping the other
+    family. With ``"text"``, :attr:`ExecResult.stdout_bytes` degrades to the
+    lossy text re-encoded; with ``"b64"``, :attr:`ExecResult.stdout` is empty.
+    Ignored (both families, as before) on older control planes and locally."""
 
 
 @dataclass
@@ -173,6 +181,25 @@ class ImageInfo:
     size: int
     architecture: str
     os: str
+
+
+@dataclass
+class MachineUsageReport:
+    """Per-machine usage + cost report (cloud target). Returned by
+    :meth:`Machine.usage` and ``Machine.delete(include_usage=True)``; usage
+    records survive deletion for 30 days.
+
+    ``usage`` carries the metered totals (``totalUptimeSeconds``, ``cpuHours``,
+    ``memoryGbHours``, ``diskGbHours``, ``egressGb``) and ``cost`` the
+    micro-dollar breakdown (``cpuMicros`` … ``totalMicros``,
+    ``amountDueMicros``), both keyed exactly as the API returns them."""
+
+    machine_id: str
+    from_ts: str
+    """Report window start (RFC 3339) — the current billing period."""
+    to_ts: str
+    usage: dict[str, float]
+    cost: dict[str, int]
 
 
 @dataclass

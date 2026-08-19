@@ -36,6 +36,7 @@ from .types import (
     ExecResult,
     ImageInfo,
     MachineConfig,
+    MachineUsageReport,
     PortEndpoint,
     PortSpec,
 )
@@ -181,9 +182,16 @@ class AsyncMachine:
         counterpart to :meth:`stop`; disk state is preserved across the cycle."""
         await asyncio.to_thread(self._m.start)
 
-    async def delete(self) -> None:
-        """Stop the machine and delete its storage."""
-        await asyncio.to_thread(self._m.delete)
+    async def delete(self, include_usage: bool = False) -> Optional[MachineUsageReport]:
+        """Stop the machine and delete its storage. On the cloud target, pass
+        ``include_usage=True`` to also get the fully settled usage + cost back
+        in one call."""
+        return await asyncio.to_thread(self._m.delete, include_usage)
+
+    async def usage(self) -> MachineUsageReport:
+        """Metered usage + cost for this machine (cloud target); readable up to
+        30 days after deletion."""
+        return await asyncio.to_thread(self._m.usage)
 
     async def fork(self, name: str, ports: Optional[list[PortSpec]] = None) -> "AsyncMachine":
         """Fork this running, forkable machine into a new clone. (cloud/local)"""

@@ -22,6 +22,7 @@ from .types import (
     ExecResult,
     ImageInfo,
     MachineConfig,
+    MachineUsageReport,
     PortEndpoint,
     PortSpec,
 )
@@ -192,9 +193,22 @@ class Machine:
         ``start()`` brings it back with that state intact (cheap pause/resume)."""
         self._t.start()
 
-    def delete(self) -> None:
-        """Stop the machine and delete its storage."""
+    def delete(self, include_usage: bool = False) -> Optional[MachineUsageReport]:
+        """Stop the machine and delete its storage. On the cloud target, pass
+        ``include_usage=True`` to also get the fully settled usage + cost back
+        in one call — the control plane takes a final metering sample before
+        teardown, so nothing accrues after the returned report."""
+        if include_usage:
+            return self._t.delete_with_usage()
         self._t.delete()
+        return None
+
+    def usage(self) -> MachineUsageReport:
+        """Metered usage + cost for this machine (cloud target). Usage records
+        survive deletion for 30 days. CPU/memory accrue via a rollup that
+        samples every few minutes, so a mid-life read is a lower bound; the
+        report is final once the machine stops or is deleted."""
+        return self._t.usage()
 
     def fork(self, name: str, ports: Optional[list[PortSpec]] = None) -> "Machine":
         """Fork this running, forkable machine into a new clone via copy-on-write

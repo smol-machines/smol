@@ -31,6 +31,7 @@ import type {
   ForkBatchOptions,
   ImageInfo,
   MachineConfig,
+  MachineUsageReport,
   PortEndpoint,
   PortSpec,
   WaitReadyOptions,
@@ -76,7 +77,9 @@ export interface RawExec {
  *  (binary-safe, untruncated), fall back to the UTF-8 bytes of the lossy text
  *  when a control predates it or the value is malformed. */
 function decodeExecBytes(b64: unknown, text: string): Uint8Array {
-  if (typeof b64 === "string") {
+  // An empty base64 field alongside non-empty text means the b64 family was
+  // dropped (`?output=text`), not that the output was empty — use the text.
+  if (typeof b64 === "string" && (b64 !== "" || text === "")) {
     try {
       return new Uint8Array(Buffer.from(b64, "base64"));
     } catch {
@@ -105,6 +108,10 @@ export interface Transport {
   stop(): Promise<void>;
   start(): Promise<void>;
   delete(): Promise<void>;
+  /** Cloud only: delete and return the settled usage + cost in one call. */
+  deleteWithUsage(): Promise<MachineUsageReport>;
+  /** Cloud only: metered usage + cost; readable up to 30 days after delete. */
+  usage(): Promise<MachineUsageReport>;
   fork(name: string, ports?: PortSpec[]): Promise<Transport>;
   forkBatch(opts: ForkBatchOptions): Promise<Transport[]>;
   assign(
@@ -473,6 +480,18 @@ class LocalTransport implements Transport {
     }
   }
 
+  async deleteWithUsage(): Promise<MachineUsageReport> {
+    throw new NotSupportedError(
+      "delete({ includeUsage: true }) is a cloud-only metering feature; the local target has no billing.",
+    );
+  }
+
+  async usage(): Promise<MachineUsageReport> {
+    throw new NotSupportedError(
+      "usage() is a cloud-only metering feature; the local target has no billing.",
+    );
+  }
+
   async fork(name: string, ports?: PortSpec[]): Promise<Transport> {
     // Local live-RAM CoW clone via the embedded engine. The golden must have been
     // started forkable (MachineConfig({ forkable: true })).
@@ -828,10 +847,13 @@ class CloudTransport implements Transport {
             opts.timeout * 1000 + CLOUD_EXEC_TIMEOUT_HEADROOM_MS,
           )
         : CLOUD_TIMEOUT_MS;
+    // `?output=` trims the response to one output family (see
+    // ExecOptions.output); older control planes ignore it and send both.
+    const outputQuery = opts?.output ? `?output=${opts.output}` : "";
     const r = await cloudFetch<MachineExecResponse>(
       this.conn,
       "POST",
-      `/v1/machines/${this.id}/exec`,
+      `/v1/machines/${this.id}/exec${outputQuery}`,
       {
         json,
         timeoutMs,
@@ -1019,6 +1041,25 @@ class CloudTransport implements Transport {
 
   async delete(): Promise<void> {
     await cloudFetch(this.conn, "DELETE", `/v1/machines/${this.id}`);
+  }
+
+  async deleteWithUsage(): Promise<MachineUsageReport> {
+    // The control plane takes a synchronous final usage sample before the
+    // teardown, so the returned report is fully settled — no need to wait for
+    // the periodic metering rollup.
+    return await cloudFetch<MachineUsageReport>(
+      this.conn,
+      "DELETE",
+      `/v1/machines/${this.id}?includeUsage=true`,
+    );
+  }
+
+  async usage(): Promise<MachineUsageReport> {
+    return await cloudFetch<MachineUsageReport>(
+      this.conn,
+      "GET",
+      `/v1/machines/${this.id}/usage`,
+    );
   }
 
   async fork(name: string, ports?: PortSpec[]): Promise<Transport> {

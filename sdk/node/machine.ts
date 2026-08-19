@@ -25,6 +25,7 @@ import type {
   ForkBatchOptions,
   ImageInfo,
   MachineConfig,
+  MachineUsageReport,
   PortEndpoint,
   PortSpec,
   WaitReadyOptions,
@@ -226,9 +227,25 @@ export class Machine {
     return this.transport.start();
   }
 
-  /** Stop the machine and delete its storage. */
-  delete(): Promise<void> {
+  /** Stop the machine and delete its storage. On the cloud target, pass
+   *  `{ includeUsage: true }` to also get the fully settled usage + cost back
+   *  in one call — the control plane takes a final metering sample before
+   *  teardown, so nothing accrues after the returned report. */
+  delete(): Promise<void>;
+  delete(opts: { includeUsage: true }): Promise<MachineUsageReport>;
+  delete(opts?: {
+    includeUsage?: boolean;
+  }): Promise<MachineUsageReport | void> {
+    if (opts?.includeUsage) return this.transport.deleteWithUsage();
     return this.transport.delete();
+  }
+
+  /** Metered usage + cost for this machine (cloud target). Usage records
+   *  survive deletion for 30 days. CPU/memory accrue via a rollup that samples
+   *  every few minutes, so a mid-life read is a lower bound; the report is
+   *  final once the machine stops or is deleted. */
+  usage(): Promise<MachineUsageReport> {
+    return this.transport.usage();
   }
 
   /** Fork this running, forkable machine into a new clone via copy-on-write live

@@ -143,6 +143,14 @@ export interface ExecOptions {
   workdir?: string;
   /** Timeout in **seconds**. */
   timeout?: number;
+  /** Cloud target only: which output encodings the server returns. The default
+   *  carries both the capped UTF-8 text fields and the byte-exact base64
+   *  fields; `"text"` or `"b64"` halves the response payload by dropping the
+   *  other family. With `"text"`, `stdoutBytes`/`stderrBytes` degrade to the
+   *  lossy text re-encoded; with `"b64"`, `stdout`/`stderr` are empty strings.
+   *  Ignored (both families, as before) on older control planes and on the
+   *  local target. */
+  output?: "text" | "b64" | "both";
 }
 
 /** Result of a command execution. */
@@ -212,6 +220,38 @@ export interface PortEndpoint {
   wsUrl: string;
   /** Headers to send (the tenant Bearer token). */
   headers: Record<string, string>;
+}
+
+/** Metered usage totals for one machine over the report window. */
+export interface MachineUsageTotals {
+  totalUptimeSeconds: number;
+  cpuHours: number;
+  memoryGbHours: number;
+  diskGbHours: number;
+  egressGb: number;
+}
+
+/** Cost breakdown for one machine, in micro-dollars (1e-6 USD). */
+export interface MachineCostBreakdown {
+  cpuMicros: number;
+  memoryMicros: number;
+  diskMicros: number;
+  egressMicros: number;
+  baseMicros: number;
+  totalMicros: number;
+  amountDueMicros: number;
+}
+
+/** Per-machine usage + cost report (cloud target). Returned by
+ *  `Machine.usage()` and `Machine.delete({ includeUsage: true })`; usage
+ *  records survive deletion for 30 days. */
+export interface MachineUsageReport {
+  machineId: string;
+  /** Report window (RFC 3339). Starts at the current billing period. */
+  from: string;
+  to: string;
+  usage: MachineUsageTotals;
+  cost: MachineCostBreakdown;
 }
 
 /** Selects and configures the backend. Local (embedded) is the default. */

@@ -32,6 +32,7 @@ from .types import (
     ExecResult,
     ImageInfo,
     MachineConfig,
+    MachineUsageReport,
     PortEndpoint,
     PortSpec,
 )
@@ -54,12 +55,25 @@ def _decode_exec_bytes(raw: dict[str, Any], b64_key: str, text: str) -> bytes:
     (binary-safe, untruncated); falls back to the UTF-8 bytes of the lossy text
     when a control predates it or the field is malformed."""
     b64 = raw.get(b64_key)
-    if isinstance(b64, str):
+    # An empty base64 field alongside non-empty text means the b64 family was
+    # dropped (`?output=text`), not that the output was empty — use the text.
+    if isinstance(b64, str) and (b64 or not text):
         try:
             return base64.b64decode(b64, validate=True)
         except Exception:  # noqa: BLE001 - any decode failure → fall back to text
             pass
     return text.encode("utf-8", "replace")
+
+
+def _usage_report_from(r: dict[str, Any], machine_id: str) -> MachineUsageReport:
+    """Shape a MachineUsageResponse body into the SDK dataclass."""
+    return MachineUsageReport(
+        machine_id=str(r.get("machineId", machine_id)),
+        from_ts=str(r.get("from", "")),
+        to_ts=str(r.get("to", "")),
+        usage=dict(r.get("usage") or {}),
+        cost=dict(r.get("cost") or {}),
+    )
 
 
 class Transport(Protocol):
@@ -91,6 +105,8 @@ class Transport(Protocol):
     def stop(self) -> None: ...
     def start(self) -> None: ...
     def delete(self) -> None: ...
+    def delete_with_usage(self) -> MachineUsageReport: ...
+    def usage(self) -> MachineUsageReport: ...
     def fork(self, name: str, ports: Optional[list[PortSpec]] = None) -> "Transport": ...
 
     def fork_batch(
@@ -407,6 +423,16 @@ class LocalTransport:
         except Exception as e:  # noqa: BLE001
             raise wrap_native_error(e) from e
 
+    def delete_with_usage(self) -> MachineUsageReport:
+        raise NotSupportedError(
+            "delete(include_usage=True) is a cloud-only metering feature; the local target has no billing."
+        )
+
+    def usage(self) -> MachineUsageReport:
+        raise NotSupportedError(
+            "usage() is a cloud-only metering feature; the local target has no billing."
+        )
+
     def fork(self, name: str, ports: Optional[list[PortSpec]] = None) -> "Transport":
         # Local live-RAM CoW clone via the embedded engine. The golden must have
         # been started forkable (MachineConfig(forkable=True)).
@@ -578,8 +604,16 @@ class CloudTransport:
         http_timeout = CLOUD_TIMEOUT_S
         if opts and opts.timeout is not None:
             http_timeout = max(CLOUD_TIMEOUT_S, opts.timeout + CLOUD_EXEC_TIMEOUT_HEADROOM_S)
+        # `?output=` trims the response to one output family (see
+        # ExecOptions.output); older control planes ignore it and send both.
+        output_query = f"?output={opts.output}" if opts and opts.output else ""
         r = _cloud_fetch(
-            self._base, self._key, "POST", f"/v1/machines/{self._id}/exec", json_body=body, timeout=http_timeout
+            self._base,
+            self._key,
+            "POST",
+            f"/v1/machines/{self._id}/exec{output_query}",
+            json_body=body,
+            timeout=http_timeout,
         )
         r = r or {}
         stdout = str(r.get("stdout", ""))
@@ -716,6 +750,22 @@ class CloudTransport:
 
     def delete(self) -> None:
         _cloud_fetch(self._base, self._key, "DELETE", f"/v1/machines/{self._id}")
+
+    def delete_with_usage(self) -> MachineUsageReport:
+        # The control plane takes a synchronous final usage sample before the
+        # teardown, so the returned report is fully settled — no need to wait
+        # for the periodic metering rollup.
+        r = (
+            _cloud_fetch(
+                self._base, self._key, "DELETE", f"/v1/machines/{self._id}?includeUsage=true"
+            )
+            or {}
+        )
+        return _usage_report_from(r, self._id)
+
+    def usage(self) -> MachineUsageReport:
+        r = _cloud_fetch(self._base, self._key, "GET", f"/v1/machines/{self._id}/usage") or {}
+        return _usage_report_from(r, self._id)
 
     def fork(self, name: str, ports: Optional[list[PortSpec]] = None) -> "CloudTransport":
         # Live-RAM CoW clone on the golden's node. The control plane returns the
