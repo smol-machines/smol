@@ -182,6 +182,17 @@ jobs:
           LIBKRUN_BUNDLE: ${{ matrix.engine_lib }}
           SMOLVM_LIB_DIR: ${{ matrix.engine_lib }}
         run: |
+          # aarch64-linux only: rustc emits `-Wl,--fix-cortex-a53-843419`, which
+          # zig 0.13's driver rejects and which breaks napi's `--zig` link. Shim
+          # `zig` ahead on PATH to strip that one flag, keeping napi's own zig
+          # handling (CC/target translation + the glibc-2.34 pin) intact.
+          if [ "$RUNNER_OS" = "Linux" ] && [ "${{ matrix.target }}" = "aarch64-unknown-linux-gnu" ]; then
+            export REAL_ZIG="$(command -v zig)"
+            mkdir -p "$RUNNER_TEMP/zigshim"
+            cp "$GITHUB_WORKSPACE/sdk/node/scripts/zig-nofix" "$RUNNER_TEMP/zigshim/zig"
+            chmod +x "$RUNNER_TEMP/zigshim/zig"
+            export PATH="$RUNNER_TEMP/zigshim:$PATH"
+          fi
           if [ "$RUNNER_OS" = "Linux" ]; then
             npm run build:native -- --target ${{ matrix.target }} --zig --zig-abi-suffix=2.34
           else
