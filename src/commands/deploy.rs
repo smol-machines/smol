@@ -112,12 +112,18 @@ impl DeployCmd {
         let push_inputs = if self.file.is_some() {
             let parsed = smolvm::registry::Reference::parse(&reference)
                 .map_err(|e| anyhow::anyhow!("{}", e))?;
-            let settings = smolvm::SmolSettings::load()?;
-            let client = super::common::build_registry_client(
+            let mut settings = smolvm::SmolSettings::load()?;
+            let built = super::common::build_registry_client(
                 &parsed.registry,
                 &settings.machines,
                 &settings.cloud,
             )?;
+            // See push.rs: a silent refresh here invalidates the snapshot the
+            // namespace lookup below would otherwise read.
+            if let Some(refreshed) = built.refreshed_settings {
+                settings = refreshed;
+            }
+            let client = built.client;
             let repo = super::common::namespaced_repo(
                 &parsed.registry,
                 &parsed.repository(),

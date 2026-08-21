@@ -31,12 +31,18 @@ impl PullCmd {
             super::common::require_ref(self.reference.as_deref(), self.ref_flag.as_deref())?;
         let parsed =
             smolvm::registry::Reference::parse(reference).map_err(|e| anyhow::anyhow!("{}", e))?;
-        let settings = smolvm::SmolSettings::load()?;
-        let client = super::common::build_registry_client(
+        let mut settings = smolvm::SmolSettings::load()?;
+        let built = super::common::build_registry_client(
             &parsed.registry,
             &settings.machines,
             &settings.cloud,
         )?;
+        // See push.rs: a silent refresh here invalidates the snapshot the
+        // namespace lookup below would otherwise read.
+        if let Some(refreshed) = built.refreshed_settings {
+            settings = refreshed;
+        }
+        let client = built.client;
 
         // Scope a bare repo under the caller's tenant on the smolmachines
         // registry, matching `pack push` — otherwise a short ref pushed as
