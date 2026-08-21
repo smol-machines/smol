@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+# `zig` shim for the aarch64-linux Node addon build.
+#
+# napi-rs's `--zig` sets up zig as the C compiler and linker (handling target
+# translation and the glibc-2.34 pin correctly). The only problem is that rustc
+# emits `-Wl,--fix-cortex-a53-843419` (a Cortex-A53 erratum workaround) which
+# zig 0.13's driver rejects with "unsupported linker arg", failing the link.
+#
+# This shim strips that one flag from every zig invocation and forwards to the
+# real zig (path in $REAL_ZIG), so napi's own zig handling keeps working. It is
+# placed ahead of the real zig on PATH only for the arm64-linux addon build.
+set -euo pipefail
+args=()
+for a in "$@"; do
+  [ "$a" = "-Wl,--fix-cortex-a53-843419" ] && continue
+  args+=("$a")
+done
+exec "${REAL_ZIG:?REAL_ZIG must point at the real zig}" "${args[@]}"

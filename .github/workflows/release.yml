@@ -182,15 +182,18 @@ jobs:
           LIBKRUN_BUNDLE: ${{ matrix.engine_lib }}
           SMOLVM_LIB_DIR: ${{ matrix.engine_lib }}
         run: |
+          # aarch64-linux only: rustc emits `-Wl,--fix-cortex-a53-843419`, which
+          # zig 0.13's driver rejects and which breaks napi's `--zig` link. Shim
+          # `zig` ahead on PATH to strip that one flag, keeping napi's own zig
+          # handling (CC/target translation + the glibc-2.34 pin) intact.
           if [ "$RUNNER_OS" = "Linux" ] && [ "${{ matrix.target }}" = "aarch64-unknown-linux-gnu" ]; then
-            # napi's raw `--zig` (zig 0.13) rejects rustc's aarch64 erratum flag
-            # `-Wl,--fix-cortex-a53-843419`. Link through a wrapper that drops it
-            # and still pins glibc 2.34 via zig, so the addon loads on glibc 2.34+.
-            chmod +x "$GITHUB_WORKSPACE/sdk/node/scripts/zigcc-nofix.sh"
-            export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER="$GITHUB_WORKSPACE/sdk/node/scripts/zigcc-nofix.sh"
-            export CC_aarch64_unknown_linux_gnu="zig cc -target aarch64-linux-gnu.2.34"
-            npm run build:native -- --target ${{ matrix.target }}
-          elif [ "$RUNNER_OS" = "Linux" ]; then
+            export REAL_ZIG="$(command -v zig)"
+            mkdir -p "$RUNNER_TEMP/zigshim"
+            cp "$GITHUB_WORKSPACE/sdk/node/scripts/zig-nofix" "$RUNNER_TEMP/zigshim/zig"
+            chmod +x "$RUNNER_TEMP/zigshim/zig"
+            export PATH="$RUNNER_TEMP/zigshim:$PATH"
+          fi
+          if [ "$RUNNER_OS" = "Linux" ]; then
             npm run build:native -- --target ${{ matrix.target }} --zig --zig-abi-suffix=2.34
           else
             npm run build:native -- --target ${{ matrix.target }}
