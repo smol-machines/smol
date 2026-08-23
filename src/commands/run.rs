@@ -84,21 +84,8 @@ impl RunCmd {
         // them off before the host-directory parse, which would reject an
         // `s3://` source as a missing directory.
         let (host_volume_specs, remote_volumes) = smolvm::remote_volume::split_specs(&self.volume)?;
-        // `run` is ephemeral and boots the default machine, so it has no
-        // persistent overlay — and the engine only mounts remote volumes into
-        // a container it establishes for one. Refuse rather than start with the
-        // volume silently missing, which would let a workload read an empty
-        // directory and produce wrong results.
-        if !remote_volumes.is_empty() {
-            anyhow::bail!(
-                "remote volumes are not supported by ephemeral `run` yet; \
-                 create a machine instead: smol create --image <IMAGE> --net -v {}",
-                self.volume
-                    .iter()
-                    .find(|v| v.starts_with("s3://"))
-                    .cloned()
-                    .unwrap_or_default()
-            );
+        if !remote_volumes.is_empty() && !self.net {
+            anyhow::bail!("remote volumes need network access to reach the bucket: add --net");
         }
         let mounts = HostMount::parse(&host_volume_specs)?;
         // Virtiofs binding form the agent uses to bind each mount into the
@@ -219,6 +206,9 @@ impl RunCmd {
         };
 
         let env = smolvm::util::parse_env_list(&self.env);
+        // Credentials and endpoint come from the workload's own env, the same
+        // place every AWS SDK reads them.
+        let s3_volumes = smolvm::remote_volume::to_s3_volumes(&remote_volumes, &env);
 
         // Execute
         let exit_code = if let Some(ref img) = resolved_image {
@@ -227,13 +217,15 @@ impl RunCmd {
                     .with_env(env)
                     .with_workdir(self.workdir)
                     .with_mounts(mount_bindings.clone())
-                    .with_tty(self.tty);
+                    .with_tty(self.tty)
+                    .with_s3_volumes(s3_volumes.clone());
                 client.run_interactive(config)?
             } else {
                 let config = RunConfig::new(img, command)
                     .with_env(env)
                     .with_workdir(self.workdir)
-                    .with_mounts(mount_bindings.clone());
+                    .with_mounts(mount_bindings.clone())
+                    .with_s3_volumes(s3_volumes.clone());
                 let (exit_code, stdout, stderr) = client.run_non_interactive(config)?;
                 if !stdout.is_empty() {
                     print!("{}", String::from_utf8_lossy(&stdout));
