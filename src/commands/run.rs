@@ -80,7 +80,27 @@ impl RunCmd {
             );
         }
 
-        let mounts = HostMount::parse(&self.volume)?;
+        // Remote volumes are mounted inside the guest by the agent, so peel
+        // them off before the host-directory parse, which would reject an
+        // `s3://` source as a missing directory.
+        let (host_volume_specs, remote_volumes) = smolvm::remote_volume::split_specs(&self.volume)?;
+        // `run` is ephemeral and boots the default machine, so it has no
+        // persistent overlay — and the engine only mounts remote volumes into
+        // a container it establishes for one. Refuse rather than start with the
+        // volume silently missing, which would let a workload read an empty
+        // directory and produce wrong results.
+        if !remote_volumes.is_empty() {
+            anyhow::bail!(
+                "remote volumes are not supported by ephemeral `run` yet; \
+                 create a machine instead: smol create --image <IMAGE> --net -v {}",
+                self.volume
+                    .iter()
+                    .find(|v| v.starts_with("s3://"))
+                    .cloned()
+                    .unwrap_or_default()
+            );
+        }
+        let mounts = HostMount::parse(&host_volume_specs)?;
         // Virtiofs binding form the agent uses to bind each mount into the
         // container: (tag, guest_target, read_only). The tag is `smolvm{i}` and
         // must match the virtiofs device order libkrun exposes at VM start, i.e.

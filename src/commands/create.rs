@@ -143,8 +143,12 @@ impl CreateCmd {
             .name
             .unwrap_or_else(smolvm::util::generate_machine_name);
 
+        // Remote volumes are mounted inside the guest by the agent, so peel
+        // them off before the host-directory parse, which would reject an
+        // `s3://` source as a missing directory.
+        let (host_volume_specs, remote_volumes) = smolvm::remote_volume::split_specs(&self.volume)?;
         let mounts: Vec<(String, String, bool)> =
-            smolvm::data::storage::HostMount::parse(&self.volume)?
+            smolvm::data::storage::HostMount::parse(&host_volume_specs)?
                 .into_iter()
                 .map(|m| m.to_storage_tuple())
                 .collect();
@@ -183,6 +187,9 @@ impl CreateCmd {
             record.dns_filter_hosts = Some(self.allow_host.clone());
         }
         record.image = self.image;
+        // The engine mounts these itself on every start, so persisting them is
+        // all that is needed for the volume to come back after a stop.
+        record.remote_volumes = remote_volumes;
         // CLI trailing args become the machine's workload (entrypoint cleared
         // so they win over the image default, matching the engine).
         if !self.command.is_empty() {
@@ -263,8 +270,12 @@ impl CreateCmd {
                 })?;
         }
 
+        // Remote volumes are mounted inside the guest by the agent, so peel
+        // them off before the host-directory parse, which would reject an
+        // `s3://` source as a missing directory.
+        let (host_volume_specs, remote_volumes) = smolvm::remote_volume::split_specs(&self.volume)?;
         let mounts: Vec<(String, String, bool)> =
-            smolvm::data::storage::HostMount::parse(&self.volume)?
+            smolvm::data::storage::HostMount::parse(&host_volume_specs)?
                 .into_iter()
                 .map(|m| m.to_storage_tuple())
                 .collect();
@@ -281,6 +292,7 @@ impl CreateCmd {
             self.net || manifest.network,
         );
         record.image = Some(manifest.image);
+        record.remote_volumes = remote_volumes;
         // CLI trailing args override the artifact's baked (entrypoint, cmd),
         // matching the engine's precedence.
         if self.command.is_empty() {

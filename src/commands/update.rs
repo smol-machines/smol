@@ -101,7 +101,12 @@ impl UpdateCmd {
             }
         }
 
-        let new_mounts = HostMount::parse(&self.volume)?;
+        // Remote volumes are mounted inside the guest by the agent, so peel
+        // them off before the host-directory parse, which would reject an
+        // `s3://` source as a missing directory.
+        let (host_volume_specs, new_remote_volumes) =
+            smolvm::remote_volume::split_specs(&self.volume)?;
+        let new_mounts = HostMount::parse(&host_volume_specs)?;
 
         // Reject duplicate host ports after the proposed changes.
         {
@@ -161,6 +166,21 @@ impl UpdateCmd {
                 });
                 if r.mounts.len() < before {
                     changes.push(format!("  removed volume: {rm}"));
+                }
+            }
+            for rv in &new_remote_volumes {
+                if !r
+                    .remote_volumes
+                    .iter()
+                    .any(|e| e.source == rv.source && e.target == rv.target)
+                {
+                    changes.push(format!(
+                        "  added remote volume: {}:{}{}",
+                        rv.source,
+                        rv.target,
+                        if rv.read_only { ":ro" } else { "" }
+                    ));
+                    r.remote_volumes.push(rv.clone());
                 }
             }
             for m in &new_mounts {

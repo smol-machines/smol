@@ -88,7 +88,11 @@ impl UpCmd {
             &sf.init
         };
 
-        let mounts = HostMount::parse(mounts_strs)?;
+        // Remote volumes are mounted inside the guest by the agent, so peel
+        // them off before the host-directory parse, which would reject an
+        // `s3://` source as a missing directory.
+        let (host_volume_specs, remote_volumes) = smolvm::remote_volume::split_specs(mounts_strs)?;
+        let mounts = HostMount::parse(&host_volume_specs)?;
         let ports: Vec<PortMapping> = port_strs
             .iter()
             .map(|s| PortMapping::parse(s).map_err(|e| anyhow::anyhow!("{}", e)))
@@ -205,6 +209,10 @@ impl UpCmd {
             record.overlay_gb = sf.overlay;
             record.ssh_agent = ssh_agent;
             record.dns_filter_hosts = dns_filter_hosts.clone();
+            // The engine mounts these itself on every start, so persisting them
+            // is all that is needed for the volume to come back after a stop.
+            record.remote_volumes = remote_volumes.clone();
+            record.validate_remote_volumes()?;
             // Persist the Smolfile's [secrets] so they are resolved and injected
             // into the machine's execs (matching the engine's Smolfile path).
             // Without this the declared secrets are parsed then silently dropped,
@@ -311,6 +319,10 @@ impl UpCmd {
                         .with_env(env.clone())
                         .with_workdir(workdir.clone())
                         .with_mounts(mount_bindings.clone())
+                        .with_s3_volumes(smolvm::remote_volume::to_s3_volumes(
+                            &remote_volumes,
+                            &env,
+                        ))
                         .with_persistent_overlay(Some(name.clone()));
                     client.run_non_interactive(config)?
                 } else {
