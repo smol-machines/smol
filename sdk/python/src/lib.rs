@@ -300,6 +300,7 @@ impl Machine {
         // → engine `HostMount` (mirrors smol-node's `HostMount::try_from`).
         // `HostMount::new` validates the paths, so config errors surface here.
         let mut mounts: Vec<smolvm::agent::HostMount> = Vec::new();
+        let mut remote_volumes: Vec<smolvm::remote_volume::RemoteVolume> = Vec::new();
         if let Some(m) = config.get_item("mounts")? {
             if !m.is_none() {
                 for item in m.iter()? {
@@ -321,9 +322,21 @@ impl Machine {
                         Some(v) if !v.is_none() => v.extract()?,
                         _ => true,
                     };
-                    mounts.push(
-                        smolvm::agent::HostMount::new(&source, &target, read_only).map_err(err)?,
-                    );
+                    // An `s3://` source is mounted inside the guest by the
+                    // agent, not bind-mounted from the host, so it must not go
+                    // through the host-directory validation below — which would
+                    // reject it as a missing directory.
+                    if smolvm::remote_volume::is_remote_source(&source) {
+                        remote_volumes.push(
+                            smolvm::remote_volume::from_parts(&source, &target, read_only)
+                                .map_err(err)?,
+                        );
+                    } else {
+                        mounts.push(
+                            smolvm::agent::HostMount::new(&source, &target, read_only)
+                                .map_err(err)?,
+                        );
+                    }
                 }
             }
         }
@@ -375,6 +388,7 @@ impl Machine {
             image,
             persistent,
             runtime_managed: false,
+            remote_volumes,
             ..Default::default()
         };
         runtime()

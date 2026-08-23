@@ -47,17 +47,31 @@ impl NapiMachine {
     /// Create a new machine. Does not start the VM yet — call `start()`.
     #[napi(constructor)]
     pub fn new(config: MachineConfig) -> napi::Result<Self> {
-        let mounts = config
+        // An `s3://` source is mounted inside the guest by the agent, not
+        // bind-mounted from the host, so route it to the remote-volume list
+        // instead of the host-directory parse (which would reject it as a
+        // missing directory).
+        let (remote_specs, host_specs): (Vec<_>, Vec<_>) = config
             .mounts
             .as_ref()
-            .map(|ms| {
-                ms.iter()
-                    .map(smolvm::agent::HostMount::try_from)
-                    .collect::<smolvm::Result<_>>()
-            })
-            .transpose()
-            .into_napi()?
+            .map(|ms| ms.iter().partition(|m| smolvm::remote_volume::is_remote_source(&m.source)))
             .unwrap_or_default();
+        let mounts: Vec<smolvm::agent::HostMount> = host_specs
+            .into_iter()
+            .map(smolvm::agent::HostMount::try_from)
+            .collect::<smolvm::Result<_>>()
+            .into_napi()?;
+        let remote_volumes: Vec<_> = remote_specs
+            .into_iter()
+            .map(|m| {
+                smolvm::remote_volume::from_parts(
+                    &m.source,
+                    &m.target,
+                    m.read_only.unwrap_or(false),
+                )
+            })
+            .collect::<smolvm::Result<_>>()
+            .into_napi()?;
 
         let ports = config
             .ports
@@ -90,6 +104,7 @@ impl NapiMachine {
             image: config.image.clone(),
             persistent: config.persistent.unwrap_or(false),
             runtime_managed: false,
+            remote_volumes,
             ..Default::default()
         };
 
