@@ -50,6 +50,7 @@ export interface NativeMachineConfig {
   ports?: NativePortMapping[] | undefined;
   resources?: NativeResources | undefined;
   persistent?: boolean | undefined;
+  forkable?: boolean | undefined;
 }
 
 export interface NativeExecResult {

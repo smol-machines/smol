@@ -90,6 +90,10 @@ check('omits the base image when unset', () => {
   const cfg = toNativeConfig('m', {});
   assert.strictEqual(cfg.image, undefined);
 });
+check('forwards forkable lifecycle to the native machine', () => {
+  assert.strictEqual(toNativeConfig('m', { forkable: true }).forkable, true);
+  assert.strictEqual(toNativeConfig('m', {}).forkable, undefined);
+});
 check('forwards image workload env and workdir to the local engine', () => {
   const cfg = toNativeConfig('m', {
     image: 'example/service:latest',

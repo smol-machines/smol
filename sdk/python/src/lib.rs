@@ -244,6 +244,10 @@ impl Machine {
             Some(v) if !v.is_none() => v.extract()?,
             _ => false,
         };
+        let forkable: bool = match config.get_item("forkable")? {
+            Some(v) if !v.is_none() => v.extract()?,
+            _ => false,
+        };
         let image: Option<String> = match config.get_item("image")? {
             Some(v) if !v.is_none() => Some(v.extract()?),
             _ => None,
@@ -407,6 +411,7 @@ impl Machine {
             command,
             allowed_hosts,
             persistent,
+            forkable,
             runtime_managed: false,
             remote_volumes,
             ..Default::default()
@@ -423,7 +428,10 @@ impl Machine {
     /// backs the SDK's local `Machine.connect()`.
     #[staticmethod]
     fn connect(name: String) -> PyResult<Self> {
-        runtime().map_err(err)?.start_machine(&name).map_err(err)?;
+        runtime()
+            .map_err(err)?
+            .connect_or_start_machine(&name)
+            .map_err(err)?;
         Ok(Self { name })
     }
 

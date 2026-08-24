@@ -180,7 +180,11 @@ def _native_exec_options(opts: Optional[ExecOptions]) -> Optional[dict]:
 
 
 def _native_config(name: str, config: MachineConfig) -> dict:
-    cfg: dict[str, Any] = {"name": name, "persistent": config.persistent}
+    cfg: dict[str, Any] = {
+        "name": name,
+        "persistent": config.persistent,
+        "forkable": config.forkable,
+    }
     if config.image is not None:
         cfg["image"] = config.image
     if config.command is not None:
@@ -263,9 +267,11 @@ def _register_local(t: "LocalTransport") -> None:
 
 
 class LocalTransport:
-    def __init__(self, inner: Any) -> None:
+    def __init__(self, inner: Any, *, cleanup_on_exit: bool = True) -> None:
         self._inner = inner
-        _register_local(self)
+        self._cleanup_on_exit = cleanup_on_exit
+        if cleanup_on_exit:
+            _register_local(self)
 
     @property
     def name(self) -> str:
@@ -419,7 +425,8 @@ class LocalTransport:
             self._inner.start()
         except Exception as e:  # noqa: BLE001
             raise wrap_native_error(e) from e
-        _live_local.add(self)
+        if self._cleanup_on_exit:
+            _live_local.add(self)
         self.wait_until_ready()
 
     def delete(self) -> None:
@@ -1347,8 +1354,16 @@ def connect_transport(machine_id: str, conn: Optional[ConnectOptions] = None) ->
         # Local: start-or-reconnect to the named machine via the native engine.
         native = _load_native()
         try:
-            transport = LocalTransport(native.Machine.connect(machine_id))
-            transport.wait_until_ready()
+            # Connecting borrows an existing machine. The caller may still
+            # stop/delete it explicitly, but interpreter shutdown must not stop
+            # a durable checkpoint owned by another process or controller.
+            transport = LocalTransport(
+                native.Machine.connect(machine_id), cleanup_on_exit=False
+            )
+            # A frozen checkpoint is intentionally not agent-ready; it remains
+            # connectable so callers can fork its retained snapshot.
+            if transport.state() != "frozen":
+                transport.wait_until_ready()
             return transport
         except Exception as e:  # noqa: BLE001
             raise wrap_native_error(e) from e

@@ -38,6 +38,20 @@ from .types import ConnectOptions, ExecOptions, MachineConfig, PortSpec, Resourc
 
 _RUNTIME_RETURN_CODE = 125
 _PROBE_TEXT = "smol-sandbox-ready"
+_DEFAULT_PROBE_COMMAND = f"printf {_PROBE_TEXT}"
+_SHELL_PROBE = (
+    "if [ -x /bin/bash ]; then printf /bin/bash; else printf /bin/sh; fi"
+)
+_SHELL_MARKER = "__SMOL_EXEC_SHELL__="
+_SHELL_AND_PROBE = (
+    'if [ -x /bin/bash ]; then shell=/bin/bash; else shell=/bin/sh; fi; '
+    f'printf "{_SHELL_MARKER}%s\\n" "$shell"; exec "$shell" -lc "$1"'
+)
+_SHELL_AND_USER_EXEC = (
+    'if [ -x /bin/bash ]; then shell=/bin/bash; else shell=/bin/sh; fi; '
+    f'printf "{_SHELL_MARKER}%s\\n" "$shell"; '
+    'exec su -s "$shell" "$2" -c "$1"'
+)
 _TTL_DELETE_RETRIES = 3
 _ALLOWED_PROVIDER_OPTIONS = {
     "allow_cidrs",
@@ -62,6 +76,7 @@ class _SmolSandbox:
     env: dict[str, str]
     workdir: str | None
     ports: tuple[int, ...]
+    shell: str | None
     episode: AsyncEpisode | None = None
     ttl_task: asyncio.Task[None] | None = None
     closed: bool = False
@@ -351,7 +366,7 @@ class SmolProvider:
         default_image: str | None = None,
         checkpoints: Mapping[str, str | Mapping[str, Any]] | None = None,
         gpu_mode: str = "cuda",
-        probe_command: str | None = f"printf {_PROBE_TEXT}",
+        probe_command: str | None = _DEFAULT_PROBE_COMMAND,
         probe_expected_stdout: str | None = _PROBE_TEXT,
         probe_timeout_s: float = 30.0,
         fork_batch_window_ms: float = 2.0,
@@ -545,18 +560,38 @@ class SmolProvider:
                     ),
                     self._connect,
                 )
+            verify = not self._options(spec).get("skip_health_check", False)
+            # A local/cloud checkpoint fork has already passed the engine's
+            # clone readiness gate. Defer the default no-op probe and shell
+            # selection into the first real command so sandbox startup remains
+            # the fork latency instead of fork + an extra container exec.
+            defer_probe = not verify or self._probe_command is None or (
+                checkpoint is not None
+                and self._probe_command == _DEFAULT_PROBE_COMMAND
+                and self._probe_expected_stdout == _PROBE_TEXT
+            )
+            shell = (
+                None
+                if defer_probe
+                else await self._select_shell_and_verify(
+                    machine,
+                    machine.id,
+                    verify=True,
+                    env=dict(spec.env),
+                    workdir=spec.workdir,
+                )
+            )
             raw = _SmolSandbox(
                 machine=machine,
                 env=dict(spec.env),
                 workdir=spec.workdir,
                 ports=tuple(spec.ports),
+                shell=shell,
                 episode=episode,
             )
             handle = SandboxHandle(
                 sandbox_id=machine.id, provider_name=self.name, raw=raw
             )
-            if not self._options(spec).get("skip_health_check", False):
-                await self._verify(handle)
             if ttl_s is not None and self._target == "local":
                 raw.ttl_task = asyncio.create_task(self._expire(handle, ttl_s))
             self._sandboxes[handle.sandbox_id] = raw
@@ -586,23 +621,67 @@ class SmolProvider:
             with contextlib.suppress(Exception):
                 await machine.delete()
 
-    async def _verify(self, handle: SandboxHandle) -> None:
-        if self._probe_command is None:
-            return
-        result = await self.exec(
-            handle, self._probe_command, timeout_s=self._probe_timeout_s
-        )
-        if result.return_code != 0 or (
-            self._probe_expected_stdout is not None
-            and self._probe_expected_stdout not in (result.stdout or "")
+    async def _select_shell_and_verify(
+        self,
+        machine: AsyncMachine,
+        machine_id: str,
+        *,
+        verify: bool,
+        env: dict[str, str] | None = None,
+        workdir: str | None = None,
+    ) -> str:
+        """Select the image shell and perform readiness in one container exec.
+
+        The first exec in a restored image clone may need to re-establish its
+        keep-alive container. Combining shell selection with the provider probe
+        avoids paying that boundary twice on every rollout.
+        """
+        command = self._probe_command if verify and self._probe_command else "true"
+        timeout = max(1, math.ceil(self._probe_timeout_s))
+        try:
+            result = await machine.exec(
+                ["/bin/sh", "-c", _SHELL_AND_PROBE, "smol-shell-probe", command],
+                ExecOptions(env=env or None, workdir=workdir, timeout=timeout),
+            )
+        except Exception as error:
+            raise SandboxCreateVerificationError(
+                f"smol sandbox {machine_id!r} failed readiness probe: {error}"
+            ) from error
+        stdout = result.stdout or ""
+        shell = "/bin/bash" if f"{_SHELL_MARKER}/bin/bash" in stdout else "/bin/sh"
+        if result.exit_code != 0 or (
+            verify
+            and self._probe_command is not None
+            and self._probe_expected_stdout is not None
+            and self._probe_expected_stdout not in stdout
         ):
             detail = (
-                f"return_code={result.return_code}, "
+                f"return_code={result.exit_code}, "
                 f"stderr={(result.stderr or '').strip()!r}"
             )
             raise SandboxCreateVerificationError(
-                f"smol sandbox {handle.sandbox_id!r} failed readiness probe: {detail}"
+                f"smol sandbox {machine_id!r} failed readiness probe: {detail}"
             )
+        return shell
+
+    @staticmethod
+    async def _detect_shell(machine: AsyncMachine) -> str:
+        """Use Bash when an image provides it, preserving POSIX-sh fallback.
+
+        NeMo's SWE evaluator uses Bash features such as ``pipefail``. Container
+        providers select Bash automatically, so forcing every Smol sandbox
+        through ``/bin/sh`` made otherwise-compatible SWE images fail only on
+        Smol.
+        """
+        try:
+            result = await machine.exec(
+                ["/bin/sh", "-c", _SHELL_PROBE], ExecOptions(timeout=5)
+            )
+            if result.exit_code == 0 and (result.stdout or "").strip() == "/bin/bash":
+                return "/bin/bash"
+        except Exception:  # noqa: BLE001 - shell selection must retain sh fallback
+            pass
+        return "/bin/sh"
 
     async def _expire(self, handle: SandboxHandle, ttl_s: float) -> None:
         try:
@@ -636,32 +715,60 @@ class SmolProvider:
                 return_code=_RUNTIME_RETURN_CODE,
                 error_type="sandbox",
             )
-        if user not in {None, "root", 0, "0"}:
+        selected_shell = raw.shell
+        non_root_user = user not in {None, "root", 0, "0"}
+        if selected_shell is not None and non_root_user:
             # Smol's exec protocol currently starts as root. Use the guest's
             # standard su implementation so ordinary SWE images retain their
             # established per-task user without adding a provider-specific API.
             import shlex
 
             command = (
-                f"exec su -s /bin/sh {shlex.quote(str(user))} -c {shlex.quote(command)}"
+                f"exec su -s {selected_shell} {shlex.quote(str(user))} "
+                f"-c {shlex.quote(command)}"
             )
         merged_env = dict(raw.env)
         if env:
             merged_env.update(env)
         timeout = max(1, math.ceil(timeout_s)) if timeout_s is not None else None
         try:
+            if selected_shell is None:
+                if non_root_user:
+                    argv = [
+                        "/bin/sh",
+                        "-c",
+                        _SHELL_AND_USER_EXEC,
+                        "smol-shell-exec",
+                        command,
+                        str(user),
+                    ]
+                else:
+                    argv = [
+                        "/bin/sh",
+                        "-c",
+                        _SHELL_AND_PROBE,
+                        "smol-shell-exec",
+                        command,
+                    ]
+            else:
+                argv = [selected_shell, "-lc", command]
             result = await raw.machine.exec(
-                ["/bin/sh", "-lc", command],
+                argv,
                 ExecOptions(
                     env=merged_env or None, workdir=cwd or raw.workdir, timeout=timeout
                 ),
             )
+            stdout = result.stdout
+            if selected_shell is None:
+                selected_shell, stdout = self._consume_shell_marker(stdout)
+                raw.shell = selected_shell
             return SandboxExecResult(
-                stdout=result.stdout,
+                stdout=stdout,
                 stderr=result.stderr,
                 return_code=result.exit_code,
                 error_type=None,
             )
+
         except SmolError as error:
             error_type = "timeout" if error.code == "TIMEOUT" else "sandbox"
             return SandboxExecResult(
@@ -677,6 +784,16 @@ class SmolProvider:
                 return_code=_RUNTIME_RETURN_CODE,
                 error_type="sandbox",
             )
+
+    @staticmethod
+    def _consume_shell_marker(stdout: str | None) -> tuple[str, str | None]:
+        if not stdout or not stdout.startswith(_SHELL_MARKER):
+            return "/bin/sh", stdout
+        marker, separator, remainder = stdout.partition("\n")
+        shell = marker.removeprefix(_SHELL_MARKER)
+        if shell not in {"/bin/bash", "/bin/sh"}:
+            shell = "/bin/sh"
+        return shell, remainder if separator else ""
 
     async def upload_file(
         self, handle: SandboxHandle, source_path: Path, target_path: str
@@ -772,6 +889,7 @@ class SmolProvider:
             if descriptor.get("workdir") is not None
             else None,
             ports=ports,
+            shell=await self._detect_shell(machine),
         )
         self._sandboxes[sandbox_id] = raw
         return SandboxHandle(sandbox_id=sandbox_id, provider_name=self.name, raw=raw)

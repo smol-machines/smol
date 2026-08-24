@@ -46,6 +46,8 @@ pub struct MachineConfig {
     pub resources: Option<VmResourcesConfig>,
     /// If true, the DB record is kept as a persistent machine.
     pub persistent: Option<bool>,
+    /// If true, every start uses cloneable, memfd-backed guest RAM.
+    pub forkable: Option<bool>,
 }
 
 /// A host directory mount specification.

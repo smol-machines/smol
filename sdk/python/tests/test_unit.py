@@ -11,8 +11,14 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "python"))
 
 from smol.errors import ExecutionError, SmolError, wrap_native_error  # noqa: E402
 from smol.rollout import RolloutClient, RolloutError, adapter_sha256  # noqa: E402
+from smol import transport as transport_module  # noqa: E402
 from smol.transport import _cli_config_api_key, _encode_path, _native_config  # noqa: E402
-from smol.types import ExecResult, MachineConfig, ResourceSpec  # noqa: E402
+from smol.types import (  # noqa: E402
+    ConnectOptions,
+    ExecResult,
+    MachineConfig,
+    ResourceSpec,
+)
 
 
 def test_wrap_parses_bracketed_code():
@@ -155,6 +161,54 @@ def test_native_config_forwards_image():
 
 def test_native_config_omits_image_when_unset():
     assert "image" not in _native_config("m", MachineConfig())
+
+
+def test_native_config_forwards_forkable_lifecycle():
+    assert _native_config("m", MachineConfig(forkable=True))["forkable"] is True
+    assert _native_config("m", MachineConfig())["forkable"] is False
+
+
+def test_borrowed_local_transport_is_not_stopped_at_interpreter_exit():
+    class Inner:
+        name = "checkpoint"
+
+    borrowed = transport_module.LocalTransport(Inner(), cleanup_on_exit=False)
+    assert borrowed not in transport_module._live_local
+
+    owned = transport_module.LocalTransport(Inner())
+    assert owned in transport_module._live_local
+    transport_module._live_local.discard(owned)
+
+
+def test_connect_preserves_frozen_checkpoint_without_readiness_wait(monkeypatch):
+    class Inner:
+        name = "checkpoint"
+
+        @staticmethod
+        def state():
+            return "frozen"
+
+    class NativeMachine:
+        @staticmethod
+        def connect(name):
+            assert name == "checkpoint"
+            return Inner()
+
+    class Native:
+        Machine = NativeMachine
+
+    monkeypatch.setattr(transport_module, "_load_native", lambda: Native)
+
+    def unexpected_wait(self, *args, **kwargs):
+        raise AssertionError("a frozen fork source must not wait for its agent")
+
+    monkeypatch.setattr(
+        transport_module.LocalTransport, "wait_until_ready", unexpected_wait
+    )
+    connected = transport_module.connect_transport(
+        "checkpoint", ConnectOptions(target="local")
+    )
+    assert connected.state() == "frozen"
 
 
 def test_native_config_forwards_image_workload_env_and_workdir():

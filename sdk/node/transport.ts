@@ -241,6 +241,7 @@ export function toNativeConfig(
       Object.entries(config.env).map(([key, value]) => ({ key, value })),
     workdir: config.workdir,
     persistent: config.persistent,
+    forkable: config.forkable,
     mounts: config.mounts?.map((m) => ({
       source: m.source,
       target: m.target,
@@ -300,9 +301,14 @@ function installLocalCleanup(): void {
 }
 
 class LocalTransport implements Transport {
-  constructor(private readonly inner: NapiInstance) {
-    liveLocal.add(this);
-    installLocalCleanup();
+  constructor(
+    private readonly inner: NapiInstance,
+    private readonly cleanupOnExit = true,
+  ) {
+    if (cleanupOnExit) {
+      liveLocal.add(this);
+      installLocalCleanup();
+    }
   }
 
   get name(): string {
@@ -467,7 +473,7 @@ class LocalTransport implements Transport {
     } catch (e) {
       throw wrapNativeError(e);
     }
-    liveLocal.add(this);
+    if (this.cleanupOnExit) liveLocal.add(this);
     await this.waitUntilReady();
   }
 
@@ -1419,8 +1425,17 @@ export async function connectTransport(
   if (!useCloud) {
     // Local: start-or-reconnect to the named machine via the native engine.
     try {
-      const transport = new LocalTransport(getNapiMachine().connect(id));
-      await transport.waitUntilReady();
+      // Connecting borrows an existing machine. A signal in this client must
+      // not stop a durable checkpoint owned by another process/controller.
+      const transport = new LocalTransport(
+        getNapiMachine().connect(id),
+        false,
+      );
+      // A frozen checkpoint is intentionally not agent-ready; it remains
+      // connectable so callers can fork its retained snapshot.
+      if ((await transport.state()) !== "frozen") {
+        await transport.waitUntilReady();
+      }
       return transport;
     } catch (e) {
       throw wrapNativeError(e);

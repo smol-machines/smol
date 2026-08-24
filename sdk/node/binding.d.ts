@@ -32,6 +32,8 @@ export interface MachineConfig {
   resources?: VmResourcesConfig
   /** If true, the DB record is kept as a persistent machine. */
   persistent?: boolean
+  /** If true, every start uses cloneable, memfd-backed guest RAM. */
+  forkable?: boolean
 }
 /** A host directory mount specification. */
 export interface HostMountConfig {

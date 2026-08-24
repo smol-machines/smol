@@ -103,6 +103,7 @@ impl NapiMachine {
             resources,
             image: config.image.clone(),
             persistent: config.persistent.unwrap_or(false),
+            forkable: config.forkable.unwrap_or(false),
             runtime_managed: false,
             remote_volumes,
             ..Default::default()
@@ -121,7 +122,10 @@ impl NapiMachine {
     /// process — backs the SDK's local `Machine.connect()`.
     #[napi(factory)]
     pub fn connect(name: String) -> napi::Result<Self> {
-        runtime().into_napi()?.start_machine(&name).into_napi()?;
+        runtime()
+            .into_napi()?
+            .connect_or_start_machine(&name)
+            .into_napi()?;
         Ok(Self { name })
     }
 

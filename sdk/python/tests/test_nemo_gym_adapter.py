@@ -151,6 +151,9 @@ async def test_cold_create_maps_full_spec_and_contract(tmp_path: Path) -> None:
     assert config.resources.allow_hosts == ["api.example.com"]
     assert config.resources.allow_cidrs == ["10.0.0.0/8", "192.0.2.5/32"]
     assert config.ports[0].guest == 8080 and config.ports[0].host > 0
+    _, probe_options = handle.raw.machine.commands[0]
+    assert probe_options.env == {"TASK": "one"}
+    assert probe_options.workdir == "/workspace"
 
     result = await provider.exec(
         handle,
@@ -211,9 +214,37 @@ async def test_exact_checkpoint_forks_prepared_machine() -> None:
     assert len(golden.fork_batches) == 1
     assert len(golden.fork_batches[0]) == 1
     assert handle.sandbox_id.startswith("fork-nemo-gym-")
+    assert handle.raw.machine.commands == []
     await provider.close(handle)
     assert handle.raw.machine.deleted is True
     assert golden.deleted is False
+
+
+@pytest.mark.asyncio
+async def test_checkpoint_folds_shell_probe_into_first_command(monkeypatch) -> None:
+    original_exec = FakeMachine.exec
+
+    async def bash_exec(self, command, options=None):
+        if command[:3] == ["/bin/sh", "-c", adapter._SHELL_AND_PROBE]:
+            self.commands.append((list(command), options))
+            return ExecResult(
+                exit_code=0,
+                stdout=f"{adapter._SHELL_MARKER}/bin/bash\npayload",
+                stderr="",
+            )
+        return await original_exec(self, command, options)
+
+    monkeypatch.setattr(FakeMachine, "exec", bash_exec)
+    provider = adapter.SmolProvider(checkpoints={"swe:ready": "golden"})
+    handle = await provider.create(SandboxSpec(image="swe:ready"))
+
+    assert handle.raw.machine.commands == []
+    result = await provider.exec(handle, "printf payload")
+    assert result.stdout == "payload"
+    assert handle.raw.shell == "/bin/bash"
+    assert handle.raw.machine.commands[-1][0][-1] == "printf payload"
+
+    await provider.close(handle)
 
 
 @pytest.mark.asyncio
@@ -326,6 +357,32 @@ async def test_user_and_closed_execution_behavior() -> None:
     await provider.close(handle)
     result = await provider.exec(handle, "true")
     assert result.return_code == 125 and result.error_type == "sandbox"
+
+
+@pytest.mark.asyncio
+async def test_exec_automatically_uses_bash_when_image_provides_it(monkeypatch) -> None:
+    original_exec = FakeMachine.exec
+
+    async def bash_exec(self, command, options=None):
+        if command[:3] == ["/bin/sh", "-c", adapter._SHELL_AND_PROBE]:
+            self.commands.append((list(command), options))
+            return ExecResult(
+                exit_code=0,
+                stdout=f"{adapter._SHELL_MARKER}/bin/bash\nsmol-sandbox-ready",
+                stderr="",
+            )
+        return await original_exec(self, command, options)
+
+    monkeypatch.setattr(FakeMachine, "exec", bash_exec)
+    provider = adapter.SmolProvider()
+    handle = await provider.create(SandboxSpec(image="swe:ready"))
+    result = await provider.exec(handle, "set -o pipefail; true", user="sandbox")
+
+    assert result.return_code == 0
+    command = handle.raw.machine.commands[-1][0]
+    assert command[0:2] == ["/bin/bash", "-lc"]
+    assert "exec su -s /bin/bash sandbox" in command[-1]
+    await provider.close(handle)
 
 
 def test_configuration_is_strict() -> None:
