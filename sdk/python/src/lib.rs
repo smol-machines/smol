@@ -235,7 +235,7 @@ struct Machine {
 impl Machine {
     /// Create (and register) a machine. Does not boot until `start()`.
     #[new]
-    fn new(config: &Bound<'_, PyDict>) -> PyResult<Self> {
+    fn new(py: Python<'_>, config: &Bound<'_, PyDict>) -> PyResult<Self> {
         let name: String = config
             .get_item("name")?
             .ok_or_else(|| PyRuntimeError::new_err("[INVALID_CONFIG] config['name'] is required"))?
@@ -416,9 +416,8 @@ impl Machine {
             remote_volumes,
             ..Default::default()
         };
-        runtime()
-            .map_err(err)?
-            .create_machine_with_workload(spec, env, workdir)
+        let runtime = runtime().map_err(err)?;
+        py.allow_threads(|| runtime.create_machine_with_workload(spec, env, workdir))
             .map_err(err)?;
         Ok(Self { name })
     }
@@ -427,10 +426,9 @@ impl Machine {
     /// (start-or-reconnect). Re-opens a persisted machine in a new process —
     /// backs the SDK's local `Machine.connect()`.
     #[staticmethod]
-    fn connect(name: String) -> PyResult<Self> {
-        runtime()
-            .map_err(err)?
-            .connect_or_start_machine(&name)
+    fn connect(py: Python<'_>, name: String) -> PyResult<Self> {
+        let runtime = runtime().map_err(err)?;
+        py.allow_threads(|| runtime.connect_or_start_machine(&name))
             .map_err(err)?;
         Ok(Self { name })
     }
@@ -455,16 +453,17 @@ impl Machine {
         runtime().map_err(err)?.guest_ports(&self.name).map_err(err)
     }
 
-    fn start(&self) -> PyResult<()> {
-        runtime().map_err(err)?.start_machine(&self.name).map_err(err)
+    fn start(&self, py: Python<'_>) -> PyResult<()> {
+        let runtime = runtime().map_err(err)?;
+        py.allow_threads(|| runtime.start_machine(&self.name))
+            .map_err(err)
     }
 
     /// Start this machine as a forkable fork base (memfd-backed guest RAM +
     /// control socket) so it can later be `fork()`-ed.
-    fn start_forkable(&self) -> PyResult<()> {
-        runtime()
-            .map_err(err)?
-            .start_forkable_machine(&self.name)
+    fn start_forkable(&self, py: Python<'_>) -> PyResult<()> {
+        let runtime = runtime().map_err(err)?;
+        py.allow_threads(|| runtime.start_forkable_machine(&self.name))
             .map_err(err)
     }
 
@@ -472,12 +471,7 @@ impl Machine {
     /// live RAM + disks (same host). `ports` are `(host, guest)` inbound forwards
     /// for the clone. Returns a handle to the running clone.
     #[pyo3(signature = (name, ports=None))]
-    fn fork(
-        &self,
-        py: Python<'_>,
-        name: String,
-        ports: Option<Vec<(u16, u16)>>,
-    ) -> PyResult<Self> {
+    fn fork(&self, py: Python<'_>, name: String, ports: Option<Vec<(u16, u16)>>) -> PyResult<Self> {
         let pinned = ports.unwrap_or_default();
         let runtime = runtime().map_err(err)?;
         py.allow_threads(|| runtime.fork_machine(&self.name, &name, &pinned))
@@ -503,28 +497,59 @@ impl Machine {
     }
 
     #[pyo3(signature = (command, options=None))]
-    fn exec(&self, command: Vec<String>, options: Option<&Bound<'_, PyDict>>) -> PyResult<ExecResult> {
+    fn exec(
+        &self,
+        py: Python<'_>,
+        command: Vec<String>,
+        options: Option<&Bound<'_, PyDict>>,
+    ) -> PyResult<ExecResult> {
         let (env, workdir, timeout) = parse_exec_opts(options)?;
-        let (code, out, errb) = runtime()
-            .map_err(err)?
-            .exec(&self.name, command, env, workdir, timeout.map(std::time::Duration::from_secs))
+        let runtime = runtime().map_err(err)?;
+        let (code, out, errb) = py
+            .allow_threads(|| {
+                runtime.exec(
+                    &self.name,
+                    command,
+                    env,
+                    workdir,
+                    timeout.map(std::time::Duration::from_secs),
+                )
+            })
             .map_err(err)?;
-        Ok(ExecResult { exit_code: code, stdout: lossy(out), stderr: lossy(errb) })
+        Ok(ExecResult {
+            exit_code: code,
+            stdout: lossy(out),
+            stderr: lossy(errb),
+        })
     }
 
     #[pyo3(signature = (image, command, options=None))]
     fn run(
         &self,
+        py: Python<'_>,
         image: String,
         command: Vec<String>,
         options: Option<&Bound<'_, PyDict>>,
     ) -> PyResult<ExecResult> {
         let (env, workdir, timeout) = parse_exec_opts(options)?;
-        let (code, out, errb) = runtime()
-            .map_err(err)?
-            .run(&self.name, &image, command, env, workdir, timeout.map(std::time::Duration::from_secs))
+        let runtime = runtime().map_err(err)?;
+        let (code, out, errb) = py
+            .allow_threads(|| {
+                runtime.run(
+                    &self.name,
+                    &image,
+                    command,
+                    env,
+                    workdir,
+                    timeout.map(std::time::Duration::from_secs),
+                )
+            })
             .map_err(err)?;
-        Ok(ExecResult { exit_code: code, stdout: lossy(out), stderr: lossy(errb) })
+        Ok(ExecResult {
+            exit_code: code,
+            stdout: lossy(out),
+            stderr: lossy(errb),
+        })
     }
 
     /// Execute a command and stream its output LIVE. Returns an `ExecStream`
@@ -565,31 +590,52 @@ impl Machine {
     }
 
     fn read_file<'py>(&self, py: Python<'py>, path: String) -> PyResult<Bound<'py, PyBytes>> {
-        let data = runtime().map_err(err)?.read_file(&self.name, &path).map_err(err)?;
+        let runtime = runtime().map_err(err)?;
+        let data = py
+            .allow_threads(|| runtime.read_file(&self.name, &path))
+            .map_err(err)?;
         Ok(PyBytes::new_bound(py, &data))
     }
 
     #[pyo3(signature = (path, data, mode=None))]
-    fn write_file(&self, path: String, data: Vec<u8>, mode: Option<u32>) -> PyResult<()> {
-        runtime().map_err(err)?.write_file(&self.name, &path, data, mode).map_err(err)
+    fn write_file(
+        &self,
+        py: Python<'_>,
+        path: String,
+        data: Vec<u8>,
+        mode: Option<u32>,
+    ) -> PyResult<()> {
+        let runtime = runtime().map_err(err)?;
+        py.allow_threads(|| runtime.write_file(&self.name, &path, data, mode))
+            .map_err(err)
     }
 
-    fn pull_image(&self, image: String) -> PyResult<ImageInfo> {
-        let i = runtime().map_err(err)?.pull_image(&self.name, &image).map_err(err)?;
+    fn pull_image(&self, py: Python<'_>, image: String) -> PyResult<ImageInfo> {
+        let runtime = runtime().map_err(err)?;
+        let i = py
+            .allow_threads(|| runtime.pull_image(&self.name, &image))
+            .map_err(err)?;
         Ok(to_image_info(i))
     }
 
-    fn list_images(&self) -> PyResult<Vec<ImageInfo>> {
-        let imgs = runtime().map_err(err)?.list_images(&self.name).map_err(err)?;
+    fn list_images(&self, py: Python<'_>) -> PyResult<Vec<ImageInfo>> {
+        let runtime = runtime().map_err(err)?;
+        let imgs = py
+            .allow_threads(|| runtime.list_images(&self.name))
+            .map_err(err)?;
         Ok(imgs.into_iter().map(to_image_info).collect())
     }
 
-    fn stop(&self) -> PyResult<()> {
-        runtime().map_err(err)?.stop_machine(&self.name).map_err(err)
+    fn stop(&self, py: Python<'_>) -> PyResult<()> {
+        let runtime = runtime().map_err(err)?;
+        py.allow_threads(|| runtime.stop_machine(&self.name))
+            .map_err(err)
     }
 
-    fn delete(&self) -> PyResult<()> {
-        runtime().map_err(err)?.delete_machine(&self.name).map_err(err)
+    fn delete(&self, py: Python<'_>) -> PyResult<()> {
+        let runtime = runtime().map_err(err)?;
+        py.allow_threads(|| runtime.delete_machine(&self.name))
+            .map_err(err)
     }
 }
 
