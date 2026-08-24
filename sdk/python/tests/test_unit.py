@@ -180,7 +180,7 @@ def test_borrowed_local_transport_is_not_stopped_at_interpreter_exit():
     transport_module._live_local.discard(owned)
 
 
-def test_connect_preserves_frozen_checkpoint_without_readiness_wait(monkeypatch):
+def test_connect_preserves_frozen_checkpoint_without_readiness_wait():
     class Inner:
         name = "checkpoint"
 
@@ -197,17 +197,19 @@ def test_connect_preserves_frozen_checkpoint_without_readiness_wait(monkeypatch)
     class Native:
         Machine = NativeMachine
 
-    monkeypatch.setattr(transport_module, "_load_native", lambda: Native)
-
-    def unexpected_wait(self, *args, **kwargs):
-        raise AssertionError("a frozen fork source must not wait for its agent")
-
-    monkeypatch.setattr(
-        transport_module.LocalTransport, "wait_until_ready", unexpected_wait
-    )
-    connected = transport_module.connect_transport(
-        "checkpoint", ConnectOptions(target="local")
-    )
+    with (
+        mock.patch.object(transport_module, "_load_native", return_value=Native),
+        mock.patch.object(
+            transport_module.LocalTransport,
+            "wait_until_ready",
+            side_effect=AssertionError(
+                "a frozen fork source must not wait for its agent"
+            ),
+        ),
+    ):
+        connected = transport_module.connect_transport(
+            "checkpoint", ConnectOptions(target="local")
+        )
     assert connected.state() == "frozen"
 
 
