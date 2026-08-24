@@ -157,8 +157,34 @@ workload. Declare those inherited properties in the checkpoint mapping. A task's
 resource request may be smaller than the declared capacity, while its network
 policy, entrypoint, and ports must match exactly; incompatible requests fail
 instead of silently running with different isolation. NeMo Gym's standard
-sandbox provider contract supports episode-from-golden forks; branching an
-arbitrary live mid-trajectory state requires an additional agent/harness hook.
+sandbox provider contract supports episode-from-golden forks.
+
+To branch an arbitrary live trajectory state, create that source as branchable
+and call the Smol provider's extension at the decision point:
+
+```python
+from nemo_gym.sandbox.providers.base import SandboxSpec
+from smol.nemo_gym import SmolProvider
+
+provider = SmolProvider(target="local")  # or target="cloud"
+checkpoint = await provider.create(
+    SandboxSpec(
+        image="ghcr.io/acme/swe:ready",
+        provider_options={"branchable": True},
+    )
+)
+await provider.exec(checkpoint, "./agent-step-1")
+await provider.exec(checkpoint, "./agent-step-2")
+
+branches = await provider.branch(checkpoint, count=16, name_prefix="candidate")
+```
+
+The first fan-out waits for active commands and freezes the source at that exact
+RAM/filesystem/process state. Every returned sandbox is an independent COW leaf;
+the frozen source may create more siblings from the same state but cannot execute
+more commands. Close the branches before the source. A configured checkpoint
+fork is already a leaf, so it cannot request another live branch until SmolVM
+supports nested fork generations.
 
 ## Architecture
 - **Pure-Python layer** (`python/smol`): `Machine`, transports, types, errors —

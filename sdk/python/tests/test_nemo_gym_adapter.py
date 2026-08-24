@@ -52,6 +52,9 @@ class FakeMachine:
         self.fork_batches.append(list(names))
         return [FakeMachine(f"fork-{name}") for name in names]
 
+    async def branch_batch(self, *, names):
+        return await self.fork_batch(names=names)
+
     async def assign(self, lease_id, *, ttl_secs=None):
         return FakeEpisode(FakeMachine(f"lease-{lease_id}"), lease_id, ttl_secs)
 
@@ -218,6 +221,135 @@ async def test_exact_checkpoint_forks_prepared_machine() -> None:
     await provider.close(handle)
     assert handle.raw.machine.deleted is True
     assert golden.deleted is False
+
+
+@pytest.mark.asyncio
+async def test_live_branch_freezes_source_and_returns_independent_leaves() -> None:
+    provider = adapter.SmolProvider(target="local")
+    source = await provider.create(
+        SandboxSpec(
+            image="swe:ready",
+            workdir="/testbed",
+            env={"EPISODE": "root"},
+            provider_options={"branchable": True},
+        )
+    )
+    config, _ = FakeMachine.created[0]
+    assert config.checkpoint is True
+
+    initial = await provider.exec(source, "printf before-branch")
+    assert initial.return_code == 0
+    branches = await provider.branch(source, count=3, name_prefix="search")
+
+    assert source.raw.frozen is True
+    assert source.raw.machine.fork_batches == [["search-0", "search-1", "search-2"]]
+    arm_command = source.raw.machine.commands[-1][0]
+    assert adapter._FORK_READY_HELPER in arm_command[-1]
+    assert [branch.sandbox_id for branch in branches] == [
+        "fork-search-0",
+        "fork-search-1",
+        "fork-search-2",
+    ]
+    assert all(branch.raw.branchable is False for branch in branches)
+    assert all(branch.raw.env == {"EPISODE": "root"} for branch in branches)
+    assert all(branch.raw.workdir == "/testbed" for branch in branches)
+
+    rejected = await provider.exec(source, "printf after-branch")
+    assert rejected.return_code == 125
+    assert "frozen" in (rejected.stderr or "")
+    assert await provider.status(source) is SandboxStatus.RUNNING
+    descriptor = await provider.serialize_handle(source)
+    assert descriptor["branchable"] is True
+    assert descriptor["frozen"] is True
+    child_result = await provider.exec(branches[0], "printf child")
+    assert child_result.return_code == 0
+    with pytest.raises(RuntimeError, match="not branchable"):
+        await provider.branch(branches[0], count=2)
+
+    await asyncio.gather(*(provider.close(branch) for branch in branches))
+    await provider.close(source)
+
+
+@pytest.mark.asyncio
+async def test_live_branch_waits_for_active_exec_and_reuses_frozen_point(
+    monkeypatch,
+) -> None:
+    started = asyncio.Event()
+    release = asyncio.Event()
+    original_exec = FakeMachine.exec
+
+    async def controlled_exec(self, command, options=None):
+        if command[-1:] == ["slow-action"]:
+            started.set()
+            await release.wait()
+        return await original_exec(self, command, options)
+
+    monkeypatch.setattr(FakeMachine, "exec", controlled_exec)
+    provider = adapter.SmolProvider(probe_command=None)
+    source = await provider.create(
+        SandboxSpec(
+            image="swe:ready", provider_options={"branchable": True}
+        )
+    )
+    action = asyncio.create_task(provider.exec(source, "slow-action"))
+    await started.wait()
+    first_fanout = asyncio.create_task(
+        provider.branch(source, count=2, name_prefix="first")
+    )
+    await asyncio.sleep(0)
+    assert not first_fanout.done()
+    release.set()
+    assert (await action).return_code == 0
+    first = await first_fanout
+    second = await provider.branch(source, count=1, name_prefix="second")
+
+    assert source.raw.machine.fork_batches == [
+        ["first-0", "first-1"],
+        ["second-0"],
+    ]
+    helper_commands = [
+        command
+        for command, _ in source.raw.machine.commands
+        if adapter._FORK_READY_HELPER in command[-1]
+    ]
+    assert len(helper_commands) == 1
+    await asyncio.gather(
+        *(provider.close(branch) for branch in [*first, *second])
+    )
+    await provider.close(source)
+
+
+@pytest.mark.asyncio
+async def test_checkpoint_fork_cannot_request_nested_live_branching() -> None:
+    provider = adapter.SmolProvider(checkpoints={"swe:ready": "golden"})
+    with pytest.raises(adapter.SandboxCreateError, match="one fork generation"):
+        await provider.create(
+            SandboxSpec(
+                image="swe:ready", provider_options={"branchable": True}
+            )
+        )
+
+
+@pytest.mark.asyncio
+async def test_live_branch_rejects_unsafe_lifecycle_and_names() -> None:
+    provider = adapter.SmolProvider(probe_command=None)
+    with pytest.raises(adapter.SandboxCreateError, match="ttl_s is not supported"):
+        await provider.create(
+            SandboxSpec(
+                image="swe:ready",
+                ttl_s=60,
+                provider_options={"branchable": True},
+            )
+        )
+
+    source = await provider.create(
+        SandboxSpec(image="swe:ready", provider_options={"branchable": True})
+    )
+    with pytest.raises(ValueError, match="only letters"):
+        await provider.branch(source, count=2, name_prefix="not/valid")
+    with pytest.raises(ValueError, match="128"):
+        await provider.branch(source, count=2, name_prefix="x" * 128)
+    await provider.close(source)
 
 
 @pytest.mark.asyncio

@@ -16,7 +16,7 @@ import socket
 import uuid
 import weakref
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
@@ -53,9 +53,11 @@ _SHELL_AND_USER_EXEC = (
     'exec su -s "$shell" "$2" -c "$1"'
 )
 _TTL_DELETE_RETRIES = 3
+_FORK_READY_HELPER = "/usr/local/bin/smolvm-fork-ready"
 _ALLOWED_PROVIDER_OPTIONS = {
     "allow_cidrs",
     "allow_hosts",
+    "branchable",
     "network_policy",
     "skip_health_check",
 }
@@ -80,6 +82,11 @@ class _SmolSandbox:
     episode: AsyncEpisode | None = None
     ttl_task: asyncio.Task[None] | None = None
     closed: bool = False
+    branchable: bool = False
+    frozen: bool = False
+    freezing: bool = False
+    active_execs: int = 0
+    activity: asyncio.Condition = field(default_factory=asyncio.Condition)
 
 
 @dataclass
@@ -412,6 +419,12 @@ class SmolProvider:
             )
         return spec.provider_options
 
+    def _branchable(self, spec: SandboxSpec) -> bool:
+        value = self._options(spec).get("branchable", False)
+        if not isinstance(value, bool):
+            raise TypeError("provider_options.branchable must be a boolean")
+        return value
+
     def _resource_spec(self, spec: SandboxSpec) -> ResourceSpec:
         resources = spec.resources
         for field in ("cpu", "memory_mib", "disk_gib"):
@@ -520,6 +533,17 @@ class SmolProvider:
             raise SandboxCreateError("ttl_s must be finite and > 0")
         name = f"nemo-gym-{uuid.uuid4().hex[:12]}"
         checkpoint = self._resolve_checkpoint(spec, image)
+        branchable = self._branchable(spec)
+        if checkpoint is not None and branchable:
+            raise SandboxCreateError(
+                "provider_options.branchable cannot be used with a checkpoint "
+                "fork: SmolVM currently supports one fork generation"
+            )
+        if branchable and ttl_s is not None:
+            raise SandboxCreateError(
+                "ttl_s is not supported for a live branch source; close its "
+                "branches and then the source explicitly"
+            )
         machine: AsyncMachine | None = None
         episode: AsyncEpisode | None = None
         try:
@@ -553,6 +577,7 @@ class SmolProvider:
                         command=list(spec.entrypoint) if spec.entrypoint else None,
                         ports=ports or None,
                         resources=self._resource_spec(spec),
+                        checkpoint=branchable,
                         ttl_seconds=math.ceil(ttl_s) if ttl_s is not None else None,
                         ready_timeout_seconds=timeout,
                         env=dict(spec.env),
@@ -588,6 +613,7 @@ class SmolProvider:
                 ports=tuple(spec.ports),
                 shell=shell,
                 episode=episode,
+                branchable=branchable,
             )
             handle = SandboxHandle(
                 sandbox_id=machine.id, provider_name=self.name, raw=raw
@@ -715,6 +741,15 @@ class SmolProvider:
                 return_code=_RUNTIME_RETURN_CODE,
                 error_type="sandbox",
             )
+        async with raw.activity:
+            if raw.frozen or raw.freezing:
+                return SandboxExecResult(
+                    stdout=None,
+                    stderr="sandbox is frozen as a live branch point",
+                    return_code=_RUNTIME_RETURN_CODE,
+                    error_type="sandbox",
+                )
+            raw.active_execs += 1
         selected_shell = raw.shell
         non_root_user = user not in {None, "root", 0, "0"}
         if selected_shell is not None and non_root_user:
@@ -784,6 +819,120 @@ class SmolProvider:
                 return_code=_RUNTIME_RETURN_CODE,
                 error_type="sandbox",
             )
+        finally:
+            async with raw.activity:
+                raw.active_execs -= 1
+                raw.activity.notify_all()
+
+    async def branch(
+        self,
+        handle: SandboxHandle,
+        *,
+        count: int,
+        name_prefix: str | None = None,
+    ) -> list[SandboxHandle]:
+        """Fork ``count`` independent sandboxes from this live execution state.
+
+        The source must have been created with
+        ``provider_options.branchable: true``. The first call waits for any
+        active commands, freezes the source at an injected SmolVM forkpoint,
+        and returns RAM/disk copy-on-write branches. The frozen source can fan
+        out more branches from that exact state, but cannot execute additional
+        commands; returned branches are intentionally leaves because SmolVM
+        currently supports one fork generation.
+        """
+        if (
+            isinstance(count, bool)
+            or not isinstance(count, int)
+            or not 1 <= count <= 256
+        ):
+            raise ValueError("branch count must be an integer between 1 and 256")
+        raw: _SmolSandbox = handle.raw
+        prefix = name_prefix or f"nemo-branch-{uuid.uuid4().hex[:10]}"
+        allowed = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-"
+        if not prefix or any(char not in allowed for char in prefix):
+            raise ValueError(
+                "branch name_prefix may contain only letters, numbers, and dashes"
+            )
+        names = [f"{prefix}-{index}" for index in range(count)]
+        if any(len(name) > 128 for name in names):
+            raise ValueError("branch names cannot exceed 128 characters")
+
+        async with raw.activity:
+            if raw.closed:
+                raise RuntimeError("cannot branch a closed sandbox")
+            if not raw.branchable:
+                raise RuntimeError(
+                    "sandbox is not branchable; create it with "
+                    "provider_options.branchable: true"
+                )
+            if raw.freezing:
+                raise RuntimeError("sandbox is already being frozen for branching")
+            if not raw.frozen:
+                raw.freezing = True
+                while raw.active_execs:
+                    await raw.activity.wait()
+
+        try:
+            if not raw.frozen:
+                arm = await raw.machine.exec(
+                    [
+                        "/bin/sh",
+                        "-c",
+                        f"if [ ! -x {_FORK_READY_HELPER} ]; then exit 127; fi; "
+                        f"{_FORK_READY_HELPER} >/dev/null 2>&1 &",
+                    ],
+                    ExecOptions(timeout=5),
+                )
+                if arm.exit_code != 0:
+                    raise RuntimeError(
+                        "failed to arm the live SmolVM forkpoint: "
+                        f"exit={arm.exit_code}, stderr={(arm.stderr or '').strip()!r}"
+                    )
+                # Once the forkpoint helper is armed, fail closed. A transport
+                # error while freezing can be ambiguous: the VMM may already
+                # be paused even though the reply never reached this process.
+                # Keeping the source branch-only makes retry safe and prevents
+                # an exec from hanging against a paused VM.
+                async with raw.activity:
+                    raw.frozen = True
+            branches = await raw.machine.branch_batch(names=names)
+            if len(branches) != count:
+                await asyncio.gather(
+                    *(branch.delete() for branch in branches),
+                    return_exceptions=True,
+                )
+                raise RuntimeError(
+                    f"SmolVM returned {len(branches)} branches for requested count={count}"
+                )
+        except BaseException:
+            async with raw.activity:
+                raw.freezing = False
+                raw.activity.notify_all()
+            raise
+
+        async with raw.activity:
+            raw.freezing = False
+            raw.frozen = True
+            raw.activity.notify_all()
+
+        handles: list[SandboxHandle] = []
+        for machine in branches:
+            branch_raw = _SmolSandbox(
+                machine=machine,
+                env=dict(raw.env),
+                workdir=raw.workdir,
+                ports=raw.ports,
+                shell=raw.shell,
+            )
+            branch_handle = SandboxHandle(
+                sandbox_id=machine.id,
+                provider_name=self.name,
+                raw=branch_raw,
+            )
+            self._sandboxes[branch_handle.sandbox_id] = branch_raw
+            handles.append(branch_handle)
+        return handles
 
     @staticmethod
     def _consume_shell_marker(stdout: str | None) -> tuple[str, str | None]:
@@ -825,6 +974,11 @@ class SmolProvider:
         raw: _SmolSandbox = handle.raw
         if raw.closed:
             return SandboxStatus.STOPPED
+        if raw.frozen:
+            # NeMo Gym has no dedicated checkpoint/frozen state. The source is
+            # healthy and can still fan out branches, so RUNNING is the least
+            # surprising lifecycle projection; exec() returns a precise error.
+            return SandboxStatus.RUNNING
         try:
             state = await raw.machine.state()
         except SmolError as error:
@@ -855,12 +1009,17 @@ class SmolProvider:
         """
         del scope
         raw: _SmolSandbox = handle.raw
-        return {
+        descriptor = {
             "sandbox_id": handle.sandbox_id,
             "env": dict(raw.env),
             "workdir": raw.workdir,
             "ports": list(raw.ports),
         }
+        if raw.branchable:
+            descriptor.update(
+                {"branchable": True, "frozen": raw.frozen, "shell": raw.shell}
+            )
+        return descriptor
 
     async def connect(self, descriptor: Mapping[str, Any]) -> SandboxHandle:
         """Reconnect to a live local or cloud sandbox by its opaque machine id."""
@@ -880,8 +1039,16 @@ class SmolProvider:
             ports
         ):
             raise ValueError("smol sandbox descriptor contains an invalid port")
+        branchable = descriptor.get("branchable", False)
+        frozen = descriptor.get("frozen", False)
+        if not isinstance(branchable, bool) or not isinstance(frozen, bool):
+            raise TypeError("smol sandbox descriptor branch state must be boolean")
+        shell_value = descriptor.get("shell")
+        if shell_value not in {None, "/bin/bash", "/bin/sh"}:
+            raise ValueError("smol sandbox descriptor contains an invalid shell")
         machine = await AsyncMachine.connect(sandbox_id, self._connect)
-        await machine.wait_until_ready()
+        if not frozen:
+            await machine.wait_until_ready()
         raw = _SmolSandbox(
             machine=machine,
             env={str(key): str(value) for key, value in env.items()},
@@ -889,7 +1056,10 @@ class SmolProvider:
             if descriptor.get("workdir") is not None
             else None,
             ports=ports,
-            shell=await self._detect_shell(machine),
+            shell=shell_value
+            or (None if frozen else await self._detect_shell(machine)),
+            branchable=branchable,
+            frozen=frozen,
         )
         self._sandboxes[sandbox_id] = raw
         return SandboxHandle(sandbox_id=sandbox_id, provider_name=self.name, raw=raw)
