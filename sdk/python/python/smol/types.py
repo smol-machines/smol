@@ -34,11 +34,11 @@ class ResourceSpec:
     """Enable outbound network access (TSI). Default: False."""
     allow_cidrs: Optional[list[str]] = None
     """Scope egress to these CIDR ranges. Setting this (or allow_hosts) enables
-    networking and restricts it to the listed CIDRs. Cloud target only."""
+    networking and restricts it to the listed CIDRs."""
     allow_hosts: Optional[list[str]] = None
     """Scope egress to these hostnames and their subdomains (e.g.
     api.anthropic.com). Setting this (or allow_cidrs) enables networking and
-    restricts it to the listed hosts. Cloud target only."""
+    restricts it to the listed hosts."""
     storage_gb: Optional[int] = None
     """Storage disk size in GB."""
     overlay_gb: Optional[int] = None
@@ -88,6 +88,8 @@ class MachineConfig:
     """Machine name (auto-generated if omitted)."""
     image: Optional[str] = None
     """Base image. Required for the cloud target; optional for local."""
+    command: Optional[list[str]] = None
+    """Workload argv overriding the image entrypoint/CMD."""
     mounts: Optional[list[MountSpec]] = None
     ports: Optional[list[PortSpec]] = None
     resources: Optional[ResourceSpec] = None
@@ -97,6 +99,10 @@ class MachineConfig:
     """Auto-stop after N idle seconds (cloud)."""
     ttl_seconds: Optional[int] = None
     """Delete after N seconds (cloud)."""
+    ready_timeout_seconds: float = 120.0
+    """Maximum time creation waits for the guest and published services to
+    become ready. Increase this for large images or heavily prepared sandbox
+    workloads; the default preserves the SDK's existing two-minute behavior."""
     forkable: bool = False
     """Start as a live-RAM fork base (cloud) so the machine can be cloned with
     :meth:`Machine.fork`. The golden and its clones are pinned to one node."""
@@ -114,6 +120,13 @@ class MachineConfig:
         # so the rest of the stack only ever reads `forkable`.
         if self.checkpoint:
             self.forkable = True
+        if self.command is not None and (
+            not self.command
+            or any(not isinstance(arg, str) or not arg for arg in self.command)
+        ):
+            raise ValueError("command must be a non-empty list of non-empty strings")
+        if self.ready_timeout_seconds <= 0:
+            raise ValueError("ready_timeout_seconds must be > 0")
 
 
 @dataclass

@@ -39,6 +39,11 @@ Issues = "https://github.com/smol-machines/smol/issues"
 dev = ["maturin>=1.5,<2.0", "pytest>=7"]
 # Use smol as a verifiers RL runtime: `pip install smolmachines[verifiers]`.
 verifiers = ["verifiers>=0.2"]
+# Use smol as a NeMo Gym sandbox provider: `pip install smolmachines[nemo-gym]`.
+nemo-gym = ["nemo-gym>=0.5.0"]
+
+[project.entry-points."nemo_gym.sandbox_providers"]
+smol = "smol.nemo_gym:SmolProvider"
 
 [tool.maturin]
 # Mixed Rust/Python layout: pure-Python package lives in python/smol, the native

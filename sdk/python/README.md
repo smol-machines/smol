@@ -110,6 +110,56 @@ from smol.integrations import (
 The vLLM backend must bind to loopback, enable runtime LoRA updates, and reserve
 one spare CPU LoRA slot so a new version can load before the old version drains.
 
+### NeMo Gym sandbox provider
+
+Install the optional integration and select the same `smol` provider for local
+SmolVM or Smol Cloud:
+
+```bash
+pip install 'smolmachines[nemo-gym]'
+```
+
+```yaml
+sandbox:
+  smol:
+    target: local                 # or cloud; cloud reuses `smol auth login`
+    checkpoints:
+      ghcr.io/acme/swe:ready:
+        machine: swe-golden       # running MachineConfig(forkable=True) machine
+        ports: [8000]
+        resources:                # describe the prepared golden's capacity
+          cpu: 4
+          memory_mib: 8192
+          disk_gib: 20
+        provider_options:         # describe its inherited egress policy
+          allow_hosts: [api.example.com]
+    fork_batch_window_ms: 2        # coalesce concurrent episode creates
+    fork_batch_size: 32
+  default_metadata:
+    sandbox-api: smol
+```
+
+NeMo Gym discovers the provider through its standard
+`nemo_gym.sandbox_providers` entry point. A normal image creates a fresh
+microVM. An exact image match in `checkpoints` instead creates every episode as
+a live RAM/disk copy-on-write fork of that prepared machine, so repositories,
+dependencies, services, and caches can already be running when the agent takes
+its first action. The provider implements exec, files, resource limits, scoped
+egress, declared service ports, entrypoint overrides, TTL cleanup, and the same
+configuration for local and cloud targets. Handles serialize without credentials
+and reconnect through the receiving SDK session, as required by DeepSWE's
+agent/verifier lifecycle. Cloud checkpoint episodes with a TTL use Smol Cloud's
+durable lease controller, so they are reclaimed even if the NeMo Gym process
+exits unexpectedly.
+
+Checkpoint forks inherit the golden's resource shape, network policy, and running
+workload. Declare those inherited properties in the checkpoint mapping. A task's
+resource request may be smaller than the declared capacity, while its network
+policy, entrypoint, and ports must match exactly; incompatible requests fail
+instead of silently running with different isolation. NeMo Gym's standard
+sandbox provider contract supports episode-from-golden forks; branching an
+arbitrary live mid-trajectory state requires an additional agent/harness hook.
+
 ## Architecture
 - **Pure-Python layer** (`python/smol`): `Machine`, transports, types, errors —
   zero third-party deps (the cloud transport uses only `urllib`).

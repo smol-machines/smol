@@ -135,6 +135,19 @@ def test_native_config_omits_gpu_when_unset():
     assert "gpu_vram_mib" not in res
 
 
+def test_native_config_forwards_scoped_egress():
+    cfg = MachineConfig(
+        resources=ResourceSpec(
+            network=True,
+            allow_cidrs=["10.0.0.0/8"],
+            allow_hosts=["api.example.com"],
+        )
+    )
+    res = _native_config("m", cfg)["resources"]
+    assert res["allowed_cidrs"] == ["10.0.0.0/8"]
+    assert res["allowed_hosts"] == ["api.example.com"]
+
+
 def test_native_config_forwards_image():
     cfg = MachineConfig(image="python:3.12-slim")
     assert _native_config("m", cfg)["image"] == "python:3.12-slim"
@@ -147,10 +160,12 @@ def test_native_config_omits_image_when_unset():
 def test_native_config_forwards_image_workload_env_and_workdir():
     cfg = MachineConfig(
         image="example/service:latest",
+        command=["python", "-m", "service"],
         env={"SESSION": "golden"},
         workdir="/workspace",
     )
     native = _native_config("m", cfg)
+    assert native["command"] == ["python", "-m", "service"]
     assert native["env"] == {"SESSION": "golden"}
     assert native["workdir"] == "/workspace"
 

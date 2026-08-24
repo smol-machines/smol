@@ -224,7 +224,8 @@ def main() -> int:
 
     try:
         m = Machine.create(
-            MachineConfig(image="alpine:3.20", forkable=True, env={"FOO": "bar"}, workdir="/app",
+            MachineConfig(image="alpine:3.20", command=["sleep", "infinity"],
+                          forkable=True, env={"FOO": "bar"}, workdir="/app",
                           resources=ResourceSpec(cpus=2, memory_mb=1024, network=True)),
             ConnectOptions(target="cloud", base_url=base, api_key="smk_testkey"),
         )
@@ -237,6 +238,8 @@ def main() -> int:
         check("network mode open", cb.get("network") == {"mode": "open"}, str(cb.get("network")))
         check("create sends env as a plain map", cb.get("env") == {"FOO": "bar"}, str(cb.get("env")))
         check("create sends workdir", cb.get("workdir") == "/app", str(cb.get("workdir")))
+        check("create sends command override",
+              cb.get("command") == ["sleep", "infinity"], str(cb.get("command")))
         check("waited for ready (GET machine)", any(h.startswith(f"GET /v1/machines/{MACHINE_ID}") for h in captured["hits"]))
         check("Machine.create() waited past started/ready=false",
               readiness_gets.get(MACHINE_ID, 0) >= 2, str(readiness_gets.get(MACHINE_ID, 0)))
