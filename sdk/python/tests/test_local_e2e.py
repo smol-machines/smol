@@ -6,12 +6,45 @@ signed smol/smolvm helper, ``SMOLVM_LIB_DIR`` at the libkrun dir). Skips cleanly
 if the native ext isn't available.
 """
 
+import asyncio
 import sys
+import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "python"))
 
-from smol import ExecutionError, Machine, MachineConfig, ResourceSpec  # noqa: E402
+from smol import (  # noqa: E402
+    AsyncMachine,
+    ExecutionError,
+    Machine,
+    MachineConfig,
+    ResourceSpec,
+)
+
+
+async def concurrent_exec_probe():
+    golden = await AsyncMachine.create(
+        MachineConfig(
+            checkpoint=True,
+            resources=ResourceSpec(cpus=2, memory_mb=1024),
+        )
+    )
+    clones = []
+    try:
+        clones = await golden.fork_batch(
+            names=[f"{golden.name}-concurrency-a", f"{golden.name}-concurrency-b"]
+        )
+        started = time.perf_counter()
+        results = await asyncio.gather(
+            *(clone.exec(["sleep", "2"]) for clone in clones)
+        )
+        return time.perf_counter() - started, results
+    finally:
+        if clones:
+            await asyncio.gather(
+                *(clone.delete() for clone in clones), return_exceptions=True
+            )
+        await golden.delete()
 
 
 def main() -> int:
@@ -27,7 +60,9 @@ def main() -> int:
             print(f"  FAIL {name} {detail}")
 
     print("smol Python SDK local e2e\n")
-    m = Machine.create(MachineConfig(resources=ResourceSpec(cpus=2, memory_mb=1024, network=True)))
+    m = Machine.create(
+        MachineConfig(resources=ResourceSpec(cpus=2, memory_mb=1024, network=True))
+    )
     try:
         check("machine has a name", bool(m.name), m.name)
 
@@ -56,6 +91,14 @@ def main() -> int:
         check("list_images includes python", any("python" in i.reference for i in imgs))
     finally:
         m.delete()
+
+    elapsed, results = asyncio.run(concurrent_exec_probe())
+    check("concurrent execs exit 0", all(result.exit_code == 0 for result in results))
+    check(
+        "concurrent execs overlap off-GIL",
+        elapsed < 3.5,
+        f"two sleep-2 execs took {elapsed:.3f}s",
+    )
 
     print(f"\n{passed} passed, {failed} failed")
     return 1 if failed else 0
