@@ -47,6 +47,9 @@ harbor = ["harbor>=0.22,<0.23"]
 [project.entry-points."nemo_gym.sandbox_providers"]
 smol = "smol.nemo_gym:SmolProvider"
 
+[project.entry-points."harbor.environments"]
+smol = "smol.harbor:SmolEnvironment"
+
 [tool.maturin]
 # Mixed Rust/Python layout: pure-Python package lives in python/smol, the native
 # extension compiles to smol._native.
