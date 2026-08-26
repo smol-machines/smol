@@ -33,6 +33,7 @@ from .types import (
     ImageInfo,
     MachineConfig,
     MachineUsageReport,
+    PortableCheckpointInfo,
     PortEndpoint,
     PortSpec,
 )
@@ -76,6 +77,18 @@ def _usage_report_from(r: dict[str, Any], machine_id: str) -> MachineUsageReport
     )
 
 
+def _checkpoint_from(r: dict[str, Any]) -> PortableCheckpointInfo:
+    return PortableCheckpointInfo(
+        id=str(r.get("id", "")),
+        machine_id=str(r.get("machineId", "")),
+        status=str(r.get("status", "")),
+        size_bytes=int(r.get("sizeBytes", 0)),
+        arch=str(r.get("arch", "")),
+        created_at=str(r.get("createdAt", "")),
+        download_url=str(r.get("downloadUrl", "")),
+    )
+
+
 class Transport(Protocol):
     @property
     def name(self) -> str: ...
@@ -107,6 +120,8 @@ class Transport(Protocol):
     def delete(self) -> None: ...
     def delete_with_usage(self) -> MachineUsageReport: ...
     def usage(self) -> MachineUsageReport: ...
+    def checkpoint(self) -> PortableCheckpointInfo: ...
+    def checkpoints(self) -> "list[PortableCheckpointInfo]": ...
     def fork(
         self,
         name: str,
@@ -457,6 +472,16 @@ class LocalTransport:
             "usage() is a cloud-only metering feature; the local target has no billing."
         )
 
+    def checkpoint(self) -> PortableCheckpointInfo:
+        raise NotSupportedError(
+            "durable portable checkpoint capture is currently available on the cloud target."
+        )
+
+    def checkpoints(self) -> "list[PortableCheckpointInfo]":
+        raise NotSupportedError(
+            "durable portable checkpoint listing is currently available on the cloud target."
+        )
+
     def fork(
         self,
         name: str,
@@ -804,6 +829,22 @@ class CloudTransport:
     def usage(self) -> MachineUsageReport:
         r = _cloud_fetch(self._base, self._key, "GET", f"/v1/machines/{self._id}/usage") or {}
         return _usage_report_from(r, self._id)
+
+    def checkpoint(self) -> PortableCheckpointInfo:
+        r = _cloud_fetch(
+            self._base,
+            self._key,
+            "POST",
+            f"/v1/machines/{self._id}/checkpoints",
+            timeout=30 * 60,
+        ) or {}
+        return _checkpoint_from(r)
+
+    def checkpoints(self) -> "list[PortableCheckpointInfo]":
+        rows = _cloud_fetch(
+            self._base, self._key, "GET", f"/v1/machines/{self._id}/checkpoints"
+        ) or []
+        return [_checkpoint_from(row) for row in rows]
 
     def fork(
         self,
@@ -1444,6 +1485,65 @@ def connect_transport(machine_id: str, conn: Optional[ConnectOptions] = None) ->
             raise
         m = hit
     return CloudTransport(base_url, api_key, str(m.get("id", machine_id)), str(m.get("name", machine_id)))
+
+
+def restore_checkpoint_transport(
+    checkpoint_id: str,
+    name: str,
+    conn: Optional[ConnectOptions] = None,
+) -> Transport:
+    """Restore one durable cloud checkpoint and return a ready machine."""
+    if not checkpoint_id or not name:
+        raise InvalidConfigError("checkpoint id and restored machine name are required.")
+    conn = conn or ConnectOptions(target="cloud")
+    explicit_key = conn.api_key or os.environ.get("SMOL_CLOUD_TOKEN")
+    use_cloud = conn.target == "cloud" or (conn.target != "local" and bool(explicit_key))
+    if not use_cloud:
+        raise NotSupportedError(
+            "restore_checkpoint() requires the cloud target; pass ConnectOptions(target='cloud')."
+        )
+    cli_key, cli_url = _cli_session()
+    api_key = explicit_key or cli_key or _cli_config_api_key()
+    if not api_key:
+        raise InvalidConfigError(
+            f"restore_checkpoint requires an api_key — {_NO_KEY_HINT}."
+        )
+    base_url = (
+        conn.base_url
+        or os.environ.get("SMOL_CLOUD_URL")
+        or cli_url
+        or DEFAULT_CLOUD_URL
+    ).rstrip("/")
+    checkpoint_path = quote(checkpoint_id, safe="")
+    created = _cloud_fetch(
+        base_url,
+        api_key,
+        "POST",
+        f"/v1/checkpoints/{checkpoint_path}/restore",
+        json_body={"name": name},
+    ) or {}
+    machine_id = str(created["id"])
+    try:
+        _cloud_fetch(
+            base_url,
+            api_key,
+            "POST",
+            f"/v1/machines/{machine_id}/start",
+            timeout=30 * 60,
+        )
+        _wait_for_ready(base_url, api_key, machine_id)
+    except BaseException:
+        try:
+            _cloud_fetch(base_url, api_key, "DELETE", f"/v1/machines/{machine_id}")
+        except Exception:  # noqa: BLE001 - preserve the restore failure
+            pass
+        raise
+    return CloudTransport(
+        base_url,
+        api_key,
+        machine_id,
+        str(created.get("name") or name),
+    )
 
 
 def _generate_name() -> str:

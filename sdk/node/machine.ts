@@ -13,6 +13,7 @@ import { ExecutionError } from "./errors";
 import {
   makeTransport,
   connectTransport,
+  restoreCheckpointTransport,
   type RawExec,
   type Transport,
 } from "./transport";
@@ -27,6 +28,7 @@ import type {
   ImageInfo,
   MachineConfig,
   MachineUsageReport,
+  PortableCheckpointInfo,
   PortEndpoint,
   PortSpec,
   WaitReadyOptions,
@@ -95,6 +97,16 @@ export class Machine {
     conn: ConnectOptions = {},
   ): Promise<Machine> {
     return new Machine(await connectTransport(id, conn));
+  }
+
+  /** Restore a durable cloud checkpoint into a new machine and wait until it is
+   * ready. The checkpoint retains RAM, CPU/device state, and exact disk state. */
+  static async restoreCheckpoint(
+    checkpointId: string,
+    name: string,
+    conn: ConnectOptions = { target: "cloud" },
+  ): Promise<Machine> {
+    return new Machine(await restoreCheckpointTransport(checkpointId, name, conn));
   }
 
   /** The machine's name / identifier. */
@@ -247,6 +259,16 @@ export class Machine {
    *  final once the machine stops or is deleted. */
   usage(): Promise<MachineUsageReport> {
     return this.transport.usage();
+  }
+
+  /** Capture this running checkpointable machine into durable cloud storage. */
+  checkpoint(): Promise<PortableCheckpointInfo> {
+    return this.transport.checkpoint();
+  }
+
+  /** List durable portable checkpoints captured from this machine. */
+  checkpoints(): Promise<PortableCheckpointInfo[]> {
+    return this.transport.checkpoints();
   }
 
   /** Fork this running, forkable machine into a new clone via copy-on-write live

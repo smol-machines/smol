@@ -264,6 +264,17 @@ export interface MachineUsageReport {
   cost: MachineCostBreakdown;
 }
 
+/** Durable live machine checkpoint stored by the cloud control plane. */
+export interface PortableCheckpointInfo {
+  id: string;
+  machineId: string;
+  status: string;
+  sizeBytes: number;
+  arch: string;
+  createdAt: string;
+  downloadUrl: string;
+}
+
 /** Selects and configures the backend. Local (embedded) is the default. */
 export interface ConnectOptions {
   /** 'local' = embedded engine (default). 'cloud' = smolfleet remote. */

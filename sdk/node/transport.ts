@@ -33,6 +33,7 @@ import type {
   ImageInfo,
   MachineConfig,
   MachineUsageReport,
+  PortableCheckpointInfo,
   PortEndpoint,
   PortSpec,
   WaitReadyOptions,
@@ -113,6 +114,8 @@ export interface Transport {
   deleteWithUsage(): Promise<MachineUsageReport>;
   /** Cloud only: metered usage + cost; readable up to 30 days after delete. */
   usage(): Promise<MachineUsageReport>;
+  checkpoint(): Promise<PortableCheckpointInfo>;
+  checkpoints(): Promise<PortableCheckpointInfo[]>;
   fork(name: string, options?: PortSpec[] | ForkOptions): Promise<Transport>;
   forkBatch(opts: ForkBatchOptions): Promise<Transport[]>;
   assign(
@@ -496,6 +499,18 @@ class LocalTransport implements Transport {
   async usage(): Promise<MachineUsageReport> {
     throw new NotSupportedError(
       "usage() is a cloud-only metering feature; the local target has no billing.",
+    );
+  }
+
+  async checkpoint(): Promise<PortableCheckpointInfo> {
+    throw new NotSupportedError(
+      "durable portable checkpoint capture is currently available on the cloud target.",
+    );
+  }
+
+  async checkpoints(): Promise<PortableCheckpointInfo[]> {
+    throw new NotSupportedError(
+      "durable portable checkpoint listing is currently available on the cloud target.",
     );
   }
 
@@ -1072,6 +1087,23 @@ class CloudTransport implements Transport {
     );
   }
 
+  async checkpoint(): Promise<PortableCheckpointInfo> {
+    return cloudFetch<PortableCheckpointInfo>(
+      this.conn,
+      "POST",
+      `/v1/machines/${this.id}/checkpoints`,
+      { timeoutMs: 30 * 60 * 1_000 },
+    );
+  }
+
+  async checkpoints(): Promise<PortableCheckpointInfo[]> {
+    return cloudFetch<PortableCheckpointInfo[]>(
+      this.conn,
+      "GET",
+      `/v1/machines/${this.id}/checkpoints`,
+    );
+  }
+
   async fork(name: string, options?: PortSpec[] | ForkOptions): Promise<Transport> {
     // Live-RAM CoW clone on the golden's node. The control plane returns the
     // running clone; wait for its agent so the returned handle is usable.
@@ -1507,4 +1539,53 @@ export async function connectTransport(
     m = hit;
   }
   return new CloudTransport(cloudConn, m.name ?? id, m.id ?? id);
+}
+
+/** Restore a durable cloud checkpoint into a new machine, then return only once
+ * the restored guest is ready. */
+export async function restoreCheckpointTransport(
+  checkpointId: string,
+  name: string,
+  conn: ConnectOptions,
+): Promise<Transport> {
+  if (!checkpointId || !name) {
+    throw new InvalidConfigError("checkpoint id and restored machine name are required.");
+  }
+  if (!selectsCloud(conn)) {
+    throw new NotSupportedError(
+      "restoreCheckpoint() requires the cloud target; pass { target: 'cloud' }.",
+    );
+  }
+  const explicitKey = conn.apiKey ?? process.env.SMOL_CLOUD_TOKEN;
+  const { apiKey: cliKey, endpoint: cliUrl } = cliSession(conn.target);
+  const key = explicitKey ?? cliKey ?? cliConfigApiKey();
+  if (!key) {
+    throw new InvalidConfigError(
+      `restoreCheckpoint requires an API key — ${NO_KEY_HINT}.`,
+    );
+  }
+  const baseUrl = (
+    conn.baseUrl ??
+    process.env.SMOL_CLOUD_URL ??
+    cliUrl ??
+    DEFAULT_CLOUD_URL
+  ).replace(/\/+$/, "");
+  const cloudConn: CloudConn = { baseUrl, apiKey: key };
+  const created = await cloudFetch<MachineInfo>(
+    cloudConn,
+    "POST",
+    `/v1/checkpoints/${encodeURIComponent(checkpointId)}/restore`,
+    { json: { name } },
+  );
+  const id = created.id;
+  try {
+    await cloudFetch(cloudConn, "POST", `/v1/machines/${id}/start`, {
+      timeoutMs: 30 * 60 * 1_000,
+    });
+    await waitForReady(cloudConn, id);
+  } catch (error) {
+    await cloudFetch(cloudConn, "DELETE", `/v1/machines/${id}`).catch(() => {});
+    throw error;
+  }
+  return new CloudTransport(cloudConn, created.name ?? name, id);
 }

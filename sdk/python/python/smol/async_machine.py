@@ -37,6 +37,7 @@ from .types import (
     ImageInfo,
     MachineConfig,
     MachineUsageReport,
+    PortableCheckpointInfo,
     PortEndpoint,
     PortSpec,
 )
@@ -77,6 +78,19 @@ class AsyncMachine:
         before doing work."""
         m = await asyncio.to_thread(Machine.connect, machine_id, conn)
         return cls(m)
+
+    @classmethod
+    async def restore_checkpoint(
+        cls,
+        checkpoint_id: str,
+        name: str,
+        conn: Optional[ConnectOptions] = None,
+    ) -> "AsyncMachine":
+        """Restore a durable cloud checkpoint and await readiness."""
+        machine = await asyncio.to_thread(
+            Machine.restore_checkpoint, checkpoint_id, name, conn
+        )
+        return cls(machine)
 
     @property
     def name(self) -> str:
@@ -192,6 +206,14 @@ class AsyncMachine:
         """Metered usage + cost for this machine (cloud target); readable up to
         30 days after deletion."""
         return await asyncio.to_thread(self._m.usage)
+
+    async def checkpoint(self) -> PortableCheckpointInfo:
+        """Capture this running checkpointable machine into durable cloud storage."""
+        return await asyncio.to_thread(self._m.checkpoint)
+
+    async def checkpoints(self) -> "list[PortableCheckpointInfo]":
+        """List durable portable checkpoints captured from this machine."""
+        return await asyncio.to_thread(self._m.checkpoints)
 
     async def fork(
         self,

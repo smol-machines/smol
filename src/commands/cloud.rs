@@ -508,6 +508,9 @@ pub enum CloudSubcommand {
     ///   smol cloud export myapp --tag v1
     Export(CloudExportArgs),
 
+    /// Capture, list, download, restore, or delete portable live checkpoints.
+    Checkpoint(CloudCheckpointArgs),
+
     /// Mint an anonymous share link for a machine's published app: anyone with
     /// the URL can reach it without a smolmachines account.
     ///
@@ -534,6 +537,59 @@ pub struct CloudExportArgs {
     /// Tag for the artifact (default: latest)
     #[arg(long, default_value = "latest")]
     pub tag: String,
+}
+
+/// Arguments for `smol cloud checkpoint`.
+#[derive(Args, Debug)]
+pub struct CloudCheckpointArgs {
+    #[command(subcommand)]
+    pub command: CloudCheckpointSubcommand,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum CloudCheckpointSubcommand {
+    /// Capture a running checkpointable machine into durable cloud storage.
+    Create {
+        /// Machine name or ID.
+        machine: String,
+    },
+    /// List a machine's portable checkpoints.
+    Ls {
+        /// Machine name or ID.
+        machine: String,
+    },
+    /// Download a checkpoint as a `.smolcheckpoint` artifact.
+    Download {
+        /// Portable checkpoint ID.
+        checkpoint: String,
+        /// Destination path (default: `<checkpoint>.smolcheckpoint`).
+        #[arg(short, long)]
+        output: Option<std::path::PathBuf>,
+    },
+    /// Create and start a machine from a portable checkpoint.
+    Restore {
+        /// Portable checkpoint ID.
+        checkpoint: String,
+        /// Name for the restored machine.
+        #[arg(short, long)]
+        name: String,
+    },
+    /// Delete an unused portable checkpoint.
+    Rm {
+        /// Portable checkpoint ID.
+        checkpoint: String,
+    },
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PortableCheckpoint {
+    id: String,
+    machine_id: String,
+    status: String,
+    size_bytes: u64,
+    arch: String,
+    created_at: String,
 }
 
 impl CloudExportArgs {
@@ -776,10 +832,133 @@ impl CloudCmd {
                 .run()
             }
             CloudSubcommand::Export(a) => export_machine(a),
+            CloudSubcommand::Checkpoint(a) => checkpoint(a),
             CloudSubcommand::Share(a) => share_machine(a),
             CloudSubcommand::Unshare(a) => unshare_machine(a),
         }
     }
+}
+
+fn print_checkpoint(checkpoint: &PortableCheckpoint) {
+    println!("{}", checkpoint.id);
+    println!("  machine  {}", checkpoint.machine_id);
+    println!("  status   {}", checkpoint.status);
+    println!("  arch     {}", checkpoint.arch);
+    println!(
+        "  size     {:.1} MiB",
+        checkpoint.size_bytes as f64 / (1024.0 * 1024.0)
+    );
+    println!("  created  {}", checkpoint.created_at);
+}
+
+fn checkpoint(args: CloudCheckpointArgs) -> Result<()> {
+    let (http, cloud_config) = cloud_client()?;
+    let endpoint = cloud_config.endpoint()?.to_string();
+    tokio::runtime::Runtime::new()?.block_on(async move {
+        match args.command {
+            CloudCheckpointSubcommand::Create { machine } => {
+                let id = resolve_machine_id(&http, &endpoint, &machine).await?;
+                let response = http
+                    .post(format!("{endpoint}/v1/machines/{id}/checkpoints"))
+                    .send()
+                    .await?;
+                let checkpoint: PortableCheckpoint = check_response(response, "capture checkpoint")
+                    .await?
+                    .json()
+                    .await?;
+                print_checkpoint(&checkpoint);
+            }
+            CloudCheckpointSubcommand::Ls { machine } => {
+                let id = resolve_machine_id(&http, &endpoint, &machine).await?;
+                let response = http
+                    .get(format!("{endpoint}/v1/machines/{id}/checkpoints"))
+                    .send()
+                    .await?;
+                let checkpoints: Vec<PortableCheckpoint> =
+                    check_response(response, "list checkpoints")
+                        .await?
+                        .json()
+                        .await?;
+                if checkpoints.is_empty() {
+                    println!("No portable checkpoints.");
+                } else {
+                    for (index, checkpoint) in checkpoints.iter().enumerate() {
+                        if index > 0 {
+                            println!();
+                        }
+                        print_checkpoint(checkpoint);
+                    }
+                }
+            }
+            CloudCheckpointSubcommand::Download { checkpoint, output } => {
+                use futures_util::StreamExt;
+                use tokio::io::AsyncWriteExt;
+
+                let output = output.unwrap_or_else(|| {
+                    std::path::PathBuf::from(format!("{checkpoint}.smolcheckpoint"))
+                });
+                let response = http
+                    .get(format!("{endpoint}/v1/checkpoints/{checkpoint}/download"))
+                    .send()
+                    .await?;
+                let response = check_response(response, "download checkpoint").await?;
+                if output.exists() {
+                    anyhow::bail!("refusing to overwrite {}", output.display());
+                }
+                let parent = output
+                    .parent()
+                    .filter(|path| !path.as_os_str().is_empty())
+                    .unwrap_or_else(|| std::path::Path::new("."));
+                let staged = tempfile::Builder::new()
+                    .prefix(".smolcheckpoint-")
+                    .tempfile_in(parent)
+                    .with_context(|| format!("stage download next to {}", output.display()))?;
+                let mut file = tokio::fs::File::from_std(staged.reopen()?);
+                let mut stream = response.bytes_stream();
+                while let Some(chunk) = stream.next().await {
+                    file.write_all(&chunk?).await?;
+                }
+                file.flush().await?;
+                file.sync_all().await?;
+                drop(file);
+                staged
+                    .persist_noclobber(&output)
+                    .map_err(|error| error.error)
+                    .with_context(|| format!("publish {}", output.display()))?;
+                println!("Downloaded {}", output.display());
+            }
+            CloudCheckpointSubcommand::Restore { checkpoint, name } => {
+                let response = http
+                    .post(format!("{endpoint}/v1/checkpoints/{checkpoint}/restore"))
+                    .json(&serde_json::json!({ "name": name }))
+                    .send()
+                    .await?;
+                let machine: CloudMachine = check_response(response, "restore checkpoint")
+                    .await?
+                    .json()
+                    .await?;
+                let response = http
+                    .post(format!("{endpoint}/v1/machines/{}/start", machine.id))
+                    .send()
+                    .await?;
+                check_response(response, "start restored machine").await?;
+                println!(
+                    "Restored {} ({})",
+                    machine.name.as_deref().unwrap_or(&machine.id),
+                    machine.id
+                );
+            }
+            CloudCheckpointSubcommand::Rm { checkpoint } => {
+                let response = http
+                    .delete(format!("{endpoint}/v1/checkpoints/{checkpoint}"))
+                    .send()
+                    .await?;
+                check_response(response, "delete checkpoint").await?;
+                println!("Deleted {checkpoint}");
+            }
+        }
+        Ok(())
+    })
 }
 
 /// `smol cloud export <machine> [--tag <t>]` — export a stopped cloud machine to

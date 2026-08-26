@@ -72,6 +72,20 @@ class Handler(BaseHTTPRequestHandler):
         if self.path.startswith(f"/v1/machines/{MACHINE_ID}/start"):
             captured["start_path"] = self.path  # carries ?forkable=true when set
             return self._send(200, json.dumps({"id": MACHINE_ID, "state": "started"}).encode())
+        if self.path == f"/v1/machines/{MACHINE_ID}/checkpoints":
+            captured["checkpoint_created"] = True
+            return self._send(201, json.dumps({
+                "id": "ckpt-1", "machineId": MACHINE_ID, "status": "available",
+                "sizeBytes": 4096, "arch": "amd64", "createdAt": "2026-08-26T00:00:00Z",
+                "downloadUrl": "/v1/checkpoints/ckpt-1/download",
+            }).encode())
+        if self.path == "/v1/checkpoints/ckpt-1/restore":
+            captured["restore_body"] = json.loads(self._read() or b"{}")
+            return self._send(201, json.dumps({
+                "id": "mach-restored", "name": captured["restore_body"]["name"], "state": "stopped"
+            }).encode())
+        if self.path == "/v1/machines/mach-restored/start":
+            return self._send(200, json.dumps({"id": "mach-restored", "state": "started"}).encode())
         if self.path == f"/v1/machines/{MACHINE_ID}/fork":
             captured["fork_body"] = json.loads(self._read() or b"{}")
             return self._send(201, json.dumps({
@@ -149,6 +163,16 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(401, b"bad token")
         if self.path == f"/v1/machines/{MACHINE_ID}":
             return self._send(200, json.dumps(readiness_response(MACHINE_ID, 2)).encode())
+        if self.path == f"/v1/machines/{MACHINE_ID}/checkpoints":
+            return self._send(200, json.dumps([{
+                "id": "ckpt-1", "machineId": MACHINE_ID, "status": "available",
+                "sizeBytes": 4096, "arch": "amd64", "createdAt": "2026-08-26T00:00:00Z",
+                "downloadUrl": "/v1/checkpoints/ckpt-1/download",
+            }]).encode())
+        if self.path == "/v1/machines/mach-restored":
+            return self._send(200, json.dumps({
+                "id": "mach-restored", "state": "running", "ready": True
+            }).encode())
         if self.path == "/v1/machines/mach-wait":
             return self._send(200, json.dumps(readiness_response("mach-wait", 5)).encode())
         if self.path == "/v1/machines/mach-timeout":
@@ -252,6 +276,23 @@ def main() -> int:
         check("ready() reads the readiness flag", m.ready() is True)
         check("ready_at() reads the readiness timestamp",
               m.ready_at() == "2026-07-22T20:01:41.152Z", str(m.ready_at()))
+
+        checkpoint = m.checkpoint()
+        check("checkpoint() captures durable live state",
+              captured.get("checkpoint_created") is True
+              and checkpoint.id == "ckpt-1" and checkpoint.size_bytes == 4096,
+              str(checkpoint))
+        checkpoints = m.checkpoints()
+        check("checkpoints() lists captured state",
+              len(checkpoints) == 1 and checkpoints[0].arch == "amd64", str(checkpoints))
+        restored = Machine.restore_checkpoint(
+            "ckpt-1", "restored",
+            ConnectOptions(target="cloud", base_url=base, api_key="smk_testkey"),
+        )
+        check("restore_checkpoint() returns a ready machine",
+              captured.get("restore_body", {}).get("name") == "restored"
+              and restored.id == "mach-restored" and restored.ready(),
+              str(captured.get("restore_body")))
         m.wait_until_ready(timeout_s=2, interval_s=0.05)
         check("wait_until_ready() resolves on ready", True)
 

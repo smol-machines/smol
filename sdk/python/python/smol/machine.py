@@ -15,7 +15,12 @@ from __future__ import annotations
 import uuid
 from typing import Any, Optional
 
-from .transport import Transport, connect_transport, make_transport
+from .transport import (
+    Transport,
+    connect_transport,
+    make_transport,
+    restore_checkpoint_transport,
+)
 from .types import (
     ConnectOptions,
     ExecOptions,
@@ -23,6 +28,7 @@ from .types import (
     ImageInfo,
     MachineConfig,
     MachineUsageReport,
+    PortableCheckpointInfo,
     PortEndpoint,
     PortSpec,
 )
@@ -79,6 +85,22 @@ class Machine:
             ``ConnectOptions(target='cloud', api_key=…)`` or ``SMOL_CLOUD_TOKEN``).
         """
         return cls(connect_transport(machine_id, conn))
+
+    @classmethod
+    def restore_checkpoint(
+        cls,
+        checkpoint_id: str,
+        name: str,
+        conn: Optional[ConnectOptions] = None,
+    ) -> "Machine":
+        """Restore a durable cloud checkpoint and wait until it is ready."""
+        return cls(
+            restore_checkpoint_transport(
+                checkpoint_id,
+                name,
+                conn or ConnectOptions(target="cloud"),
+            )
+        )
 
     @property
     def name(self) -> str:
@@ -209,6 +231,14 @@ class Machine:
         samples every few minutes, so a mid-life read is a lower bound; the
         report is final once the machine stops or is deleted."""
         return self._t.usage()
+
+    def checkpoint(self) -> PortableCheckpointInfo:
+        """Capture this running checkpointable machine into durable cloud storage."""
+        return self._t.checkpoint()
+
+    def checkpoints(self) -> "list[PortableCheckpointInfo]":
+        """List durable portable checkpoints captured from this machine."""
+        return self._t.checkpoints()
 
     def fork(
         self,

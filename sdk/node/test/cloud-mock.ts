@@ -81,6 +81,36 @@ const server = createServer(async (req, res) => {
       ports: seen.forkBody.ports ?? [],
     });
   }
+  if (method === "POST" && url === "/v1/machines/m1/checkpoints") {
+    seen.checkpointCreate = true;
+    return json(201, {
+      id: "ckpt-1",
+      machineId: "m1",
+      status: "available",
+      sizeBytes: 4096,
+      arch: "amd64",
+      createdAt: "2026-08-26T00:00:00Z",
+      downloadUrl: "/v1/checkpoints/ckpt-1/download",
+    });
+  }
+  if (method === "GET" && url === "/v1/machines/m1/checkpoints") {
+    return json(200, [{
+      id: "ckpt-1",
+      machineId: "m1",
+      status: "available",
+      sizeBytes: 4096,
+      arch: "amd64",
+      createdAt: "2026-08-26T00:00:00Z",
+      downloadUrl: "/v1/checkpoints/ckpt-1/download",
+    }]);
+  }
+  if (method === "POST" && url === "/v1/checkpoints/ckpt-1/restore") {
+    seen.restoreBody = JSON.parse((await readBody(req)).toString() || "{}");
+    return json(201, { id: "m-restored", name: seen.restoreBody.name, state: "stopped" });
+  }
+  if (method === "POST" && url === "/v1/machines/m-restored/start") {
+    return json(200, { id: "m-restored", state: "started" });
+  }
   if (method === "POST" && url === "/v1/machines/m1/fork-batch") {
     seen.forkBatchBody = JSON.parse((await readBody(req)).toString() || "{}");
     const n = seen.forkBatchBody.count ?? seen.forkBatchBody.names?.length ?? 0;
@@ -142,6 +172,8 @@ const server = createServer(async (req, res) => {
   }
   if (method === "GET" && url === "/v1/machines/m1")
     return json(200, readinessResponse("m1", 2));
+  if (method === "GET" && url === "/v1/machines/m-restored")
+    return json(200, { id: "m-restored", state: "running", ready: true });
   if (method === "GET" && url === "/v1/machines/m-wait")
     return json(200, readinessResponse("m-wait", 5));
   if (method === "GET" && url === "/v1/machines/m-timeout")
@@ -423,6 +455,25 @@ async function main(): Promise<void> {
     ports: [{ host: 18080, guest: 80 }],
     checkpointable: true,
   });
+
+  const checkpoint = await m.checkpoint();
+  check(
+    "checkpoint captures durable live state",
+    seen.checkpointCreate === true && checkpoint.id === "ckpt-1" && checkpoint.sizeBytes === 4096,
+    JSON.stringify(checkpoint),
+  );
+  const checkpoints = await m.checkpoints();
+  check("checkpoints lists captured state", checkpoints.length === 1 && checkpoints[0].arch === "amd64");
+  const restored = await Machine.restoreCheckpoint(
+    "ckpt-1",
+    "restored",
+    { target: "cloud", baseUrl, apiKey: "smk_test123" },
+  );
+  check(
+    "restoreCheckpoint returns a ready machine",
+    seen.restoreBody?.name === "restored" && restored.id === "m-restored" && await restored.ready(),
+    JSON.stringify(seen.restoreBody),
+  );
   check(
     "fork hit POST /fork with clone name",
     seen.forkBody?.name === "rollout-1",

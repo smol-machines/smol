@@ -16,6 +16,7 @@ __all__ = [
     "ConnectOptions",
     "MachineState",
     "MachineUsageReport",
+    "PortableCheckpointInfo",
     "PortEndpoint",
 ]
 
@@ -221,6 +222,19 @@ class MachineUsageReport:
     to_ts: str
     usage: dict[str, float]
     cost: dict[str, int]
+
+
+@dataclass
+class PortableCheckpointInfo:
+    """Durable live machine checkpoint stored by the cloud control plane."""
+
+    id: str
+    machine_id: str
+    status: str
+    size_bytes: int
+    arch: str
+    created_at: str
+    download_url: str
 
 
 @dataclass
