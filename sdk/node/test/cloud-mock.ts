@@ -419,7 +419,10 @@ async function main(): Promise<void> {
   );
 
   // --- fork: live-RAM RL clone over the cloud ---
-  const clone = await m.fork("rollout-1", [{ host: 18080, guest: 80 }]);
+  const clone = await m.fork("rollout-1", {
+    ports: [{ host: 18080, guest: 80 }],
+    checkpointable: true,
+  });
   check(
     "fork hit POST /fork with clone name",
     seen.forkBody?.name === "rollout-1",
@@ -430,6 +433,11 @@ async function main(): Promise<void> {
     JSON.stringify(seen.forkBody?.ports) ===
       JSON.stringify([{ port: 80, hostPort: 18080 }]),
     JSON.stringify(seen.forkBody?.ports),
+  );
+  check(
+    "fork can promote the clone to a checkpoint source",
+    seen.forkBody?.forkable === true,
+    JSON.stringify(seen.forkBody),
   );
   check(
     "fork returns running clone handle",

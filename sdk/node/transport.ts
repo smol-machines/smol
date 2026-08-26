@@ -29,6 +29,7 @@ import type {
   ExecOptions,
   AssignOptions,
   ForkBatchOptions,
+  ForkOptions,
   ImageInfo,
   MachineConfig,
   MachineUsageReport,
@@ -112,7 +113,7 @@ export interface Transport {
   deleteWithUsage(): Promise<MachineUsageReport>;
   /** Cloud only: metered usage + cost; readable up to 30 days after delete. */
   usage(): Promise<MachineUsageReport>;
-  fork(name: string, ports?: PortSpec[]): Promise<Transport>;
+  fork(name: string, options?: PortSpec[] | ForkOptions): Promise<Transport>;
   forkBatch(opts: ForkBatchOptions): Promise<Transport[]>;
   assign(
     opts: AssignOptions,
@@ -498,16 +499,19 @@ class LocalTransport implements Transport {
     );
   }
 
-  async fork(name: string, ports?: PortSpec[]): Promise<Transport> {
+  async fork(name: string, options?: PortSpec[] | ForkOptions): Promise<Transport> {
     // Local live-RAM CoW clone via the embedded engine. The golden must have been
     // started forkable (MachineConfig({ forkable: true })).
-    const nativePorts = (ports ?? []).map((p) => ({
+    const opts: ForkOptions = Array.isArray(options) ? { ports: options } : (options ?? {});
+    const nativePorts = (opts.ports ?? []).map((p) => ({
       host: p.host,
       guest: p.guest,
     }));
     let clone: LocalTransport | undefined;
     try {
-      clone = new LocalTransport(await this.inner.fork(name, nativePorts));
+      clone = new LocalTransport(
+        await this.inner.fork(name, nativePorts, opts.checkpointable ?? false),
+      );
       await clone.waitUntilReady();
       return clone; // ctor registers for cleanup
     } catch (e) {
@@ -1068,10 +1072,11 @@ class CloudTransport implements Transport {
     );
   }
 
-  async fork(name: string, ports?: PortSpec[]): Promise<Transport> {
+  async fork(name: string, options?: PortSpec[] | ForkOptions): Promise<Transport> {
     // Live-RAM CoW clone on the golden's node. The control plane returns the
     // running clone; wait for its agent so the returned handle is usable.
-    const portBody = (ports ?? []).map((p) => ({
+    const opts: ForkOptions = Array.isArray(options) ? { ports: options } : (options ?? {});
+    const portBody = (opts.ports ?? []).map((p) => ({
       port: p.guest,
       hostPort: p.host,
     }));
@@ -1080,7 +1085,11 @@ class CloudTransport implements Transport {
       "POST",
       `/v1/machines/${this.id}/fork`,
       {
-        json: { name, ports: portBody },
+        json: {
+          name,
+          ports: portBody,
+          ...(opts.checkpointable ? { forkable: true } : {}),
+        },
       },
     );
     const cloneId = clone.id;

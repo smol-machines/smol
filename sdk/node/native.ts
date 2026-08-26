@@ -88,7 +88,11 @@ export interface NapiMachine {
   guestPorts(): number[];
   start(): Promise<void>;
   startForkable(): Promise<void>;
-  fork(name: string, ports?: NativePortMapping[]): Promise<NapiMachine>;
+  fork(
+    name: string,
+    ports?: NativePortMapping[],
+    checkpointable?: boolean,
+  ): Promise<NapiMachine>;
   exec(
     command: string[],
     options?: NativeExecOptions,

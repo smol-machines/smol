@@ -176,7 +176,7 @@ export declare class NapiMachine {
    * live RAM + disks (same host). `ports` are `{ host, guest }` inbound
    * forwards for the clone. Returns a handle to the running clone.
    */
-  fork(name: string, ports?: Array<PortMappingConfig> | undefined | null): Promise<NapiMachine>
+  fork(name: string, ports?: Array<PortMappingConfig> | undefined | null, checkpointable?: boolean | undefined | null): Promise<NapiMachine>
   /** Execute a command directly in the VM (not in a container). */
   exec(command: Array<string>, options?: ExecOptions | undefined | null): Promise<ExecResult>
   /**

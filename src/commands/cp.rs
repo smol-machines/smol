@@ -72,8 +72,11 @@ impl CpCmd {
             .and_then(|db| db.get_vm(&handle).ok().flatten())
         {
             if let Some(image) = record.image.as_ref() {
-                let owner =
-                    smolvm::workload::persistent_overlay_owner(&handle, record.golden.as_deref());
+                let owner = smolvm::workload::persistent_overlay_owner(
+                    &handle,
+                    record.golden.as_deref(),
+                    record.fork_overlay_owner.as_deref(),
+                );
                 client.run_non_interactive(
                     RunConfig::new(image, vec!["/bin/true".to_string()])
                         .with_persistent_overlay(Some(owner)),

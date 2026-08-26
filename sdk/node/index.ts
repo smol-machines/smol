@@ -39,6 +39,7 @@ export type {
   ResourceSpec,
   MountSpec,
   PortSpec,
+  ForkOptions,
   ForkBatchOptions,
   AssignOptions,
   ExecOptions,

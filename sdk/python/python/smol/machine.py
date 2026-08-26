@@ -210,7 +210,13 @@ class Machine:
         report is final once the machine stops or is deleted."""
         return self._t.usage()
 
-    def fork(self, name: str, ports: Optional[list[PortSpec]] = None) -> "Machine":
+    def fork(
+        self,
+        name: str,
+        ports: Optional[list[PortSpec]] = None,
+        *,
+        checkpointable: bool = False,
+    ) -> "Machine":
         """Fork this running, forkable machine into a new clone via copy-on-write
         live RAM + disks (cloud target). The clone inherits the golden's warm
         in-memory state and runs on the same node; forks are fast (~tens of ms)
@@ -222,11 +228,19 @@ class Machine:
         :param ports: optional pinned inbound port forwards for the clone (each
             ``PortSpec(host, guest)``); by default the node allocates fresh host
             ports so clones don't collide.
+        :param checkpointable: materialize this child as a new checkpoint source
+            so it can be forked again. This pays one eager guest-memory copy.
         :returns: a :class:`Machine` handle to the running clone.
         """
-        return Machine(self._t.fork(name, ports))
+        return Machine(self._t.fork(name, ports, checkpointable=checkpointable))
 
-    def branch(self, name: str, ports: Optional[list[PortSpec]] = None) -> "Machine":
+    def branch(
+        self,
+        name: str,
+        ports: Optional[list[PortSpec]] = None,
+        *,
+        checkpointable: bool = False,
+    ) -> "Machine":
         """Branch a rollback-isolated clone from this checkpoint — the RL/agent
         name for :meth:`fork`. The branch inherits the checkpoint's warm RAM *and*
         disk via copy-on-write, explores independently, and is discarded when
@@ -234,7 +248,7 @@ class Machine:
         filesystem are rolled back for free. Requires this machine to be a
         checkpoint (``MachineConfig(checkpoint=True)``). Alias of :meth:`fork`.
         """
-        return self.fork(name, ports)
+        return self.fork(name, ports, checkpointable=checkpointable)
 
     def fork_batch(
         self,

@@ -472,12 +472,24 @@ impl Machine {
     /// Fork this running, forkable machine into a new clone via copy-on-write
     /// live RAM + disks (same host). `ports` are `(host, guest)` inbound forwards
     /// for the clone. Returns a handle to the running clone.
-    #[pyo3(signature = (name, ports=None))]
-    fn fork(&self, py: Python<'_>, name: String, ports: Option<Vec<(u16, u16)>>) -> PyResult<Self> {
+    #[pyo3(signature = (name, ports=None, checkpointable=false))]
+    fn fork(
+        &self,
+        py: Python<'_>,
+        name: String,
+        ports: Option<Vec<(u16, u16)>>,
+        checkpointable: bool,
+    ) -> PyResult<Self> {
         let pinned = ports.unwrap_or_default();
         let runtime = runtime().map_err(err)?;
-        py.allow_threads(|| runtime.fork_machine(&self.name, &name, &pinned))
-            .map_err(err)?;
+        py.allow_threads(|| {
+            if checkpointable {
+                runtime.fork_checkpointable_machine(&self.name, &name, &pinned)
+            } else {
+                runtime.fork_machine(&self.name, &name, &pinned)
+            }
+        })
+        .map_err(err)?;
         Ok(Machine { name })
     }
 

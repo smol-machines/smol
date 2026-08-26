@@ -1,8 +1,6 @@
 //! smol machine rm — delete a machine (local or cloud).
 
 use clap::Args;
-use smolvm::agent::AgentManager;
-use smolvm::config::SmolvmConfig;
 
 #[derive(Args, Debug)]
 pub struct RmCmd {
@@ -71,33 +69,11 @@ fn confirm_delete(name: &str) -> anyhow::Result<bool> {
 
 /// Delete a local machine: stop it if running, drop the record, remove its data.
 fn run_local(name: &str) -> anyhow::Result<()> {
-    let mut config = SmolvmConfig::load()?;
-
-    let record = config
-        .get_vm(name)
-        .ok_or_else(|| anyhow::anyhow!("machine '{}' not found", name))?
-        .clone();
-
-    // Stop if running
-    if record.actual_state() == smolvm::config::RecordState::Running {
-        if let Ok(manager) = AgentManager::for_vm(name) {
-            println!("Stopping machine '{}'...", name);
-            if let Err(e) = manager.stop() {
-                eprintln!("Warning: failed to stop machine: {}", e);
-            }
-        }
+    let db = smolvm::db::SmolvmDb::open()?;
+    if db.get_vm(name)?.is_none() {
+        anyhow::bail!("machine '{}' not found", name);
     }
-
-    config.remove_vm(name);
-
-    // Clean up data directory
-    let data_dir = smolvm::agent::vm_data_dir(name);
-    if data_dir.exists() {
-        if let Err(e) = std::fs::remove_dir_all(&data_dir) {
-            eprintln!("Warning: failed to clean up data directory: {}", e);
-        }
-    }
-
+    smolvm::embedded::EmbeddedRuntime::with_db(db).delete_machine(name)?;
     println!("Deleted machine: {}", name);
     Ok(())
 }

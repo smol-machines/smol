@@ -23,6 +23,7 @@ import type {
   ExecOptions,
   ExecResult,
   ForkBatchOptions,
+  ForkOptions,
   ImageInfo,
   MachineConfig,
   MachineUsageReport,
@@ -255,11 +256,12 @@ export class Machine {
    *  reset. The golden must have been created with `MachineConfig({ forkable: true })`.
    *
    *  @param name  name for the new clone machine.
-   *  @param ports optional pinned inbound port forwards (`{ host, guest }`); by
-   *               default the node allocates fresh host ports so clones don't collide.
+   *  @param options optional pinned ports and `checkpointable: true` when this
+   *                 child must itself become a fork source. A `PortSpec[]` is
+   *                 still accepted for backwards compatibility.
    *  @returns a `Machine` handle to the running clone. */
-  async fork(name: string, ports?: PortSpec[]): Promise<Machine> {
-    return new Machine(await this.transport.fork(name, ports));
+  async fork(name: string, options?: PortSpec[] | ForkOptions): Promise<Machine> {
+    return new Machine(await this.transport.fork(name, options));
   }
 
   /** Branch a rollback-isolated clone from this checkpoint — the RL/agent name
@@ -268,8 +270,8 @@ export class Machine {
    *  branch starts from the same checkpoint, so both memory and filesystem are
    *  rolled back for free. Requires this machine to be a checkpoint
    *  (`MachineConfig({ checkpoint: true })`). Alias of {@link fork}. */
-  branch(name: string, ports?: PortSpec[]): Promise<Machine> {
-    return this.fork(name, ports);
+  branch(name: string, options?: PortSpec[] | ForkOptions): Promise<Machine> {
+    return this.fork(name, options);
   }
 
   /** Fork this forkable machine into MANY clones in one call — the RL fan-out

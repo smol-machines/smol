@@ -6,15 +6,15 @@ use smolvm::data::network::PortMapping;
 #[derive(Args, Debug)]
 pub struct ForkCmd {
     /// The running, forkable source machine to clone from
-    #[arg(long, value_name = "NAME")]
+    #[arg(long, visible_alias = "from", value_name = "NAME")]
     pub golden: String,
 
     /// Name for the new clone machine
     #[arg(short = 'n', long, value_name = "NAME")]
     pub name: String,
 
-    /// (Rejected) make the clone itself forkable — nested fork is unsupported
-    #[arg(long)]
+    /// Make the clone a new checkpoint source so it can be forked again
+    #[arg(long, visible_alias = "checkpointable")]
     pub forkable: bool,
 
     /// Pin the clone's inbound port forwards (repeatable). Without this, the
@@ -40,6 +40,7 @@ fn cloud_fork_body(
     clone_name: &str,
     ports: &[PortMapping],
     share_weights: bool,
+    forkable: bool,
 ) -> serde_json::Value {
     let ports: Vec<serde_json::Value> = ports
         .iter()
@@ -49,6 +50,7 @@ fn cloud_fork_body(
         "name": clone_name,
         "ports": ports,
         "shareWeights": share_weights,
+        "forkable": forkable,
     })
 }
 
@@ -56,6 +58,12 @@ impl ForkCmd {
     pub fn run(mut self) -> anyhow::Result<()> {
         use super::resolve::{self, Location, Target};
 
+        if self.forkable && self.share_weights {
+            anyhow::bail!(
+                "checkpointable CUDA descendants are not supported; drop either \
+                 `--checkpointable` or `--share-weights`"
+            );
+        }
         let target = Target::from_flags(self.local, self.cloud)?;
         let (location, golden_handle) = resolve::route(Some(&self.golden), target)?;
         self.golden = golden_handle;
@@ -63,17 +71,14 @@ impl ForkCmd {
             return self.run_cloud();
         }
 
-        if self.forkable {
-            anyhow::bail!(
-                "nested fork is not supported: a clone cannot be re-forked, so \
-                 `--forkable` on a fork has no effect (drop it)"
-            );
-        }
-
         let pinned = PortMapping::to_tuples(&self.port);
         let db = smolvm::db::SmolvmDb::open()?;
         let runtime = smolvm::embedded::EmbeddedRuntime::with_db(db.clone());
-        runtime.fork_machine_detached(&self.golden, &self.name, &pinned, self.share_weights)?;
+        if self.forkable {
+            runtime.fork_checkpointable_machine_detached(&self.golden, &self.name, &pinned)?;
+        } else {
+            runtime.fork_machine_detached(&self.golden, &self.name, &pinned, self.share_weights)?;
+        }
 
         let clone = db
             .get_vm(&self.name)?
@@ -92,14 +97,8 @@ impl ForkCmd {
     }
 
     fn run_cloud(self) -> anyhow::Result<()> {
-        if self.forkable {
-            anyhow::bail!(
-                "nested fork is not supported: a clone cannot be re-forked, so \
-                 `--forkable` on a fork has no effect (drop it)"
-            );
-        }
         let clone_name = self.name.clone();
-        let body = cloud_fork_body(&clone_name, &self.port, self.share_weights);
+        let body = cloud_fork_body(&clone_name, &self.port, self.share_weights, self.forkable);
         super::cloud::run_cloud_command(
             Some(self.golden),
             move |http, endpoint, golden_id| async move {
@@ -140,10 +139,11 @@ mod tests {
 
     #[test]
     fn cloud_fork_preserves_weight_sharing_and_ports() {
-        let body = cloud_fork_body("clone", &[PortMapping::new(49152, 9222)], true);
+        let body = cloud_fork_body("clone", &[PortMapping::new(49152, 9222)], true, true);
         assert_eq!(body["name"], "clone");
         assert_eq!(body["ports"][0]["hostPort"], 49152);
         assert_eq!(body["ports"][0]["port"], 9222);
         assert_eq!(body["shareWeights"], true);
+        assert_eq!(body["forkable"], true);
     }
 }

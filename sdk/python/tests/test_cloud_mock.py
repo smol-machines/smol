@@ -317,13 +317,20 @@ def main() -> int:
               str(captured.get("connect_path")))
 
         # --- fork: live-RAM RL clone over the cloud ---
-        clone = m.fork("rollout-1", ports=[PortSpec(host=18080, guest=80)])
+        clone = m.fork(
+            "rollout-1",
+            ports=[PortSpec(host=18080, guest=80)],
+            checkpointable=True,
+        )
         check("fork hit POST /fork", f"POST /v1/machines/{MACHINE_ID}/fork" in captured["hits"])
         check("fork body carries clone name", captured["fork_body"].get("name") == "rollout-1",
               str(captured.get("fork_body")))
         check("fork ports mapped guest+hostPort",
               captured["fork_body"].get("ports") == [{"port": 80, "hostPort": 18080}],
               str(captured["fork_body"].get("ports")))
+        check("fork can promote the clone to a checkpoint source",
+              captured["fork_body"].get("forkable") is True,
+              str(captured.get("fork_body")))
         check("fork returns running clone handle", clone.name == "rollout-1" and clone.state() == "started",
               f"{clone.name}/{clone.state()}")
 

@@ -60,6 +60,16 @@ export interface PortSpec {
   guest: number;
 }
 
+/** Options for one live fork. Passing a `PortSpec[]` directly remains supported
+ * for backwards compatibility. */
+export interface ForkOptions {
+  /** Optional pinned inbound port forwards. */
+  ports?: PortSpec[];
+  /** Materialize this child as a new checkpoint source so it can be forked
+   * again. This pays one eager guest-memory copy when the child boots. */
+  checkpointable?: boolean;
+}
+
 /** Options for forking a forkable golden into many clones at once — the RL
  *  fan-out primitive (GRPO group sampling / eval-task fan-out). Provide either
  *  `count` (clones auto-named `{namePrefix}-{n}`) or explicit `names`. */

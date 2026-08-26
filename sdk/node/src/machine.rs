@@ -54,7 +54,10 @@ impl NapiMachine {
         let (remote_specs, host_specs): (Vec<_>, Vec<_>) = config
             .mounts
             .as_ref()
-            .map(|ms| ms.iter().partition(|m| smolvm::remote_volume::is_remote_source(&m.source)))
+            .map(|ms| {
+                ms.iter()
+                    .partition(|m| smolvm::remote_volume::is_remote_source(&m.source))
+            })
             .unwrap_or_default();
         let mounts: Vec<smolvm::agent::HostMount> = host_specs
             .into_iter()
@@ -139,11 +142,7 @@ impl NapiMachine {
     /// worker thread drives the engine's `exec_streaming_with` and feeds an mpsc
     /// channel the stream drains incrementally (no buffering).
     #[napi]
-    pub fn exec_stream(
-        &self,
-        command: Vec<String>,
-        options: Option<ExecOptions>,
-    ) -> ExecStream {
+    pub fn exec_stream(&self, command: Vec<String>, options: Option<ExecOptions>) -> ExecStream {
         let name = self.name.clone();
         let (env, workdir, timeout) = parse_exec_options(options);
         let (tx, rx) = std::sync::mpsc::channel::<ExecEvent>();
@@ -151,16 +150,11 @@ impl NapiMachine {
         std::thread::spawn(move || {
             match runtime() {
                 Ok(rt) => {
-                    if let Err(e) = rt.exec_streaming_with(
-                        &name,
-                        command,
-                        env,
-                        workdir,
-                        timeout,
-                        move |ev| {
+                    if let Err(e) =
+                        rt.exec_streaming_with(&name, command, env, workdir, timeout, move |ev| {
                             let _ = tx.send(ev);
-                        },
-                    ) {
+                        })
+                    {
                         let _ = err_tx.send(ExecEvent::Error(e.to_string()));
                     }
                 }
@@ -244,6 +238,7 @@ impl NapiMachine {
         &self,
         name: String,
         ports: Option<Vec<PortMappingConfig>>,
+        checkpointable: Option<bool>,
     ) -> napi::Result<NapiMachine> {
         let runtime = runtime().into_napi()?;
         let golden = self.name.clone();
@@ -253,10 +248,16 @@ impl NapiMachine {
             .iter()
             .map(|p| (p.host, p.guest))
             .collect();
-        tokio::task::spawn_blocking(move || runtime.fork_machine(&golden, &clone, &pinned))
-            .await
-            .map_err(join_error)?
-            .into_napi()?;
+        tokio::task::spawn_blocking(move || {
+            if checkpointable.unwrap_or(false) {
+                runtime.fork_checkpointable_machine(&golden, &clone, &pinned)
+            } else {
+                runtime.fork_machine(&golden, &clone, &pinned)
+            }
+        })
+        .await
+        .map_err(join_error)?
+        .into_napi()?;
         Ok(NapiMachine { name })
     }
 

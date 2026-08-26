@@ -107,7 +107,13 @@ class Transport(Protocol):
     def delete(self) -> None: ...
     def delete_with_usage(self) -> MachineUsageReport: ...
     def usage(self) -> MachineUsageReport: ...
-    def fork(self, name: str, ports: Optional[list[PortSpec]] = None) -> "Transport": ...
+    def fork(
+        self,
+        name: str,
+        ports: Optional[list[PortSpec]] = None,
+        *,
+        checkpointable: bool = False,
+    ) -> "Transport": ...
 
     def fork_batch(
         self,
@@ -451,12 +457,18 @@ class LocalTransport:
             "usage() is a cloud-only metering feature; the local target has no billing."
         )
 
-    def fork(self, name: str, ports: Optional[list[PortSpec]] = None) -> "Transport":
+    def fork(
+        self,
+        name: str,
+        ports: Optional[list[PortSpec]] = None,
+        *,
+        checkpointable: bool = False,
+    ) -> "Transport":
         # Local live-RAM CoW clone via the embedded engine. The golden must have
         # been started forkable (MachineConfig(forkable=True)).
         pinned = [(p.host, p.guest) for p in (ports or [])]
         try:
-            clone_inner = self._inner.fork(name, pinned)
+            clone_inner = self._inner.fork(name, pinned, checkpointable)
         except Exception as e:  # noqa: BLE001
             raise wrap_native_error(e) from e
         # LocalTransport.__init__ registers the clone for atexit cleanup.
@@ -793,7 +805,13 @@ class CloudTransport:
         r = _cloud_fetch(self._base, self._key, "GET", f"/v1/machines/{self._id}/usage") or {}
         return _usage_report_from(r, self._id)
 
-    def fork(self, name: str, ports: Optional[list[PortSpec]] = None) -> "CloudTransport":
+    def fork(
+        self,
+        name: str,
+        ports: Optional[list[PortSpec]] = None,
+        *,
+        checkpointable: bool = False,
+    ) -> "CloudTransport":
         # Live-RAM CoW clone on the golden's node. The control plane returns the
         # running clone; wait for its agent so the returned handle is usable.
         port_body = [{"port": p.guest, "hostPort": p.host} for p in (ports or [])]
@@ -803,7 +821,11 @@ class CloudTransport:
                 self._key,
                 "POST",
                 f"/v1/machines/{self._id}/fork",
-                json_body={"name": name, "ports": port_body},
+                json_body={
+                    "name": name,
+                    "ports": port_body,
+                    **({"forkable": True} if checkpointable else {}),
+                },
             )
             or {}
         )

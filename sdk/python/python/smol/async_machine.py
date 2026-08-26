@@ -193,17 +193,32 @@ class AsyncMachine:
         30 days after deletion."""
         return await asyncio.to_thread(self._m.usage)
 
-    async def fork(self, name: str, ports: Optional[list[PortSpec]] = None) -> "AsyncMachine":
+    async def fork(
+        self,
+        name: str,
+        ports: Optional[list[PortSpec]] = None,
+        *,
+        checkpointable: bool = False,
+    ) -> "AsyncMachine":
         """Fork this running, forkable machine into a new clone. (cloud/local)"""
-        clone = await asyncio.to_thread(self._m.fork, name, ports)
+        clone = await asyncio.to_thread(
+            self._m.fork,
+            name,
+            ports,
+            checkpointable=checkpointable,
+        )
         return AsyncMachine(clone)
 
     async def branch(
-        self, name: str, ports: Optional[list[PortSpec]] = None
+        self,
+        name: str,
+        ports: Optional[list[PortSpec]] = None,
+        *,
+        checkpointable: bool = False,
     ) -> "AsyncMachine":
         """Branch a rollback-isolated clone from this checkpoint (RAM + disk CoW) —
         the RL/agent name for :meth:`fork`. Alias of :meth:`fork`."""
-        return await self.fork(name, ports)
+        return await self.fork(name, ports, checkpointable=checkpointable)
 
     async def fork_batch(
         self,
