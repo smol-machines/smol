@@ -10,7 +10,7 @@ fn persistent_overlay_owner(
     machine_name: &str,
     record: Option<&smolvm::config::VmRecord>,
 ) -> String {
-    smolvm::workload::persistent_overlay_owner(
+    smolvm::workload::persistent_overlay_owner_with_lineage(
         machine_name,
         record.and_then(|record| record.golden.as_deref()),
         record.and_then(|record| record.fork_overlay_owner.as_deref()),
