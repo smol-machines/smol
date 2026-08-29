@@ -115,6 +115,15 @@ export interface ImageInfo {
   /** Platform OS (e.g., "linux"). */
   os: string
 }
+/** Result of writing a portable live checkpoint to local disk. */
+export interface LocalCheckpointResult {
+  /** Compressed artifact size in bytes. */
+  sizeBytes: number
+  /** Source pause at the RAM/disk consistency boundary, in milliseconds. */
+  sourcePauseMs: number
+  /** Complete capture and compression time, in milliseconds. */
+  elapsedMs: number
+}
 /** Event from a streaming exec session. */
 export interface ExecStreamEvent {
   /** Event kind: stdout, stderr, exit, or error. */
@@ -143,6 +152,8 @@ export declare class NapiMachine {
    * process — backs the SDK's local `Machine.connect()`.
    */
   static connect(name: string): NapiMachine
+  /** Create a stopped machine from a portable live checkpoint on disk. */
+  static restoreCheckpoint(name: string, artifact: string): NapiMachine
   /** Get the machine name. */
   get name(): string
   /**
@@ -171,12 +182,19 @@ export declare class NapiMachine {
    * control socket) so it can later be `fork()`-ed.
    */
   startForkable(): Promise<void>
+  /** Capture this running checkpointable machine to local disk. */
+  checkpoint(output: string): Promise<LocalCheckpointResult>
   /**
    * Fork this running, forkable machine into a new clone via copy-on-write
    * live RAM + disks (same host). `ports` are `{ host, guest }` inbound
    * forwards for the clone. Returns a handle to the running clone.
    */
   fork(name: string, ports?: Array<PortMappingConfig> | undefined | null, checkpointable?: boolean | undefined | null): Promise<NapiMachine>
+  /**
+   * Fork many clones from one retained snapshot and boot them in bounded
+   * parallel waves. Transactional: an error removes every clone in this call.
+   */
+  forkBatch(names: Array<string>, ports?: Array<PortMappingConfig> | undefined | null, parallel?: number | undefined | null): Promise<Array<NapiMachine>>
   /** Execute a command directly in the VM (not in a container). */
   exec(command: Array<string>, options?: ExecOptions | undefined | null): Promise<ExecResult>
   /**

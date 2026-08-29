@@ -93,14 +93,24 @@ class Machine:
         name: str,
         conn: Optional[ConnectOptions] = None,
     ) -> "Machine":
-        """Restore a durable cloud checkpoint and wait until it is ready."""
+        """Restore a local artifact or durable cloud checkpoint and await readiness."""
         return cls(
             restore_checkpoint_transport(
                 checkpoint_id,
                 name,
-                conn or ConnectOptions(target="cloud"),
+                conn,
             )
         )
+
+    @classmethod
+    def restore(
+        cls,
+        checkpoint_id: str,
+        name: str,
+        conn: Optional[ConnectOptions] = None,
+    ) -> "Machine":
+        """Restore a local artifact or cloud checkpoint; alias of ``restore_checkpoint``."""
+        return cls.restore_checkpoint(checkpoint_id, name, conn)
 
     @property
     def name(self) -> str:
@@ -232,9 +242,9 @@ class Machine:
         report is final once the machine stops or is deleted."""
         return self._t.usage()
 
-    def checkpoint(self) -> PortableCheckpointInfo:
-        """Capture this running checkpointable machine into durable cloud storage."""
-        return self._t.checkpoint()
+    def checkpoint(self, output: Optional[str] = None) -> PortableCheckpointInfo:
+        """Capture this machine; local capture requires a `.smolcheckpoint` path."""
+        return self._t.checkpoint(output)
 
     def checkpoints(self) -> "list[PortableCheckpointInfo]":
         """List durable portable checkpoints captured from this machine."""

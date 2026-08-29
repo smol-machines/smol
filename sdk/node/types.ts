@@ -281,6 +281,12 @@ export interface PortableCheckpointInfo {
   arch: string;
   createdAt: string;
   downloadUrl: string;
+  /** Local artifact path when capture wrote directly to disk. */
+  path?: string;
+  /** Local source pause at the consistency boundary. */
+  sourcePauseMs?: number;
+  /** Local end-to-end capture and compression time. */
+  elapsedMs?: number;
 }
 
 /** Selects and configures the backend. Local (embedded) is the default. */

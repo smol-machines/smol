@@ -156,6 +156,18 @@ pub struct ImageInfo {
     pub os: String,
 }
 
+/// Result of writing a portable live checkpoint to local disk.
+#[napi(object)]
+#[derive(Debug, Clone)]
+pub struct LocalCheckpointResult {
+    /// Compressed artifact size in bytes.
+    pub size_bytes: f64,
+    /// Source pause at the RAM/disk consistency boundary, in milliseconds.
+    pub source_pause_ms: f64,
+    /// Complete capture and compression time, in milliseconds.
+    pub elapsed_ms: f64,
+}
+
 /// Event from a streaming exec session.
 #[napi(object)]
 #[derive(Debug, Clone)]

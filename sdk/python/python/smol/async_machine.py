@@ -86,11 +86,21 @@ class AsyncMachine:
         name: str,
         conn: Optional[ConnectOptions] = None,
     ) -> "AsyncMachine":
-        """Restore a durable cloud checkpoint and await readiness."""
+        """Restore a local artifact or durable cloud checkpoint and await readiness."""
         machine = await asyncio.to_thread(
             Machine.restore_checkpoint, checkpoint_id, name, conn
         )
         return cls(machine)
+
+    @classmethod
+    async def restore(
+        cls,
+        checkpoint_id: str,
+        name: str,
+        conn: Optional[ConnectOptions] = None,
+    ) -> "AsyncMachine":
+        """Restore a local artifact or cloud checkpoint; alias of ``restore_checkpoint``."""
+        return await cls.restore_checkpoint(checkpoint_id, name, conn)
 
     @property
     def name(self) -> str:
@@ -207,9 +217,9 @@ class AsyncMachine:
         30 days after deletion."""
         return await asyncio.to_thread(self._m.usage)
 
-    async def checkpoint(self) -> PortableCheckpointInfo:
-        """Capture this running checkpointable machine into durable cloud storage."""
-        return await asyncio.to_thread(self._m.checkpoint)
+    async def checkpoint(self, output: Optional[str] = None) -> PortableCheckpointInfo:
+        """Capture this machine; local capture requires a `.smolcheckpoint` path."""
+        return await asyncio.to_thread(self._m.checkpoint, output)
 
     async def checkpoints(self) -> "list[PortableCheckpointInfo]":
         """List durable portable checkpoints captured from this machine."""

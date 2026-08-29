@@ -69,6 +69,16 @@ pub enum MachineSubcommand {
     #[command(name = "branch", visible_alias = "fork")]
     Branch(crate::commands::fork::ForkCmd),
 
+    /// Branch many children from one live state in one transactional batch
+    #[command(name = "branch-batch", visible_alias = "fork-batch")]
+    BranchBatch(crate::commands::fork_batch::ForkBatchCmd),
+
+    /// Persist a live machine as a portable rollback point
+    Checkpoint(crate::commands::checkpoint::CheckpointCmd),
+
+    /// Restore a portable rollback point as a running fork source
+    Restore(crate::commands::restore::RestoreCmd),
+
     // --- maintenance / introspection --------------------------------------
     /// List a machine's cached images and storage usage
     Images(crate::commands::images::ImagesCmd),
@@ -116,6 +126,9 @@ impl MachineCmd {
             MachineSubcommand::Logs(cmd) => cmd.run(),
             MachineSubcommand::Cp(cmd) => cmd.run(),
             MachineSubcommand::Branch(cmd) => cmd.run(),
+            MachineSubcommand::BranchBatch(cmd) => cmd.run(),
+            MachineSubcommand::Checkpoint(cmd) => cmd.run(),
+            MachineSubcommand::Restore(cmd) => cmd.run(),
             // maintenance
             MachineSubcommand::Images(cmd) => cmd.run(),
             MachineSubcommand::Prune(cmd) => cmd.run(),
@@ -178,6 +191,19 @@ mod tests {
                 panic!("expected start command");
             };
             assert!(start.forkable);
+        }
+    }
+
+    #[test]
+    fn branch_batch_is_primary_and_fork_batch_remains_an_alias() {
+        for verb in ["branch-batch", "fork-batch"] {
+            let parsed =
+                TestCli::parse_from(["smol", verb, "--from", "source", "--count", "2", "--local"]);
+            let MachineSubcommand::BranchBatch(batch) = parsed.command else {
+                panic!("expected batch branch command");
+            };
+            assert_eq!(batch.golden, "source");
+            assert_eq!(batch.count, Some(2));
         }
     }
 }

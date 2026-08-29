@@ -126,6 +126,18 @@ struct ImageInfo {
     os: String,
 }
 
+/// Result of writing a portable live checkpoint to local disk.
+#[pyclass]
+#[derive(Clone)]
+struct LocalCheckpointResult {
+    #[pyo3(get)]
+    size_bytes: u64,
+    #[pyo3(get)]
+    source_pause_ms: f64,
+    #[pyo3(get)]
+    elapsed_ms: f64,
+}
+
 fn to_image_info(i: smolvm_protocol::ImageInfo) -> ImageInfo {
     ImageInfo {
         reference: i.reference,
@@ -433,6 +445,17 @@ impl Machine {
         Ok(Self { name })
     }
 
+    /// Create a stopped machine from a portable live checkpoint on disk.
+    #[staticmethod]
+    fn restore_checkpoint(py: Python<'_>, name: String, artifact: String) -> PyResult<Self> {
+        let runtime = runtime().map_err(err)?;
+        py.allow_threads(|| {
+            runtime.restore_checkpoint_machine(&name, std::path::Path::new(&artifact))
+        })
+        .map_err(err)?;
+        Ok(Self { name })
+    }
+
     #[getter]
     fn name(&self) -> String {
         self.name.clone()
@@ -467,6 +490,29 @@ impl Machine {
         let runtime = runtime().map_err(err)?;
         py.allow_threads(|| runtime.start_forkable_machine(&self.name))
             .map_err(err)
+    }
+
+    /// Capture this running checkpointable machine to local disk.
+    fn checkpoint(&self, py: Python<'_>, output: String) -> PyResult<LocalCheckpointResult> {
+        let runtime = runtime().map_err(err)?;
+        let result = py
+            .allow_threads(|| {
+                let options = smolvm::portable_checkpoint::CaptureOptions {
+                    rootfs_dir: Some(smolvm::agent::AgentManager::default_rootfs_path()?),
+                    ..Default::default()
+                };
+                runtime.checkpoint_machine(
+                    &self.name,
+                    std::path::Path::new(&output),
+                    &options,
+                )
+            })
+            .map_err(err)?;
+        Ok(LocalCheckpointResult {
+            size_bytes: result.size_bytes,
+            source_pause_ms: result.source_pause.as_secs_f64() * 1000.0,
+            elapsed_ms: result.elapsed.as_secs_f64() * 1000.0,
+        })
     }
 
     /// Fork this running, forkable machine into a new clone via copy-on-write
@@ -658,6 +704,7 @@ fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<Machine>()?;
     m.add_class::<ExecResult>()?;
     m.add_class::<ImageInfo>()?;
+    m.add_class::<LocalCheckpointResult>()?;
     m.add_class::<ExecStream>()?;
     Ok(())
 }

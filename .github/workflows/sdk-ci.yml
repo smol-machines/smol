@@ -120,6 +120,7 @@ jobs:
           bun test/e2e.ts
           bun test/bun-package-e2e.ts
           bun test/fork-service-e2e.ts
+          bun test/checkpoint-branch-e2e.ts
 
   python-check:
     name: Python · unit + cloud-mock

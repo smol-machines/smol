@@ -101,14 +101,24 @@ export class Machine {
     return new Machine(await connectTransport(id, conn));
   }
 
-  /** Restore a durable cloud checkpoint into a new machine and wait until it is
-   * ready. The checkpoint retains RAM, CPU/device state, and exact disk state. */
+  /** Restore a local `.smolcheckpoint` path or durable cloud checkpoint id into
+   * a ready, immediately forkable machine. */
   static async restoreCheckpoint(
     checkpointId: string,
     name: string,
-    conn: ConnectOptions = { target: "cloud" },
+    conn?: ConnectOptions,
   ): Promise<Machine> {
     return new Machine(await restoreCheckpointTransport(checkpointId, name, conn));
+  }
+
+  /** Restore a local `.smolcheckpoint` path or durable cloud checkpoint id.
+   * Alias of {@link restoreCheckpoint}. */
+  static restore(
+    checkpointId: string,
+    name: string,
+    conn?: ConnectOptions,
+  ): Promise<Machine> {
+    return Machine.restoreCheckpoint(checkpointId, name, conn);
   }
 
   /** The machine's name / identifier. */
@@ -263,9 +273,10 @@ export class Machine {
     return this.transport.usage();
   }
 
-  /** Capture this running checkpointable machine into durable cloud storage. */
-  checkpoint(): Promise<PortableCheckpointInfo> {
-    return this.transport.checkpoint();
+  /** Capture this running checkpointable machine. Local capture requires an
+   * output `.smolcheckpoint` path; cloud capture stores the artifact durably. */
+  checkpoint(output?: string): Promise<PortableCheckpointInfo> {
+    return this.transport.checkpoint(output);
   }
 
   /** List durable portable checkpoints captured from this machine. */

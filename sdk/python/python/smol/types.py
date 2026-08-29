@@ -228,7 +228,7 @@ class MachineUsageReport:
 
 @dataclass
 class PortableCheckpointInfo:
-    """Durable live machine checkpoint stored by the cloud control plane."""
+    """Portable live machine checkpoint stored locally or by the cloud."""
 
     id: str
     machine_id: str
@@ -237,6 +237,9 @@ class PortableCheckpointInfo:
     arch: str
     created_at: str
     download_url: str
+    path: Optional[str] = None
+    source_pause_ms: Optional[float] = None
+    elapsed_ms: Optional[float] = None
 
 
 @dataclass

@@ -17,6 +17,7 @@ import atexit
 import base64
 import json
 import os
+import platform
 import socket
 import time
 import urllib.error
@@ -120,7 +121,7 @@ class Transport(Protocol):
     def delete(self) -> None: ...
     def delete_with_usage(self) -> MachineUsageReport: ...
     def usage(self) -> MachineUsageReport: ...
-    def checkpoint(self) -> PortableCheckpointInfo: ...
+    def checkpoint(self, output: Optional[str] = None) -> PortableCheckpointInfo: ...
     def checkpoints(self) -> "list[PortableCheckpointInfo]": ...
     def fork(
         self,
@@ -472,9 +473,27 @@ class LocalTransport:
             "usage() is a cloud-only metering feature; the local target has no billing."
         )
 
-    def checkpoint(self) -> PortableCheckpointInfo:
-        raise NotSupportedError(
-            "durable portable checkpoint capture is currently available on the cloud target."
+    def checkpoint(self, output: Optional[str] = None) -> PortableCheckpointInfo:
+        if not output:
+            raise InvalidConfigError(
+                "local checkpoint capture requires an output .smolcheckpoint path."
+            )
+        path = os.path.abspath(os.fspath(output))
+        try:
+            result = self._inner.checkpoint(path)
+        except Exception as e:  # noqa: BLE001
+            raise wrap_native_error(e) from e
+        return PortableCheckpointInfo(
+            id=path,
+            machine_id=self.name,
+            status="available",
+            size_bytes=int(result.size_bytes),
+            arch=platform.machine(),
+            created_at=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            download_url="",
+            path=path,
+            source_pause_ms=float(result.source_pause_ms),
+            elapsed_ms=float(result.elapsed_ms),
         )
 
     def checkpoints(self) -> "list[PortableCheckpointInfo]":
@@ -830,7 +849,11 @@ class CloudTransport:
         r = _cloud_fetch(self._base, self._key, "GET", f"/v1/machines/{self._id}/usage") or {}
         return _usage_report_from(r, self._id)
 
-    def checkpoint(self) -> PortableCheckpointInfo:
+    def checkpoint(self, output: Optional[str] = None) -> PortableCheckpointInfo:
+        if output:
+            raise InvalidConfigError(
+                "cloud checkpoint capture returns durable metadata; use its download_url to save an artifact."
+            )
         r = _cloud_fetch(
             self._base,
             self._key,
@@ -1515,16 +1538,39 @@ def restore_checkpoint_transport(
     name: str,
     conn: Optional[ConnectOptions] = None,
 ) -> Transport:
-    """Restore one durable cloud checkpoint and return a ready machine."""
+    """Restore one local artifact or durable cloud checkpoint and return it ready."""
     if not checkpoint_id or not name:
         raise InvalidConfigError("checkpoint id and restored machine name are required.")
-    conn = conn or ConnectOptions(target="cloud")
+    if conn is None:
+        local_path = os.fspath(checkpoint_id)
+        looks_local = (
+            os.path.isfile(local_path)
+            or local_path.endswith(".smolcheckpoint")
+            or os.path.isabs(local_path)
+            or os.path.dirname(local_path) != ""
+        )
+        conn = ConnectOptions(target="local" if looks_local else "cloud")
     explicit_key = conn.api_key or os.environ.get("SMOL_CLOUD_TOKEN")
     use_cloud = conn.target == "cloud" or (conn.target != "local" and bool(explicit_key))
     if not use_cloud:
-        raise NotSupportedError(
-            "restore_checkpoint() requires the cloud target; pass ConnectOptions(target='cloud')."
-        )
+        native = _load_native()
+        path = os.path.abspath(os.fspath(checkpoint_id))
+        transport: Optional[LocalTransport] = None
+        try:
+            transport = LocalTransport(
+                native.Machine.restore_checkpoint(name, path)
+            )
+            transport.start()
+            return transport
+        except BaseException as e:
+            if transport is not None:
+                try:
+                    transport.delete()
+                except Exception:  # noqa: BLE001 - preserve restore failure
+                    pass
+            if isinstance(e, Exception):
+                raise wrap_native_error(e) from e
+            raise
     cli_key, cli_url = _cli_session()
     api_key = explicit_key or cli_key or _cli_config_api_key()
     if not api_key:

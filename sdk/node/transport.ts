@@ -7,10 +7,10 @@
  *  Cloud-only/local-only capability gaps surface as `NotSupportedError`.
  */
 
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { createConnection } from "node:net";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { join, resolve as resolvePath } from "node:path";
 import {
   getNapiMachine,
   type NapiMachine as NapiInstance,
@@ -114,7 +114,7 @@ export interface Transport {
   deleteWithUsage(): Promise<MachineUsageReport>;
   /** Cloud only: metered usage + cost; readable up to 30 days after delete. */
   usage(): Promise<MachineUsageReport>;
-  checkpoint(): Promise<PortableCheckpointInfo>;
+  checkpoint(output?: string): Promise<PortableCheckpointInfo>;
   checkpoints(): Promise<PortableCheckpointInfo[]>;
   fork(name: string, options?: PortSpec[] | ForkOptions): Promise<Transport>;
   forkBatch(opts: ForkBatchOptions): Promise<Transport[]>;
@@ -507,10 +507,26 @@ class LocalTransport implements Transport {
     );
   }
 
-  async checkpoint(): Promise<PortableCheckpointInfo> {
-    throw new NotSupportedError(
-      "durable portable checkpoint capture is currently available on the cloud target.",
-    );
+  async checkpoint(output?: string): Promise<PortableCheckpointInfo> {
+    if (!output) {
+      throw new InvalidConfigError(
+        "local checkpoint capture requires an output .smolcheckpoint path.",
+      );
+    }
+    const path = resolvePath(output);
+    const result = await this.inner.checkpoint(path);
+    return {
+      id: path,
+      machineId: this.name,
+      status: "available",
+      sizeBytes: result.sizeBytes,
+      arch: process.arch,
+      createdAt: new Date().toISOString(),
+      downloadUrl: "",
+      path,
+      sourcePauseMs: result.sourcePauseMs,
+      elapsedMs: result.elapsedMs,
+    };
   }
 
   async checkpoints(): Promise<PortableCheckpointInfo[]> {
@@ -545,21 +561,27 @@ class LocalTransport implements Transport {
   }
 
   async forkBatch(opts: ForkBatchOptions): Promise<Transport[]> {
-    // No control plane locally, so fan out sequential single forks off the same
-    // golden (each is CoW O(metadata) after the first freeze) and clean up what
-    // succeeded if any fork fails — best-effort local mirror of the cloud
-    // target's all-or-nothing transaction.
     const names = resolveBatchNames(opts, "branch");
-    const forks: Transport[] = [];
+    const nativePorts = (opts.ports ?? []).map((p) => ({
+      host: p.host,
+      guest: p.guest,
+    }));
+    const branches: LocalTransport[] = [];
     try {
-      for (const name of names) {
-        forks.push(await this.fork(name, opts.ports));
+      const inners = await this.inner.forkBatch(
+        names,
+        nativePorts,
+        Math.min(8, names.length),
+      );
+      branches.push(...inners.map((inner) => new LocalTransport(inner)));
+      for (const branch of branches) {
+        await branch.waitUntilReady();
       }
     } catch (e) {
-      await Promise.all(forks.map((f) => f.delete().catch(() => {})));
-      throw e;
+      await Promise.all(branches.map((branch) => branch.delete().catch(() => {})));
+      throw wrapNativeError(e);
     }
-    return forks;
+    return branches;
   }
 
   async assign(): Promise<{
@@ -1096,7 +1118,12 @@ class CloudTransport implements Transport {
     );
   }
 
-  async checkpoint(): Promise<PortableCheckpointInfo> {
+  async checkpoint(output?: string): Promise<PortableCheckpointInfo> {
+    if (output) {
+      throw new InvalidConfigError(
+        "cloud checkpoint capture returns durable metadata; use its downloadUrl to save an artifact.",
+      );
+    }
     return cloudFetch<PortableCheckpointInfo>(
       this.conn,
       "POST",
@@ -1586,15 +1613,23 @@ export async function connectTransport(
 export async function restoreCheckpointTransport(
   checkpointId: string,
   name: string,
-  conn: ConnectOptions,
+  conn?: ConnectOptions,
 ): Promise<Transport> {
   if (!checkpointId || !name) {
     throw new InvalidConfigError("checkpoint id and restored machine name are required.");
   }
+  conn ??= { target: looksLikeLocalCheckpoint(checkpointId) ? "local" : "cloud" };
   if (!selectsCloud(conn)) {
-    throw new NotSupportedError(
-      "restoreCheckpoint() requires the cloud target; pass { target: 'cloud' }.",
-    );
+    const path = resolvePath(checkpointId);
+    let restored: LocalTransport | undefined;
+    try {
+      restored = new LocalTransport(getNapiMachine().restoreCheckpoint(name, path));
+      await restored.start();
+      return restored;
+    } catch (error) {
+      if (restored) await restored.delete().catch(() => {});
+      throw wrapNativeError(error);
+    }
   }
   const explicitKey = conn.apiKey ?? process.env.SMOL_CLOUD_TOKEN;
   const { apiKey: cliKey, endpoint: cliUrl } = cliSession(conn.target);
@@ -1628,4 +1663,15 @@ export async function restoreCheckpointTransport(
     throw error;
   }
   return new CloudTransport(cloudConn, created.name ?? name, id);
+}
+
+function looksLikeLocalCheckpoint(checkpoint: string): boolean {
+  return (
+    existsSync(checkpoint) ||
+    checkpoint.endsWith(".smolcheckpoint") ||
+    checkpoint.startsWith(".") ||
+    checkpoint.startsWith("/") ||
+    checkpoint.includes("/") ||
+    checkpoint.includes("\\")
+  );
 }

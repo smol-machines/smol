@@ -67,6 +67,12 @@ export interface NativeImageInfo {
   os: string;
 }
 
+export interface NativeCheckpointResult {
+  sizeBytes: number;
+  sourcePauseMs: number;
+  elapsedMs: number;
+}
+
 export interface NativeExecStreamEvent {
   kind: string;
   data?: string;
@@ -88,11 +94,17 @@ export interface NapiMachine {
   guestPorts(): number[];
   start(): Promise<void>;
   startForkable(): Promise<void>;
+  checkpoint(output: string): Promise<NativeCheckpointResult>;
   fork(
     name: string,
     ports?: NativePortMapping[],
     checkpointable?: boolean,
   ): Promise<NapiMachine>;
+  forkBatch(
+    names: string[],
+    ports?: NativePortMapping[],
+    parallel?: number,
+  ): Promise<NapiMachine[]>;
   exec(
     command: string[],
     options?: NativeExecOptions,
@@ -118,6 +130,7 @@ export interface NapiMachine {
 export interface NapiMachineCtor {
   new (config: NativeMachineConfig): NapiMachine;
   connect(name: string): NapiMachine;
+  restoreCheckpoint(name: string, artifact: string): NapiMachine;
 }
 
 import { wireBundledAssets, type RuntimeAssets } from "./assets";

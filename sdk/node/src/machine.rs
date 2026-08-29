@@ -132,6 +132,16 @@ impl NapiMachine {
         Ok(Self { name })
     }
 
+    /// Create a stopped machine from a portable live checkpoint on disk.
+    #[napi(factory)]
+    pub fn restore_checkpoint(name: String, artifact: String) -> napi::Result<Self> {
+        runtime()
+            .into_napi()?
+            .restore_checkpoint_machine(&name, std::path::Path::new(&artifact))
+            .into_napi()?;
+        Ok(Self { name })
+    }
+
     /// Get the machine name.
     #[napi(getter)]
     pub fn name(&self) -> String {
@@ -230,6 +240,31 @@ impl NapiMachine {
             .into_napi()
     }
 
+    /// Capture this running checkpointable machine to local disk.
+    #[napi]
+    pub async fn checkpoint(&self, output: String) -> napi::Result<LocalCheckpointResult> {
+        let name = self.name.clone();
+        let result = tokio::task::spawn_blocking(move || {
+            let options = smolvm::portable_checkpoint::CaptureOptions {
+                rootfs_dir: Some(smolvm::agent::AgentManager::default_rootfs_path()?),
+                ..Default::default()
+            };
+            runtime()?.checkpoint_machine(
+                &name,
+                std::path::Path::new(&output),
+                &options,
+            )
+        })
+        .await
+        .map_err(join_error)?
+        .into_napi()?;
+        Ok(LocalCheckpointResult {
+            size_bytes: result.size_bytes as f64,
+            source_pause_ms: result.source_pause.as_secs_f64() * 1000.0,
+            elapsed_ms: result.elapsed.as_secs_f64() * 1000.0,
+        })
+    }
+
     /// Fork this running, forkable machine into a new clone via copy-on-write
     /// live RAM + disks (same host). `ports` are `{ host, guest }` inbound
     /// forwards for the clone. Returns a handle to the running clone.
@@ -259,6 +294,33 @@ impl NapiMachine {
         .map_err(join_error)?
         .into_napi()?;
         Ok(NapiMachine { name })
+    }
+
+    /// Fork many clones from one retained snapshot and boot them in bounded
+    /// parallel waves. Transactional: an error removes every clone in this call.
+    #[napi]
+    pub async fn fork_batch(
+        &self,
+        names: Vec<String>,
+        ports: Option<Vec<PortMappingConfig>>,
+        parallel: Option<u32>,
+    ) -> napi::Result<Vec<NapiMachine>> {
+        let runtime = runtime().into_napi()?;
+        let golden = self.name.clone();
+        let clones = names.clone();
+        let pinned: Vec<(u16, u16)> = ports
+            .unwrap_or_default()
+            .iter()
+            .map(|p| (p.host, p.guest))
+            .collect();
+        let width = parallel.unwrap_or(8).max(1) as usize;
+        tokio::task::spawn_blocking(move || {
+            runtime.fork_machines(&golden, &clones, &pinned, width)
+        })
+        .await
+        .map_err(join_error)?
+        .into_napi()?;
+        Ok(names.into_iter().map(|name| NapiMachine { name }).collect())
     }
 
     /// Execute a command directly in the VM (not in a container).
