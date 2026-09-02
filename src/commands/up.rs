@@ -13,16 +13,16 @@ fn resolve_fork_config(
     cuda: bool,
 ) -> anyhow::Result<(bool, Option<u32>, Option<u64>)> {
     if fork.pool_size == Some(0) {
-        anyhow::bail!("Smolfile [fork] pool_size must be greater than zero");
+        anyhow::bail!("Smolfile [branch] pool_size must be greater than zero");
     }
     if fork.cuda_vram_limit_mib == Some(0) {
-        anyhow::bail!("Smolfile [fork] cuda_vram_limit_mib must be greater than zero");
+        anyhow::bail!("Smolfile [branch] cuda_vram_limit_mib must be greater than zero");
     }
     if fork.pool_size.is_some() && !cuda {
-        anyhow::bail!("Smolfile [fork] pool_size requires cuda = true or auto_graph = true");
+        anyhow::bail!("Smolfile [branch] pool_size requires cuda = true or auto_graph = true");
     }
     if fork.cuda_vram_limit_mib.is_some() && fork.pool_size.is_none() {
-        anyhow::bail!("Smolfile [fork] cuda_vram_limit_mib requires pool_size");
+        anyhow::bail!("Smolfile [branch] cuda_vram_limit_mib requires pool_size");
     }
     Ok((
         fork.enabled.unwrap_or(false) || fork.pool_size.is_some(),

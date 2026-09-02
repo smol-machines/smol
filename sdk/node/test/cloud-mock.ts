@@ -67,8 +67,12 @@ const server = createServer(async (req, res) => {
     seen.startUrl = url;
     return json(200, { state: "started", ready: false });
   }
-  if (method === "POST" && url === "/v1/machines/m1/fork") {
+  if (method === "POST" && url === "/v1/machines/m1/branches") {
     seen.forkBody = JSON.parse((await readBody(req)).toString() || "{}");
+    if (seen.forkBody.name === "legacy-branch") {
+      seen.newBranchReturned404 = true;
+      return json(404, { code: "NOT_FOUND", error: "route not found" });
+    }
     return json(201, {
       id: "m2",
       name: seen.forkBody.name ?? "clone",
@@ -79,6 +83,20 @@ const server = createServer(async (req, res) => {
       env: {},
       ephemeral: false,
       ports: seen.forkBody.ports ?? [],
+    });
+  }
+  if (method === "POST" && url === "/v1/machines/m1/fork") {
+    seen.legacyForkBody = JSON.parse((await readBody(req)).toString() || "{}");
+    return json(201, {
+      id: "m2",
+      name: seen.legacyForkBody.name,
+      state: "started",
+      source: { type: "image", reference: "alpine" },
+      resources: { cpus: 2, memoryMb: 1024 },
+      network: { mode: "open" },
+      env: {},
+      ephemeral: false,
+      ports: seen.legacyForkBody.ports ?? [],
     });
   }
   if (method === "POST" && url === "/v1/machines/m1/checkpoints") {
@@ -111,8 +129,12 @@ const server = createServer(async (req, res) => {
   if (method === "POST" && url === "/v1/machines/m-restored/start") {
     return json(200, { id: "m-restored", state: "started" });
   }
-  if (method === "POST" && url === "/v1/machines/m1/fork-batch") {
+  if (method === "POST" && url === "/v1/machines/m1/branches/batch") {
     seen.forkBatchBody = JSON.parse((await readBody(req)).toString() || "{}");
+    if (seen.forkBatchBody.namePrefix === "legacy") {
+      seen.newBranchBatchReturned404 = true;
+      return json(404, { code: "NOT_FOUND", error: "route not found" });
+    }
     const n = seen.forkBatchBody.count ?? seen.forkBatchBody.names?.length ?? 0;
     const prefix = seen.forkBatchBody.namePrefix ?? "golden";
     const clones = Array.from({ length: n }, (_, i) => ({
@@ -127,6 +149,24 @@ const server = createServer(async (req, res) => {
       ports: seen.forkBatchBody.ports ?? [],
     }));
     return json(201, { clones });
+  }
+  if (method === "POST" && url === "/v1/machines/m1/fork-batch") {
+    seen.legacyForkBatchBody = JSON.parse((await readBody(req)).toString() || "{}");
+    const n = seen.legacyForkBatchBody.count ?? 0;
+    const prefix = seen.legacyForkBatchBody.namePrefix ?? "fork";
+    return json(201, {
+      clones: Array.from({ length: n }, (_, i) => ({
+        id: `b${i + 1}`,
+        name: `${prefix}-${i + 1}`,
+        state: "started",
+        source: { type: "image", reference: "alpine" },
+        resources: { cpus: 2, memoryMb: 1024 },
+        network: { mode: "open" },
+        env: {},
+        ephemeral: false,
+        ports: [],
+      })),
+    });
   }
   if (method === "POST" && url === "/v1/machines/m1/assign") {
     seen.assignBody = JSON.parse((await readBody(req)).toString() || "{}");
@@ -450,10 +490,10 @@ async function main(): Promise<void> {
     JSON.stringify(seen.createBody),
   );
 
-  // --- fork: live-RAM RL clone over the cloud ---
-  const clone = await m.fork("rollout-1", {
+  // --- branch: live-RAM child over the cloud ---
+  const clone = await m.branch("rollout-1", {
     ports: [{ host: 18080, guest: 80 }],
-    checkpointable: true,
+    branchable: true,
   });
 
   const checkpoint = await m.checkpoint();
@@ -475,7 +515,7 @@ async function main(): Promise<void> {
     JSON.stringify(seen.restoreBody),
   );
   check(
-    "fork hit POST /fork with clone name",
+    "branch uses POST /branches with the child name",
     seen.forkBody?.name === "rollout-1",
     JSON.stringify(seen.forkBody),
   );
@@ -486,30 +526,47 @@ async function main(): Promise<void> {
     JSON.stringify(seen.forkBody?.ports),
   );
   check(
-    "fork can promote the clone to a checkpoint source",
-    seen.forkBody?.forkable === true,
+    "branch can promote the child to another branch source",
+    seen.forkBody?.branchable === true,
     JSON.stringify(seen.forkBody),
   );
   check(
-    "fork returns running clone handle",
+    "branch returns a running child handle",
     clone.name === "rollout-1" && (await clone.state()) === "running",
     clone.name,
   );
-
-  // --- fork-batch: fan out N RL rollouts in one transactional call ---
-  const batch = await m.forkBatch({ count: 3, namePrefix: "rollout" });
+  const legacyBranch = await m.branch("legacy-branch", { branchable: true });
   check(
-    "forkBatch hit POST /fork-batch with the size spec",
+    "branch falls back to a legacy /fork control plane",
+    seen.newBranchReturned404 === true &&
+      seen.legacyForkBody?.name === "legacy-branch" &&
+      seen.legacyForkBody?.forkable === true &&
+      legacyBranch.name === "legacy-branch",
+    JSON.stringify(seen.legacyForkBody),
+  );
+
+  // --- branch batch: fan out N children in one transactional call ---
+  const batch = await m.branchBatch({ count: 3, namePrefix: "rollout" });
+  check(
+    "branchBatch uses POST /branches/batch with the size spec",
     seen.forkBatchBody?.count === 3 &&
       seen.forkBatchBody?.namePrefix === "rollout",
     JSON.stringify(seen.forkBatchBody),
   );
   check(
-    "forkBatch returns N clone handles in request order",
+    "branchBatch returns N child handles in request order",
     batch.length === 3 &&
       batch[0].name === "rollout-1" &&
       batch[2].name === "rollout-3",
     batch.map((c) => c.name).join(","),
+  );
+  const legacyBatch = await m.branchBatch({ count: 2, namePrefix: "legacy" });
+  check(
+    "branchBatch falls back to a legacy /fork-batch control plane",
+    seen.newBranchBatchReturned404 === true &&
+      seen.legacyForkBatchBody?.count === 2 &&
+      legacyBatch.length === 2,
+    JSON.stringify(seen.legacyForkBatchBody),
   );
 
   // --- assign: lease an RL episode, heartbeat, complete ---

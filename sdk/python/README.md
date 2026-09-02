@@ -25,8 +25,8 @@ with Machine.create(MachineConfig(resources=ResourceSpec(cpus=2, memory_mb=1024,
 # Branch a prepared machine: a CoW clone of its RAM and disks, typically under
 # 200ms, so a warm environment is reused instead of rebuilt. Pass network=True
 # whenever an image has to be pulled.
-golden = Machine.create(MachineConfig(image="alpine", network=True, forkable=True))
-branch = golden.branch("b1")
+source = Machine.create(MachineConfig(image="alpine", network=True, branchable=True))
+branch = source.branch("b1")
 
 # Cloud (smolfleet) — create() waits until it is ready for work.
 from smol import ConnectOptions
@@ -67,7 +67,7 @@ asyncio.run(main())
 ```
 
 Every `Machine` method has an `await`able counterpart on `AsyncMachine`
-(`create`/`connect`/`exec`/`wait_until_ready`/`request`/`fork`/…), plus
+(`create`/`connect`/`exec`/`wait_until_ready`/`request`/`branch`/…), plus
 `async with` for auto-delete. `endpoint(port)` stays synchronous — it only builds
 a URL and does no I/O.
 
@@ -97,9 +97,9 @@ result = rollouts.generate(
 )
 ```
 
-Inside a forked rollout worker, no configuration is required: `RolloutClient()`
-discovers its authenticated node assignment from `/etc/smolvm/fork-env` and
-automatically groups workers from the same fork batch into a bounded cohort.
+Inside a branched rollout worker, no configuration is required: `RolloutClient()`
+discovers its authenticated node assignment from `/etc/smolvm/branch-env` and
+automatically groups workers from the same branch batch into a bounded cohort.
 Pass `auto_fork_cohort=False` only when the application already supplies an
 explicit `cohort_id`, `cohort_size`, and `cohort_max_wait_ms`.
 
@@ -132,16 +132,16 @@ sandbox:
     target: local                 # or cloud; cloud reuses `smol auth login`
     checkpoints:
       ghcr.io/acme/swe:ready:
-        machine: swe-golden       # running MachineConfig(forkable=True) machine
+        machine: swe-source       # running MachineConfig(branchable=True) machine
         ports: [8000]
-        resources:                # describe the prepared golden's capacity
+        resources:                # describe the prepared source's capacity
           cpu: 4
           memory_mib: 8192
           disk_gib: 20
         provider_options:         # describe its inherited egress policy
           allow_hosts: [api.example.com]
     fork_batch_window_ms: 2        # coalesce concurrent episode creates
-    fork_batch_size: 32
+    fork_batch_size: 32            # compatibility config name
   default_metadata:
     sandbox-api: smol
 ```
@@ -149,7 +149,7 @@ sandbox:
 NeMo Gym discovers the provider through its standard
 `nemo_gym.sandbox_providers` entry point. A normal image creates a fresh
 microVM. An exact image match in `checkpoints` instead creates every episode as
-a live RAM/disk copy-on-write fork of that prepared machine, so repositories,
+a live RAM/disk copy-on-write branch of that prepared machine, so repositories,
 dependencies, services, and caches can already be running when the agent takes
 its first action. The provider implements exec, files, resource limits, scoped
 egress, declared service ports, entrypoint overrides, TTL cleanup, and the same
@@ -159,12 +159,12 @@ agent/verifier lifecycle. Cloud checkpoint episodes with a TTL use Smol Cloud's
 durable lease controller, so they are reclaimed even if the NeMo Gym process
 exits unexpectedly.
 
-Checkpoint forks inherit the golden's resource shape, network policy, and running
+Configured branches inherit the source's resource shape, network policy, and running
 workload. Declare those inherited properties in the checkpoint mapping. A task's
 resource request may be smaller than the declared capacity, while its network
 policy, entrypoint, and ports must match exactly; incompatible requests fail
 instead of silently running with different isolation. NeMo Gym's standard
-sandbox provider contract supports episode-from-golden forks.
+sandbox provider contract supports episodes branched from a prepared source.
 
 To branch an arbitrary live trajectory state, create that source as branchable
 and call the Smol provider's extension at the decision point:
@@ -186,16 +186,15 @@ await provider.exec(checkpoint, "./agent-step-2")
 branches = await provider.branch(checkpoint, count=16, name_prefix="candidate")
 ```
 
-The first fan-out waits for active commands and freezes the source at that exact
-RAM/filesystem/process state. Every returned sandbox is an independent COW leaf;
-the frozen source may create more siblings from the same state but cannot execute
-more commands. Close the branches before the source. A configured checkpoint
-fork is already a leaf, so it cannot request another live branch until SmolVM
-supports nested fork generations.
+The provider's exact-state fan-out waits for active commands and then retains the
+source as a stable branch point. Every returned sandbox is an independent COW
+leaf; close the children before the source. SmolVM itself supports nested
+branching when a child is created with `branchable=True`, while this provider
+returns leaves by default for predictable episode cleanup.
 
 ### Harbor environment provider
 
-Run Harbor or Terminal-Bench trials as isolated copy-on-write SmolVM forks:
+Run Harbor or Terminal-Bench trials as isolated copy-on-write SmolVM branches:
 
 ```bash
 pip install 'smolmachines[harbor]'
@@ -210,8 +209,8 @@ harbor run \
 The provider uses Harbor's standard custom-environment interface and works with
 the same SDK configuration locally or on Smol Cloud. By default, the first
 trial for each distinct environment creates a warm checkpoint from its
-published `docker_image`; concurrent and later trials fork clean RAM/disk COW
-clones from that checkpoint. Set `--environment-kwarg auto_checkpoint=false`
+published `docker_image`; concurrent and later trials branch clean RAM/disk COW
+children from that source. Set `--environment-kwarg auto_checkpoint=false`
 for cold one-machine-per-trial behavior.
 
 To use an environment prepared before the Harbor job, map its image reference
@@ -232,7 +231,7 @@ environment:
         network_mode: public
 ```
 
-Checkpoint forks preserve initialized process and filesystem state rather than
+Branches preserve initialized process and filesystem state rather than
 merely reusing image layers. The initial implementation supports Linux
 single-container tasks with a published `docker_image`; Docker Compose and
 Dockerfile-only tasks fail clearly instead of silently changing semantics.

@@ -79,7 +79,7 @@ smol machine ls --cloud
 | Same code, someone else's hardware | SDK `Machine.create(cfg, { target: 'cloud' })` |
 | Long-lived named environment | `smol machine create` → `exec` |
 | Ship software as one binary | `smol pack create` |
-| Many sandboxes from one warm state | `machine.fork()` / `forkBatch()` |
+| Many sandboxes from one warm state | `machine.branch()` / `branchBatch()` |
 | RL rollouts with reward attribution | `machine.assign()` → `Episode` → `rewardFork()` |
 
 ## Machine API
@@ -94,7 +94,7 @@ Both SDKs expose the same surface (camelCase in Node, snake_case in Python).
 | Files | `readFile`, `writeFile` |
 | Images | `pullImage`, `listImages` |
 | Networking | `endpoint`, `url`, `fetch` (Node) / `request` (Python) |
-| Fork | `fork`, `forkBatch` |
+| Branch | `branch`, `branchBatch` (`fork`/`forkBatch` compatibility aliases) |
 | Rollouts | `assign` → `Episode` (`exec`, `heartbeat`, `complete`, `status`), `rewardFork` |
 
 🔴 **`create()` waits until the guest agent is reachable.** A *cloud* machine
@@ -116,7 +116,7 @@ Full reference in [`docs/cli.md`](docs/cli.md); `smol <command> --help` for flag
 | Group | What |
 |-------|------|
 | `smol run` | Ephemeral one-shot |
-| `smol machine …` | Lifecycle: create, start, exec, ls, rm, fork, logs, cp |
+| `smol machine …` | Lifecycle: create, start, exec, ls, rm, branch, logs, cp |
 | `smol file …` | Declarative Smolfile workflows |
 | `smol pack …` | Build and run `.smolmachine` artifacts |
 | `smol registry …` | Container registry: login, push, pull |

@@ -520,7 +520,7 @@ class LocalTransport:
         # retained snapshot, and boots clones in bounded parallel waves. It is
         # transactional before returning; readiness below preserves that same
         # all-or-nothing behavior for agent/service probes.
-        resolved = _resolve_batch_names(count, names, name_prefix, "fork")
+        resolved = _resolve_batch_names(count, names, name_prefix, "branch")
         pinned = [(p.host, p.guest) for p in (ports or [])]
         forks: list[LocalTransport] = []
         try:
@@ -856,8 +856,23 @@ class CloudTransport:
         # Live-RAM CoW clone on the golden's node. The control plane returns the
         # running clone; wait for its agent so the returned handle is usable.
         port_body = [{"port": p.guest, "hostPort": p.host} for p in (ports or [])]
-        clone = (
-            _cloud_fetch(
+        try:
+            clone = _cloud_fetch(
+                self._base,
+                self._key,
+                "POST",
+                f"/v1/machines/{self._id}/branches",
+                json_body={
+                    "name": name,
+                    "ports": port_body,
+                    **({"branchable": True} if checkpointable else {}),
+                },
+            )
+        except SmolError as error:
+            if error.code != "NOT_FOUND":
+                raise
+            # Compatibility with control planes from before branch routes.
+            clone = _cloud_fetch(
                 self._base,
                 self._key,
                 "POST",
@@ -868,8 +883,7 @@ class CloudTransport:
                     **({"forkable": True} if checkpointable else {}),
                 },
             )
-            or {}
-        )
+        clone = clone or {}
         clone_id = clone["id"]
         clone_name = clone.get("name") or name
         _wait_for_ready(self._base, self._key, clone_id)
@@ -894,16 +908,25 @@ class CloudTransport:
             body["count"] = count
         if name_prefix is not None:
             body["namePrefix"] = name_prefix
-        resp = (
-            _cloud_fetch(
+        try:
+            resp = _cloud_fetch(
+                self._base,
+                self._key,
+                "POST",
+                f"/v1/machines/{self._id}/branches/batch",
+                json_body=body,
+            )
+        except SmolError as error:
+            if error.code != "NOT_FOUND":
+                raise
+            resp = _cloud_fetch(
                 self._base,
                 self._key,
                 "POST",
                 f"/v1/machines/{self._id}/fork-batch",
                 json_body=body,
             )
-            or {}
-        )
+        resp = resp or {}
         clones = resp.get("clones") or []
         transports = [
             CloudTransport(self._base, self._key, c["id"], c.get("name") or c["id"])

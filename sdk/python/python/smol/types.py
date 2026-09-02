@@ -112,12 +112,13 @@ class MachineConfig:
     """Maximum time creation waits for the guest and published services to
     become ready. Increase this for large images or heavily prepared sandbox
     workloads; the default preserves the SDK's existing two-minute behavior."""
+    branchable: Optional[bool] = None
+    """Start as a live-RAM branch source so the machine can produce independent
+    copy-on-write children with :meth:`Machine.branch`."""
     forkable: bool = False
-    """Start as a live-RAM fork base (cloud) so the machine can be cloned with
-    :meth:`Machine.fork`. The golden and its clones are pinned to one node."""
+    """Deprecated alias for :attr:`branchable`."""
     checkpoint: bool = False
-    """RL/agent-facing alias for :attr:`forkable`: mark this machine as a
-    checkpoint you branch rollback-isolated clones from (:meth:`Machine.branch`)."""
+    """Deprecated alias for :attr:`branchable`; checkpoints are durable artifacts."""
     env: Optional[dict[str, str]] = None
     """Environment variables for the image workload launched at create."""
     workdir: Optional[str] = None
@@ -125,9 +126,10 @@ class MachineConfig:
     image's own workdir."""
 
     def __post_init__(self) -> None:
-        # `checkpoint=True` is the RL/agent name for `forkable=True`; fold it in
-        # so the rest of the stack only ever reads `forkable`.
-        if self.checkpoint:
+        # Native/cloud transports retain the compatibility `forkable` field.
+        if self.branchable is not None:
+            self.forkable = self.branchable
+        elif self.checkpoint:
             self.forkable = True
         if self.command is not None and (
             not self.command

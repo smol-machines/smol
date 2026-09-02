@@ -95,6 +95,14 @@ check('forwards forkable lifecycle to the native machine', () => {
   assert.strictEqual(toNativeConfig('m', { forkable: true }).forkable, true);
   assert.strictEqual(toNativeConfig('m', {}).forkable, undefined);
 });
+check('prefers branchable while retaining lifecycle aliases', () => {
+  assert.strictEqual(toNativeConfig('m', { branchable: true }).forkable, true);
+  assert.strictEqual(
+    toNativeConfig('m', { branchable: false, forkable: true }).forkable,
+    false,
+  );
+  assert.strictEqual(toNativeConfig('m', { checkpoint: true }).forkable, true);
+});
 check('forwards image workload env and workdir to the local engine', () => {
   const cfg = toNativeConfig('m', {
     image: 'example/service:latest',

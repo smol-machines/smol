@@ -65,8 +65,9 @@ pub enum MachineSubcommand {
     /// Copy files between host and machine
     Cp(crate::commands::cp::CpCmd),
 
-    /// Fork a running, forkable machine into a new clone (CoW RAM + disks)
-    Fork(crate::commands::fork::ForkCmd),
+    /// Branch a running, branchable machine into an independent child (CoW RAM + disks)
+    #[command(name = "branch", visible_alias = "fork")]
+    Branch(crate::commands::fork::ForkCmd),
 
     // --- maintenance / introspection --------------------------------------
     /// List a machine's cached images and storage usage
@@ -114,13 +115,69 @@ impl MachineCmd {
             .run(),
             MachineSubcommand::Logs(cmd) => cmd.run(),
             MachineSubcommand::Cp(cmd) => cmd.run(),
-            MachineSubcommand::Fork(cmd) => cmd.run(),
+            MachineSubcommand::Branch(cmd) => cmd.run(),
             // maintenance
             MachineSubcommand::Images(cmd) => cmd.run(),
             MachineSubcommand::Prune(cmd) => cmd.run(),
             MachineSubcommand::Update(cmd) => cmd.run(),
             MachineSubcommand::Monitor(cmd) => cmd.run(),
             MachineSubcommand::DataDir(cmd) => cmd.run(),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::Parser;
+
+    #[derive(Parser)]
+    struct TestCli {
+        #[command(subcommand)]
+        command: MachineSubcommand,
+    }
+
+    #[test]
+    fn branch_is_primary_and_fork_remains_an_alias() {
+        let branch = TestCli::parse_from([
+            "smol",
+            "branch",
+            "--from",
+            "source",
+            "--name",
+            "child",
+            "--branchable",
+        ]);
+        let MachineSubcommand::Branch(branch) = branch.command else {
+            panic!("expected branch command");
+        };
+        assert_eq!(branch.golden, "source");
+        assert_eq!(branch.name, "child");
+        assert!(branch.forkable);
+
+        let fork = TestCli::parse_from([
+            "smol",
+            "fork",
+            "--golden",
+            "source",
+            "--name",
+            "child",
+            "--forkable",
+        ]);
+        let MachineSubcommand::Branch(fork) = fork.command else {
+            panic!("expected fork compatibility alias");
+        };
+        assert!(fork.forkable);
+    }
+
+    #[test]
+    fn start_accepts_branchable_and_legacy_forkable() {
+        for flag in ["--branchable", "--forkable"] {
+            let parsed = TestCli::parse_from(["smol", "start", "--name", "source", flag]);
+            let MachineSubcommand::Start(start) = parsed.command else {
+                panic!("expected start command");
+            };
+            assert!(start.forkable);
         }
     }
 }

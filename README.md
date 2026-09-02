@@ -84,17 +84,17 @@ Pin a release with `SMOL_VERSION=v1.3.7`; override locations with `PREFIX` /
 
 ## Branching
 
-Set a machine up once — toolchain, repo, dependencies, warm caches — then fork
-it copy-on-write. A branch inherits the parent's RAM *and* disks, so nothing
+Set a machine up once — toolchain, repo, dependencies, warm caches — then branch
+it copy-on-write. A child inherits the source's RAM *and* disks, so nothing
 re-installs: `node_modules` is there, caches are warm, a process mid-request
 keeps running.
 
 ```ts
-const golden = await Machine.create({ image: 'alpine', network: true, forkable: true });
+const source = await Machine.create({ image: 'alpine', network: true, branchable: true });
 // ... install deps and warm the caches, once ...
-const b = await golden.branch('b1');          // typically under 200ms
+const b = await source.branch('b1');          // typically under 200ms
 await b.exec(['npm', 'test']);                // full speed, isolated
-const fleet = await golden.branchBatch({ count: 8, namePrefix: 'run' });
+const fleet = await source.branchBatch({ count: 8, namePrefix: 'run' });
 ```
 
 Branches are the unit of work for agents and CI: a fresh, VM-isolated machine

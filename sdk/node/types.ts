@@ -60,31 +60,38 @@ export interface PortSpec {
   guest: number;
 }
 
-/** Options for one live fork. Passing a `PortSpec[]` directly remains supported
- * for backwards compatibility. */
-export interface ForkOptions {
+/** Options for one live branch. Passing a `PortSpec[]` directly remains
+ * supported for backwards compatibility. */
+export interface BranchOptions {
   /** Optional pinned inbound port forwards. */
   ports?: PortSpec[];
-  /** Materialize this child as a new checkpoint source so it can be forked
+  /** Materialize this child as a new branch source so it can be branched
    * again. This pays one eager guest-memory copy when the child boots. */
+  branchable?: boolean;
+  /** @deprecated Use `branchable`. */
   checkpointable?: boolean;
 }
 
-/** Options for forking a forkable golden into many clones at once — the RL
- *  fan-out primitive (GRPO group sampling / eval-task fan-out). Provide either
- *  `count` (clones auto-named `{namePrefix}-{n}`) or explicit `names`. */
-export interface ForkBatchOptions {
-  /** Number of clones to fork (1..=64). Ignored when `names` is set. */
+/** Backwards-compatible name for {@link BranchOptions}. */
+export type ForkOptions = BranchOptions;
+
+/** Options for branching one source into many children at once. Provide either
+ *  `count` (children auto-named `{namePrefix}-{n}`) or explicit `names`. */
+export interface BranchBatchOptions {
+  /** Number of children to branch (1..=64). Ignored when `names` is set. */
   count?: number;
-  /** Explicit clone names; its length is the batch size when set. */
+  /** Explicit child names; its length is the batch size when set. */
   names?: string[];
-  /** Prefix for auto-named clones when `count` is used (default: the golden's
-   *  name on the cloud target, else `"fork"`). */
+  /** Prefix for auto-named children when `count` is used (default: the source
+   *  name on the cloud target, else `"branch"`). */
   namePrefix?: string;
-  /** Inbound port forwards applied to every clone. Empty = each clone gets fresh
-   *  host ports so clones don't collide. */
+  /** Inbound port forwards applied to every child. Empty = each child gets fresh
+   *  host ports so children don't collide. */
   ports?: PortSpec[];
 }
+
+/** Backwards-compatible name for {@link BranchBatchOptions}. */
+export type ForkBatchOptions = BranchBatchOptions;
 
 /** Options for assigning an RL episode — fork + provision one clone of a forkable
  *  golden under an idempotent lease. Cloud target only. */
@@ -132,11 +139,12 @@ export interface MachineConfig {
   autoStopSeconds?: number;
   /** Delete the machine after N seconds. (cloud) */
   ttlSeconds?: number;
-  /** Start as a live-RAM fork base (cloud) so the machine can be cloned with
-   *  `Machine.fork`. The golden and its clones are pinned to one node. */
+  /** Start as a live-RAM branch source so the machine can produce independent
+   *  copy-on-write children with `Machine.branch`. */
+  branchable?: boolean;
+  /** @deprecated Use `branchable`. */
   forkable?: boolean;
-  /** RL/agent-facing alias for `forkable`: mark this machine as a checkpoint
-   *  you branch rollback-isolated clones from (`Machine.branch`). */
+  /** @deprecated Use `branchable`; `checkpoint` now refers to a durable artifact. */
   checkpoint?: boolean;
   /** Environment variables for the image workload launched at create. */
   env?: Record<string, string>;

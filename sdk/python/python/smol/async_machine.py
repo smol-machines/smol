@@ -222,25 +222,30 @@ class AsyncMachine:
         *,
         checkpointable: bool = False,
     ) -> "AsyncMachine":
-        """Fork this running, forkable machine into a new clone. (cloud/local)"""
-        clone = await asyncio.to_thread(
-            self._m.fork,
+        """Deprecated alias for :meth:`branch`."""
+        return await self.branch(
             name,
             ports,
             checkpointable=checkpointable,
         )
-        return AsyncMachine(clone)
 
     async def branch(
         self,
         name: str,
         ports: Optional[list[PortSpec]] = None,
         *,
-        checkpointable: bool = False,
+        branchable: bool = False,
+        checkpointable: Optional[bool] = None,
     ) -> "AsyncMachine":
-        """Branch a rollback-isolated clone from this checkpoint (RAM + disk CoW) —
-        the RL/agent name for :meth:`fork`. Alias of :meth:`fork`."""
-        return await self.fork(name, ports, checkpointable=checkpointable)
+        """Branch an independent copy-on-write child from this running source."""
+        clone = await asyncio.to_thread(
+            self._m.branch,
+            name,
+            ports,
+            branchable=branchable,
+            checkpointable=checkpointable,
+        )
+        return AsyncMachine(clone)
 
     async def fork_batch(
         self,
@@ -250,17 +255,10 @@ class AsyncMachine:
         name_prefix: Optional[str] = None,
         ports: Optional[list[PortSpec]] = None,
     ) -> "list[AsyncMachine]":
-        """Fork this forkable machine into MANY clones in one call — the RL fan-out
-        primitive (GRPO group sampling / eval-task fan-out). Transactional on the
-        cloud target (all-or-nothing). See :meth:`Machine.fork_batch`."""
-        clones = await asyncio.to_thread(
-            self._m.fork_batch,
-            count,
-            names=names,
-            name_prefix=name_prefix,
-            ports=ports,
+        """Deprecated alias for :meth:`branch_batch`."""
+        return await self.branch_batch(
+            count, names=names, name_prefix=name_prefix, ports=ports
         )
-        return [AsyncMachine(c) for c in clones]
 
     async def branch_batch(
         self,
@@ -270,11 +268,15 @@ class AsyncMachine:
         name_prefix: Optional[str] = None,
         ports: Optional[list[PortSpec]] = None,
     ) -> "list[AsyncMachine]":
-        """Branch MANY rollback-isolated clones from this checkpoint in one call —
-        the RL/agent name for :meth:`fork_batch`. Alias of :meth:`fork_batch`."""
-        return await self.fork_batch(
-            count, names=names, name_prefix=name_prefix, ports=ports
+        """Branch this source into many independent children in one call."""
+        children = await asyncio.to_thread(
+            self._m.branch_batch,
+            count,
+            names=names,
+            name_prefix=name_prefix,
+            ports=ports,
         )
+        return [AsyncMachine(child) for child in children]
 
     async def assign(
         self,

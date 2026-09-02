@@ -701,6 +701,88 @@
         }
       }
     },
+    "/v1/machines/{id}/branches": {
+      "post": {
+        "tags": [
+          "machines"
+        ],
+        "operationId": "machine_branch",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Branchable source machine id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ForkRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Child created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MachineInfo"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/machines/{id}/branches/batch": {
+      "post": {
+        "tags": [
+          "machines"
+        ],
+        "operationId": "machine_branch_batch",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Branchable source machine id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ForkBatchRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Children created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ForkBatchResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/machines/{id}/checkpoints": {
       "get": {
         "tags": [
@@ -2496,6 +2578,10 @@
             "format": "int64",
             "minimum": 0
           },
+          "branchable": {
+            "type": "boolean",
+            "description": "Create this machine as a branch source: it boots with cloneable live RAM\nso `POST /v1/machines/:id/branches` can create independent copy-on-write\nchildren. Default false."
+          },
           "command": {
             "type": "array",
             "items": {
@@ -2514,10 +2600,6 @@
           },
           "ephemeral": {
             "type": "boolean"
-          },
-          "forkable": {
-            "type": "boolean",
-            "description": "Create this machine as a FORKABLE golden: it boots as a live-RAM fork base\n(cloneable copy-on-write) so `POST /v1/machines/:id/fork` can spawn\nnear-instant clones that share the golden's RAM. Default false. Forkable\nrequires a fork-capable node (currently amd64) and always cold-boots (never\nwarm-pool-claimed); a create pinning an incompatible arch is rejected."
           },
           "mounts": {
             "type": "array",
@@ -2967,12 +3049,12 @@
       },
       "ForkBatchRequest": {
         "type": "object",
-        "description": "Request to fork a running, forkable golden into MANY clones in one call — the\nRL fan-out primitive (GRPO group sampling / eval-task fan-out). Each clone is\na live-RAM CoW fork exactly like `ForkRequest`, pinned to the golden's node.\nTRANSACTIONAL: if any clone fails, the whole batch is rolled back, so the\ncaller gets all N branches or none (a partial group would bias reward\ncomparison). See docs/fork-and-durability.md.",
+        "description": "Request to branch a running source into many children in one call. The\noperation is transactional: if any child fails, every child is rolled back.",
         "properties": {
           "count": {
             "type": "integer",
             "format": "int32",
-            "description": "Number of clones to fork (1..=`MAX_FORK_BATCH`). Ignored when `names` is\nnon-empty.",
+            "description": "Number of children to branch (1..=`MAX_FORK_BATCH`). Ignored when `names` is\nnon-empty.",
             "minimum": 0
           },
           "namePrefix": {
@@ -2980,27 +3062,27 @@
               "string",
               "null"
             ],
-            "description": "Prefix for auto-named clones when `count` is used. Defaults to the golden's\nname."
+            "description": "Prefix for auto-named children when `count` is used. Defaults to the source's\nname."
           },
           "names": {
             "type": "array",
             "items": {
               "type": "string"
             },
-            "description": "Explicit clone names. When non-empty, its length is the batch size and\n`count` is ignored; otherwise clones are auto-named `{name_prefix}-{n}`."
+            "description": "Explicit child names. When non-empty, its length is the batch size and\n`count` is ignored; otherwise children are auto-named `{name_prefix}-{n}`."
           },
           "ports": {
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/MachinePort"
             },
-            "description": "Inbound port forwards applied to EVERY clone. Empty = each clone gets fresh\nhost ports — the usual fan-out case, where clones must not collide."
+            "description": "Inbound port forwards applied to every child. Empty means each child gets\nfresh host ports so siblings do not collide."
           }
         }
       },
       "ForkBatchResponse": {
         "type": "object",
-        "description": "Result of a batch fork: the clones, in request order.",
+        "description": "Result of a batch branch: the children, in request order.",
         "required": [
           "clones"
         ],
@@ -3015,18 +3097,18 @@
       },
       "ForkRequest": {
         "type": "object",
-        "description": "Request to fork a running, forkable golden into a new clone via copy-on-write\nlive RAM + disks (~same-host, processes keep running). Distinct from the\nsnapshot-based fork (overlay → object store, processes restart). See\ndocs/fork-and-durability.md.",
+        "description": "Request to branch a running source into an independent copy-on-write child.",
         "required": [
           "name"
         ],
         "properties": {
-          "forkable": {
+          "branchable": {
             "type": "boolean",
             "description": "Materialize the child as another checkpoint source so it can execute,\nreach a later decision point, and branch again. This pays one eager guest\nmemory copy while the child boots; its descendants remain copy-on-write."
           },
           "name": {
             "type": "string",
-            "description": "Name for the new clone machine."
+            "description": "Name for the new child machine."
           },
           "ports": {
             "type": "array",
@@ -3179,12 +3261,22 @@
         "description": "Dynamic machine operations for clients that must feature-detect instead of\nguessing from a server or engine version.",
         "required": [
           "exec",
+          "branch",
+          "branchBatch",
+          "nestedBranch",
+          "maxBranchBatch",
           "fork",
           "forkBatch",
           "nestedFork",
           "maxForkBatch"
         ],
         "properties": {
+          "branch": {
+            "type": "boolean"
+          },
+          "branchBatch": {
+            "type": "boolean"
+          },
           "exec": {
             "type": "boolean"
           },
@@ -3194,10 +3286,19 @@
           "forkBatch": {
             "type": "boolean"
           },
-          "maxForkBatch": {
+          "maxBranchBatch": {
             "type": "integer",
             "format": "int32",
             "minimum": 0
+          },
+          "maxForkBatch": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Legacy alias for `max_branch_batch`.",
+            "minimum": 0
+          },
+          "nestedBranch": {
+            "type": "boolean"
           },
           "nestedFork": {
             "type": "boolean"
@@ -3366,6 +3467,30 @@
             "format": "int64",
             "minimum": 0
           },
+          "branchGeneration": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "Zero for a root branch source, one for its children, and so on.",
+            "minimum": 0
+          },
+          "branchState": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/CheckpointState",
+                "description": "Lifecycle of a live branch source."
+              }
+            ]
+          },
+          "branchable": {
+            "type": "boolean",
+            "description": "Whether this machine can produce live copy-on-write branches."
+          },
           "capabilities": {
             "$ref": "#/components/schemas/MachineCapabilities",
             "description": "Operations the control plane can safely offer for this machine right now."
@@ -3377,7 +3502,7 @@
               },
               {
                 "$ref": "#/components/schemas/CheckpointState",
-                "description": "Lifecycle of a forkable checkpoint. `mutable` means it may still execute;\nits first fork freezes the exact RAM/process/filesystem state. A `frozen`\ncheckpoint can create more branches but is not an ordinary ready worker."
+                "description": "Legacy alias for `branch_state`."
               }
             ]
           },
@@ -3409,12 +3534,12 @@
               "null"
             ],
             "format": "int32",
-            "description": "Zero for a root checkpoint, one for its children, and so on.",
+            "description": "Legacy alias for `branch_generation`.",
             "minimum": 0
           },
           "forkable": {
             "type": "boolean",
-            "description": "Whether this machine was created as a forkable golden — a live-RAM fork\nbase that `POST /v1/machines/:id/fork` can CoW-clone. Default false."
+            "description": "Legacy alias for `branchable`."
           },
           "id": {
             "type": "string"
@@ -3462,12 +3587,19 @@
           "resources": {
             "$ref": "#/components/schemas/MachineResources"
           },
+          "rootBranchId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Root source for this live branch lineage. A root points to itself;\nordinary machines have no lineage."
+          },
           "rootCheckpointId": {
             "type": [
               "string",
               "null"
             ],
-            "description": "Root checkpoint for this branch lineage. A root checkpoint points to\nitself; ordinary machines have no lineage."
+            "description": "Legacy alias for `root_branch_id`."
           },
           "source": {
             "$ref": "#/components/schemas/MachineSource"

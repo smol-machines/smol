@@ -340,6 +340,38 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/machines/{id}/branches": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["machine_branch"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/machines/{id}/branches/batch": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["machine_branch_batch"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/machines/{id}/checkpoints": {
         parameters: {
             query?: never;
@@ -1133,6 +1165,12 @@ export interface components {
             /** Format: int64 */
             autoStopSeconds?: number | null;
             /**
+             * @description Create this machine as a branch source: it boots with cloneable live RAM
+             *     so `POST /v1/machines/:id/branches` can create independent copy-on-write
+             *     children. Default false.
+             */
+            branchable?: boolean;
+            /**
              * @description Optional workload command (argv) that overrides the source image's or
              *     `.smolmachine` artifact's own entrypoint+cmd when the machine starts, so a
              *     deploy of an off-the-shelf image can say what to run/serve. Empty (default)
@@ -1143,14 +1181,6 @@ export interface components {
                 [key: string]: string;
             };
             ephemeral?: boolean;
-            /**
-             * @description Create this machine as a FORKABLE golden: it boots as a live-RAM fork base
-             *     (cloneable copy-on-write) so `POST /v1/machines/:id/fork` can spawn
-             *     near-instant clones that share the golden's RAM. Default false. Forkable
-             *     requires a fork-capable node (currently amd64) and always cold-boots (never
-             *     warm-pool-claimed); a create pinning an incompatible arch is rejected.
-             */
-            forkable?: boolean;
             mounts?: components["schemas"]["MachineMountSpec"][];
             name?: string | null;
             network?: components["schemas"]["MachineNetwork"];
@@ -1312,54 +1342,45 @@ export interface components {
             message: string;
         };
         /**
-         * @description Request to fork a running, forkable golden into MANY clones in one call — the
-         *     RL fan-out primitive (GRPO group sampling / eval-task fan-out). Each clone is
-         *     a live-RAM CoW fork exactly like `ForkRequest`, pinned to the golden's node.
-         *     TRANSACTIONAL: if any clone fails, the whole batch is rolled back, so the
-         *     caller gets all N branches or none (a partial group would bias reward
-         *     comparison). See docs/fork-and-durability.md.
+         * @description Request to branch a running source into many children in one call. The
+         *     operation is transactional: if any child fails, every child is rolled back.
          */
         ForkBatchRequest: {
             /**
              * Format: int32
-             * @description Number of clones to fork (1..=`MAX_FORK_BATCH`). Ignored when `names` is
+             * @description Number of children to branch (1..=`MAX_FORK_BATCH`). Ignored when `names` is
              *     non-empty.
              */
             count?: number;
             /**
-             * @description Prefix for auto-named clones when `count` is used. Defaults to the golden's
+             * @description Prefix for auto-named children when `count` is used. Defaults to the source's
              *     name.
              */
             namePrefix?: string | null;
             /**
-             * @description Explicit clone names. When non-empty, its length is the batch size and
-             *     `count` is ignored; otherwise clones are auto-named `{name_prefix}-{n}`.
+             * @description Explicit child names. When non-empty, its length is the batch size and
+             *     `count` is ignored; otherwise children are auto-named `{name_prefix}-{n}`.
              */
             names?: string[];
             /**
-             * @description Inbound port forwards applied to EVERY clone. Empty = each clone gets fresh
-             *     host ports — the usual fan-out case, where clones must not collide.
+             * @description Inbound port forwards applied to every child. Empty means each child gets
+             *     fresh host ports so siblings do not collide.
              */
             ports?: components["schemas"]["MachinePort"][];
         };
-        /** @description Result of a batch fork: the clones, in request order. */
+        /** @description Result of a batch branch: the children, in request order. */
         ForkBatchResponse: {
             clones: components["schemas"]["MachineInfo"][];
         };
-        /**
-         * @description Request to fork a running, forkable golden into a new clone via copy-on-write
-         *     live RAM + disks (~same-host, processes keep running). Distinct from the
-         *     snapshot-based fork (overlay → object store, processes restart). See
-         *     docs/fork-and-durability.md.
-         */
+        /** @description Request to branch a running source into an independent copy-on-write child. */
         ForkRequest: {
             /**
              * @description Materialize the child as another checkpoint source so it can execute,
              *     reach a later decision point, and branch again. This pays one eager guest
              *     memory copy while the child boots; its descendants remain copy-on-write.
              */
-            forkable?: boolean;
-            /** @description Name for the new clone machine. */
+            branchable?: boolean;
+            /** @description Name for the new child machine. */
             name: string;
             /**
              * @description Pin the clone's inbound port forwards. Empty = the node allocates fresh
@@ -1409,11 +1430,19 @@ export interface components {
          *     guessing from a server or engine version.
          */
         MachineCapabilities: {
+            branch: boolean;
+            branchBatch: boolean;
             exec: boolean;
             fork: boolean;
             forkBatch: boolean;
             /** Format: int32 */
+            maxBranchBatch: number;
+            /**
+             * Format: int32
+             * @description Legacy alias for `max_branch_batch`.
+             */
             maxForkBatch: number;
+            nestedBranch: boolean;
             nestedFork: boolean;
         };
         MachineCodeRequest: {
@@ -1482,6 +1511,14 @@ export interface components {
             arch?: string | null;
             /** Format: int64 */
             autoStopSeconds?: number | null;
+            /**
+             * Format: int32
+             * @description Zero for a root branch source, one for its children, and so on.
+             */
+            branchGeneration?: number | null;
+            branchState?: null | components["schemas"]["CheckpointState"];
+            /** @description Whether this machine can produce live copy-on-write branches. */
+            branchable?: boolean;
             /** @description Operations the control plane can safely offer for this machine right now. */
             capabilities?: components["schemas"]["MachineCapabilities"];
             checkpointState?: null | components["schemas"]["CheckpointState"];
@@ -1500,13 +1537,10 @@ export interface components {
             error?: string | null;
             /**
              * Format: int32
-             * @description Zero for a root checkpoint, one for its children, and so on.
+             * @description Legacy alias for `branch_generation`.
              */
             forkGeneration?: number | null;
-            /**
-             * @description Whether this machine was created as a forkable golden — a live-RAM fork
-             *     base that `POST /v1/machines/:id/fork` can CoW-clone. Default false.
-             */
+            /** @description Legacy alias for `branchable`. */
             forkable?: boolean;
             id: string;
             lastActivityAt?: string | null;
@@ -1536,9 +1570,11 @@ export interface components {
             readyAt?: string | null;
             resources: components["schemas"]["MachineResources"];
             /**
-             * @description Root checkpoint for this branch lineage. A root checkpoint points to
-             *     itself; ordinary machines have no lineage.
+             * @description Root source for this live branch lineage. A root points to itself;
+             *     ordinary machines have no lineage.
              */
+            rootBranchId?: string | null;
+            /** @description Legacy alias for `root_branch_id`. */
             rootCheckpointId?: string | null;
             source: components["schemas"]["MachineSource"];
             state: string;
@@ -2726,6 +2762,60 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+        };
+    };
+    machine_branch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Branchable source machine id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ForkRequest"];
+            };
+        };
+        responses: {
+            /** @description Child created */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MachineInfo"];
+                };
+            };
+        };
+    };
+    machine_branch_batch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Branchable source machine id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ForkBatchRequest"];
+            };
+        };
+        responses: {
+            /** @description Children created */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ForkBatchResponse"];
+                };
             };
         };
     };

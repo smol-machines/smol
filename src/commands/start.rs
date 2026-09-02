@@ -20,9 +20,9 @@ pub struct StartCmd {
     #[arg(long, conflicts_with = "cloud")]
     pub local: bool,
 
-    /// Start as a fork base: back guest RAM with a memfd (CoW-cloneable) and
-    /// expose a control socket so the machine can be forked with `smol machine fork`.
-    #[arg(long)]
+    /// Start as a branch source: back guest RAM with a memfd (CoW-cloneable) and
+    /// expose a control socket so the machine can be branched later.
+    #[arg(long = "branchable", visible_alias = "forkable")]
     pub forkable: bool,
 }
 
@@ -257,7 +257,7 @@ impl StartCmd {
             eprintln!("Starting {}...", id);
             let mut req = http.post(format!("{}/v1/machines/{}/start", endpoint, id));
             if forkable {
-                // Start as a live-RAM fork base (golden) so it can be `smol machine fork --cloud`-ed.
+                // Start with cloneable live RAM so it can be branched later.
                 req = req.query(&[("forkable", "true")]);
             }
             let resp = req.send().await?;

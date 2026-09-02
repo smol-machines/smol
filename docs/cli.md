@@ -30,7 +30,7 @@ Global behavior:
 | Command | Description |
 |---------|-------------|
 | `smol machine create <name> --image <ref>` | Create a **persistent** machine (does not run a command). Use `--from <path.smolmachine>` to create from a packed artifact (uses its layers, no pull). Restrict egress with `--allow-cidr`/`--allow-host`/`--outbound-localhost-only` (imply `--net`). |
-| `smol machine start <name>` / `smol machine stop <name>` | Start / stop a persistent machine. Add `--forkable` to `start` to make it a fork base. |
+| `smol machine start <name>` / `smol machine stop <name>` | Start / stop a persistent machine. Add `--branchable` to `start` to make it a branch source (`--forkable` remains an alias). |
 | `smol machine ls` | List machines, local **and** cloud (`--json`; `--local`/`--cloud` to scope). Alias: `list`. |
 | `smol machine status <name>` | Show one machine's status (`--json`). |
 | `smol machine rm <name>` | Delete a machine (`--force` to skip the confirmation prompt). Alias: `delete`. |
@@ -38,7 +38,7 @@ Global behavior:
 | `smol machine shell --name <name>` | Interactive shell into a machine. Alias: `sh`. |
 | `smol machine cp <src> <dst>` | Copy files host↔guest (`name:/path` denotes a guest path). |
 | `smol machine logs <name>` | Fetch machine logs (`--tail N`). |
-| `smol machine fork --golden <name> --name <clone>` | Clone a running, forkable machine (copy-on-write RAM + disks). The golden must have been started `--forkable`; it then stays frozen as the shared base. `-p HOST:GUEST` pins the clone's ports (otherwise they're remapped to free host ports). |
+| `smol machine branch --from <source> --name <child>` | Create an independent child from a running branchable machine (copy-on-write RAM + disks). Use `--branchable` on the child to branch again. `fork`, `--golden`, and `--forkable` remain compatibility aliases. |
 | `smol machine images --name <name>` | List a machine's cached images and storage usage (`--json`). |
 | `smol machine prune --name <name>` | Reclaim a machine's disk: free unreferenced layers, or `--all` to purge the cache (`--dry-run` to preview; `--all` requires the machine stopped). |
 | `smol machine update --name <name> …` | Modify a **stopped** machine: add/remove volumes/ports/env, set `--cpus`/`--mem`/`--workdir`, toggle `--net`/`--gpu`, expand `--storage`/`--overlay` (expand-only). |

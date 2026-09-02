@@ -20,8 +20,8 @@ const local = await Machine.create({ resources: { cpus: 2, memoryMb: 1024 } });
 // Branch a prepared machine: a CoW clone of its RAM and disks, typically
 // under 200ms, so a warm environment is reused instead of rebuilt. Pass
 // `network: true` whenever an image has to be pulled.
-const golden = await Machine.create({ image: 'alpine', network: true, forkable: true });
-const branch = await golden.branch('b1');
+const source = await Machine.create({ image: 'alpine', network: true, branchable: true });
+const branch = await source.branch('b1');
 
 // Cloud (smolfleet) — pass an API key, or set SMOL_CLOUD_TOKEN.
 const cloud = await Machine.create(
@@ -118,9 +118,9 @@ const result = await rollouts.generate({
 });
 ```
 
-Inside a forked rollout worker, `new RolloutClient()` discovers its authenticated
-node assignment from `/etc/smolvm/fork-env` and automatically groups workers
-from the same fork batch into a bounded cohort. Set `autoForkCohort: false` only
+Inside a branched rollout worker, `new RolloutClient()` discovers its authenticated
+node assignment from `/etc/smolvm/branch-env` and automatically groups workers
+from the same branch batch into a bounded cohort. Set `autoForkCohort: false` only
 when the application already supplies an explicit `cohort`.
 
 The client targets the loopback rollout API on a CUDA node; it publishes
@@ -160,6 +160,7 @@ try {
 - `machine.execStream(command, opts?)` → `AsyncGenerator<ExecEvent>`.
 - `machine.readFile(path)` / `machine.writeFile(path, data, mode?)`.
 - `machine.pullImage(image)` / `machine.listImages()`.
+- `machine.branch(name, options?)` / `machine.branchBatch(options)`.
 - `machine.stop()` / `machine.delete()` / `await machine.state()`. Cloud
   `"started"` means VM launched, not ready for work.
 

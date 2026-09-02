@@ -173,6 +173,15 @@ def test_native_config_forwards_forkable_lifecycle():
     assert _native_config("m", MachineConfig())["forkable"] is False
 
 
+def test_branchable_is_primary_and_lifecycle_aliases_remain_compatible():
+    assert _native_config("m", MachineConfig(branchable=True))["forkable"] is True
+    assert (
+        _native_config("m", MachineConfig(branchable=False, forkable=True))["forkable"]
+        is False
+    )
+    assert _native_config("m", MachineConfig(checkpoint=True))["forkable"] is True
+
+
 def test_borrowed_local_transport_is_not_stopped_at_interpreter_exit():
     class Inner:
         name = "checkpoint"

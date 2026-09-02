@@ -86,8 +86,13 @@ class Handler(BaseHTTPRequestHandler):
             }).encode())
         if self.path == "/v1/machines/mach-restored/start":
             return self._send(200, json.dumps({"id": "mach-restored", "state": "started"}).encode())
-        if self.path == f"/v1/machines/{MACHINE_ID}/fork":
+        if self.path == f"/v1/machines/{MACHINE_ID}/branches":
             captured["fork_body"] = json.loads(self._read() or b"{}")
+            if captured["fork_body"].get("name") == "legacy-branch":
+                captured["new_branch_returned_404"] = True
+                return self._send(404, json.dumps({
+                    "code": "NOT_FOUND", "error": "route not found"
+                }).encode())
             return self._send(201, json.dumps({
                 "id": CLONE_ID, "name": captured["fork_body"].get("name") or "clone",
                 "source": {"type": "image", "reference": "alpine:3.20"}, "state": "started",
@@ -95,9 +100,23 @@ class Handler(BaseHTTPRequestHandler):
                 "env": {}, "ephemeral": False, "ports": captured["fork_body"].get("ports") or [],
                 "createdAt": "2026-05-30T00:00:00Z", "updatedAt": "2026-05-30T00:00:00Z",
             }).encode())
-        if self.path == f"/v1/machines/{MACHINE_ID}/fork-batch":
+        if self.path == f"/v1/machines/{MACHINE_ID}/fork":
+            captured["legacy_fork_body"] = json.loads(self._read() or b"{}")
+            return self._send(201, json.dumps({
+                "id": CLONE_ID, "name": captured["legacy_fork_body"]["name"],
+                "source": {"type": "image", "reference": "alpine:3.20"}, "state": "started",
+                "resources": {"cpus": 2, "memoryMb": 1024}, "network": {"mode": "open"},
+                "env": {}, "ephemeral": False, "ports": [],
+                "createdAt": "2026-05-30T00:00:00Z", "updatedAt": "2026-05-30T00:00:00Z",
+            }).encode())
+        if self.path == f"/v1/machines/{MACHINE_ID}/branches/batch":
             captured["fork_batch_body"] = json.loads(self._read() or b"{}")
             body = captured["fork_batch_body"]
+            if body.get("namePrefix") == "legacy":
+                captured["new_branch_batch_returned_404"] = True
+                return self._send(404, json.dumps({
+                    "code": "NOT_FOUND", "error": "route not found"
+                }).encode())
             names = body.get("names")
             n = body.get("count") or len(names or [])
             prefix = body.get("namePrefix") or "golden"
@@ -111,6 +130,17 @@ class Handler(BaseHTTPRequestHandler):
                     "env": {}, "ephemeral": False, "ports": body.get("ports") or [],
                     "createdAt": "2026-05-30T00:00:00Z", "updatedAt": "2026-05-30T00:00:00Z",
                 })
+            return self._send(201, json.dumps({"clones": clones}).encode())
+        if self.path == f"/v1/machines/{MACHINE_ID}/fork-batch":
+            captured["legacy_fork_batch_body"] = json.loads(self._read() or b"{}")
+            body = captured["legacy_fork_batch_body"]
+            clones = [{
+                "id": f"mach-b{i + 1}", "name": f"legacy-{i + 1}",
+                "source": {"type": "image", "reference": "alpine:3.20"}, "state": "started",
+                "resources": {"cpus": 2, "memoryMb": 1024}, "network": {"mode": "open"},
+                "env": {}, "ephemeral": False, "ports": [],
+                "createdAt": "2026-05-30T00:00:00Z", "updatedAt": "2026-05-30T00:00:00Z",
+            } for i in range(body.get("count") or 0)]
             return self._send(201, json.dumps({"clones": clones}).encode())
         if self.path == f"/v1/machines/{MACHINE_ID}/assign":
             captured["assign_body"] = json.loads(self._read() or b"{}")
@@ -357,28 +387,34 @@ def main() -> int:
               body.get("ok") is True and captured.get("connect_path") == f"/v1/machines/{MACHINE_ID}/connect/80/healthz",
               str(captured.get("connect_path")))
 
-        # --- fork: live-RAM RL clone over the cloud ---
-        clone = m.fork(
+        # --- branch: live-RAM child over the cloud ---
+        clone = m.branch(
             "rollout-1",
             ports=[PortSpec(host=18080, guest=80)],
-            checkpointable=True,
+            branchable=True,
         )
-        check("fork hit POST /fork", f"POST /v1/machines/{MACHINE_ID}/fork" in captured["hits"])
+        check("branch hit POST /branches", f"POST /v1/machines/{MACHINE_ID}/branches" in captured["hits"])
         check("fork body carries clone name", captured["fork_body"].get("name") == "rollout-1",
               str(captured.get("fork_body")))
         check("fork ports mapped guest+hostPort",
               captured["fork_body"].get("ports") == [{"port": 80, "hostPort": 18080}],
               str(captured["fork_body"].get("ports")))
-        check("fork can promote the clone to a checkpoint source",
-              captured["fork_body"].get("forkable") is True,
+        check("branch can promote the child to another branch source",
+              captured["fork_body"].get("branchable") is True,
               str(captured.get("fork_body")))
         check("fork returns running clone handle", clone.name == "rollout-1" and clone.state() == "started",
               f"{clone.name}/{clone.state()}")
+        legacy_branch = m.branch("legacy-branch", branchable=True)
+        check("branch falls back to legacy /fork",
+              captured.get("new_branch_returned_404") is True
+              and captured.get("legacy_fork_body", {}).get("forkable") is True
+              and legacy_branch.name == "legacy-branch",
+              str(captured.get("legacy_fork_body")))
 
-        # --- fork_batch: fan out N RL rollouts in one transactional call ---
-        batch = m.fork_batch(count=3, name_prefix="rollout")
-        check("fork_batch hit POST /fork-batch",
-              f"POST /v1/machines/{MACHINE_ID}/fork-batch" in captured["hits"])
+        # --- branch_batch: fan out N children in one transactional call ---
+        batch = m.branch_batch(count=3, name_prefix="rollout")
+        check("branch_batch hit POST /branches/batch",
+              f"POST /v1/machines/{MACHINE_ID}/branches/batch" in captured["hits"])
         check("fork_batch sent the size spec",
               captured["fork_batch_body"].get("count") == 3
               and captured["fork_batch_body"].get("namePrefix") == "rollout",
@@ -386,6 +422,12 @@ def main() -> int:
         check("fork_batch returns N clones in request order",
               len(batch) == 3 and batch[0].name == "rollout-1" and batch[2].name == "rollout-3",
               ",".join(c.name for c in batch))
+        legacy_batch = m.branch_batch(count=2, name_prefix="legacy")
+        check("branch_batch falls back to legacy /fork-batch",
+              captured.get("new_branch_batch_returned_404") is True
+              and captured.get("legacy_fork_batch_body", {}).get("count") == 2
+              and len(legacy_batch) == 2,
+              str(captured.get("legacy_fork_batch_body")))
 
         # --- assign: lease an RL episode, heartbeat, auto-complete on context exit ---
         with m.assign("task-99", task={"seed": 7}, secrets={"KEY": "v"}) as ep:

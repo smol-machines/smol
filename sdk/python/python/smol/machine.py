@@ -247,38 +247,28 @@ class Machine:
         *,
         checkpointable: bool = False,
     ) -> "Machine":
-        """Fork this running, forkable machine into a new clone via copy-on-write
-        live RAM + disks (cloud target). The clone inherits the golden's warm
-        in-memory state and runs on the same node; forks are fast (~tens of ms)
-        and repeatable from one golden — the basis for RL rollout branching and
-        instant episode reset. The golden must have been created with
-        ``MachineConfig(forkable=True)``.
+        """Deprecated alias for :meth:`branch`.
 
-        :param name: name for the new clone machine.
-        :param ports: optional pinned inbound port forwards for the clone (each
-            ``PortSpec(host, guest)``); by default the node allocates fresh host
-            ports so clones don't collide.
-        :param checkpointable: materialize this child as a new checkpoint source
-            so it can be forked again. This pays one eager guest-memory copy.
-        :returns: a :class:`Machine` handle to the running clone.
+        ``checkpointable=True`` retains the legacy spelling for creating a child
+        that can itself become a branch source.
         """
-        return Machine(self._t.fork(name, ports, checkpointable=checkpointable))
+        return self.branch(name, ports, checkpointable=checkpointable)
 
     def branch(
         self,
         name: str,
         ports: Optional[list[PortSpec]] = None,
         *,
-        checkpointable: bool = False,
+        branchable: bool = False,
+        checkpointable: Optional[bool] = None,
     ) -> "Machine":
-        """Branch a rollback-isolated clone from this checkpoint — the RL/agent
-        name for :meth:`fork`. The branch inherits the checkpoint's warm RAM *and*
-        disk via copy-on-write, explores independently, and is discarded when
-        done; the next branch starts from the same checkpoint, so both memory and
-        filesystem are rolled back for free. Requires this machine to be a
-        checkpoint (``MachineConfig(checkpoint=True)``). Alias of :meth:`fork`.
+        """Branch an independent child from this running source. The child
+        inherits warm RAM and disk through copy-on-write while the source remains
+        available for more branches. Create the source with
+        ``MachineConfig(branchable=True)``.
         """
-        return self.fork(name, ports, checkpointable=checkpointable)
+        promote = branchable or bool(checkpointable)
+        return Machine(self._t.fork(name, ports, checkpointable=promote))
 
     def fork_batch(
         self,
@@ -288,29 +278,8 @@ class Machine:
         name_prefix: Optional[str] = None,
         ports: Optional[list[PortSpec]] = None,
     ) -> "list[Machine]":
-        """Fork this forkable machine into MANY clones in one call — the RL
-        fan-out primitive (GRPO group sampling / eval-task fan-out). Each clone is
-        a live-RAM CoW fork off this golden, like :meth:`fork`. On the cloud target
-        the batch is transactional (all-or-nothing: if any clone fails, the whole
-        batch is rolled back), so you get all N branches or none. Requires this
-        machine to be ``forkable``.
-
-        Provide either ``count`` (clones auto-named ``{name_prefix}-{n}``) or
-        explicit ``names``.
-
-        :param count: number of clones to fork (ignored when ``names`` is given).
-        :param names: explicit clone names; its length is the batch size.
-        :param name_prefix: prefix for auto-named clones (default: the golden's
-            name on the cloud target, else ``"fork"``).
-        :param ports: optional pinned inbound port forwards applied to every clone.
-        :returns: the clones, in request order.
-        """
-        return [
-            Machine(t)
-            for t in self._t.fork_batch(
-                count, names=names, name_prefix=name_prefix, ports=ports
-            )
-        ]
+        """Deprecated alias for :meth:`branch_batch`."""
+        return self.branch_batch(count, names=names, name_prefix=name_prefix, ports=ports)
 
     def branch_batch(
         self,
@@ -320,14 +289,17 @@ class Machine:
         name_prefix: Optional[str] = None,
         ports: Optional[list[PortSpec]] = None,
     ) -> "list[Machine]":
-        """Branch MANY rollback-isolated clones from this checkpoint in one call —
-        the RL/agent name for :meth:`fork_batch` (tree-search fan-out / GRPO group
-        sampling). Each branch is a live-RAM + disk CoW clone of the checkpoint.
-        Alias of :meth:`fork_batch`.
+        """Branch this source into many independent children in one call.
+
+        The cloud operation is transactional: callers receive every child or
+        none. Create the source with ``MachineConfig(branchable=True)``.
         """
-        return self.fork_batch(
-            count, names=names, name_prefix=name_prefix, ports=ports
-        )
+        return [
+            Machine(t)
+            for t in self._t.fork_batch(
+                count, names=names, name_prefix=name_prefix, ports=ports
+            )
+        ]
 
     def assign(
         self,

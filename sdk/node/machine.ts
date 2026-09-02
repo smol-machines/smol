@@ -19,6 +19,8 @@ import {
 } from "./transport";
 import type {
   AssignOptions,
+  BranchBatchOptions,
+  BranchOptions,
   ConnectOptions,
   ExecEvent,
   ExecOptions,
@@ -73,10 +75,10 @@ export class Machine {
     config: MachineConfig = {},
     conn: ConnectOptions = {},
   ): Promise<Machine> {
-    // `checkpoint: true` is the RL/agent-facing name for `forkable: true` — a
-    // machine you branch rollback-isolated clones from. Normalize it here so
-    // the rest of the stack only ever sees `forkable`.
-    if (config.checkpoint) config = { ...config, forkable: true };
+    // The native/cloud transports still use the compatibility `forkable`
+    // field. Normalize every accepted public spelling at this boundary.
+    const branchable = config.branchable ?? config.forkable ?? config.checkpoint;
+    if (branchable !== undefined) config = { ...config, forkable: branchable };
     return new Machine(await makeTransport(config, conn));
   }
 
@@ -271,62 +273,42 @@ export class Machine {
     return this.transport.checkpoints();
   }
 
-  /** Fork this running, forkable machine into a new clone via copy-on-write live
-   *  RAM + disks (cloud target). The clone inherits the golden's warm in-memory
-   *  state and runs on the same node; forks are fast (~tens of ms) and repeatable
-   *  from one golden — the basis for RL rollout branching and instant episode
-   *  reset. The golden must have been created with `MachineConfig({ forkable: true })`.
+  /** Branch an independent child from this running source. The child inherits
+   *  warm RAM and disk through copy-on-write while the source remains available
+   *  for more branches. Create the source with `{ branchable: true }`.
    *
-   *  @param name  name for the new clone machine.
-   *  @param options optional pinned ports and `checkpointable: true` when this
-   *                 child must itself become a fork source. A `PortSpec[]` is
-   *                 still accepted for backwards compatibility.
-   *  @returns a `Machine` handle to the running clone. */
-  async fork(name: string, options?: PortSpec[] | ForkOptions): Promise<Machine> {
-    return new Machine(await this.transport.fork(name, options));
+   *  @param name name for the child machine.
+   *  @param options optional pinned ports and `branchable: true` when the child
+   *                 must itself become a branch source. */
+  branch(name: string, options?: PortSpec[] | BranchOptions): Promise<Machine> {
+    return this.transport.fork(name, options).then((transport) => new Machine(transport));
   }
 
-  /** Branch a rollback-isolated clone from this checkpoint — the RL/agent name
-   *  for `fork()`. The branch inherits the checkpoint's warm RAM *and* disk via
-   *  copy-on-write, explores independently, and is discarded when done; the next
-   *  branch starts from the same checkpoint, so both memory and filesystem are
-   *  rolled back for free. Requires this machine to be a checkpoint
-   *  (`MachineConfig({ checkpoint: true })`). Alias of {@link fork}. */
-  branch(name: string, options?: PortSpec[] | ForkOptions): Promise<Machine> {
-    return this.fork(name, options);
+  /** @deprecated Use {@link branch}. */
+  fork(name: string, options?: PortSpec[] | ForkOptions): Promise<Machine> {
+    return this.branch(name, options);
   }
 
-  /** Fork this forkable machine into MANY clones in one call — the RL fan-out
-   *  primitive (GRPO group sampling / eval-task fan-out). Each clone is a live-RAM
-   *  CoW fork off this golden, like `fork()`. On the cloud target the batch is
-   *  transactional (all-or-nothing: if any clone fails, the whole batch is rolled
-   *  back), so you get all N branches or none. Provide either `count` (clones
-   *  auto-named `{namePrefix}-{n}`) or explicit `names`. Requires this machine to
-   *  be `forkable`.
+  /** Branch this source into MANY independent children in one call. On the
+   *  cloud target the batch is transactional, so callers receive all children
+   *  or none. Create the source with `{ branchable: true }`.
    *
    *  @param opts  batch size (`count` or `names`), optional `namePrefix`/`ports`
-   *  @returns the clones, in request order
+   *  @returns the children, in request order
    *
    *  ```ts
-   *  const clones = await golden.forkBatch({ count: 32, namePrefix: "rollout" });
-   *  await Promise.all(clones.map((c) => c.exec(["python", "rollout.py"])));
+   *  const children = await source.branchBatch({ count: 32, namePrefix: "rollout" });
+   *  await Promise.all(children.map((child) => child.exec(["python", "rollout.py"])));
    *  ``` */
-  async forkBatch(opts: ForkBatchOptions): Promise<Machine[]> {
-    const clones = await this.transport.forkBatch(opts);
-    return clones.map((t) => new Machine(t));
+  branchBatch(opts: BranchBatchOptions): Promise<Machine[]> {
+    return this.transport
+      .forkBatch(opts)
+      .then((children) => children.map((transport) => new Machine(transport)));
   }
 
-  /** Branch MANY rollback-isolated clones from this checkpoint in one call — the
-   *  RL/agent name for `forkBatch()` (tree-search fan-out / GRPO group sampling).
-   *  Each branch is a live-RAM + disk CoW clone of the checkpoint. Alias of
-   *  {@link forkBatch}.
-   *
-   *  ```ts
-   *  const ckpt = await Machine.create({ image, checkpoint: true });
-   *  const branches = await ckpt.branchBatch({ count: 32, namePrefix: "rollout" });
-   *  ``` */
-  branchBatch(opts: ForkBatchOptions): Promise<Machine[]> {
-    return this.forkBatch(opts);
+  /** @deprecated Use {@link branchBatch}. */
+  async forkBatch(opts: ForkBatchOptions): Promise<Machine[]> {
+    return this.branchBatch(opts);
   }
 
   /** Assign an RL episode: fork + provision a clone of this forkable golden under

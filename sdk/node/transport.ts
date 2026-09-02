@@ -233,6 +233,11 @@ export function resolveNetwork(config: MachineConfig): boolean | undefined {
   return config.resources?.network ?? config.network;
 }
 
+/** Resolve the primary branch lifecycle name and its compatibility aliases. */
+export function resolveBranchable(config: MachineConfig): boolean | undefined {
+  return config.branchable ?? config.forkable ?? config.checkpoint;
+}
+
 export function toNativeConfig(
   name: string,
   config: MachineConfig,
@@ -245,7 +250,7 @@ export function toNativeConfig(
       Object.entries(config.env).map(([key, value]) => ({ key, value })),
     workdir: config.workdir,
     persistent: config.persistent,
-    forkable: config.forkable,
+    forkable: resolveBranchable(config),
     mounts: config.mounts?.map((m) => ({
       source: m.source,
       target: m.target,
@@ -525,7 +530,11 @@ class LocalTransport implements Transport {
     let clone: LocalTransport | undefined;
     try {
       clone = new LocalTransport(
-        await this.inner.fork(name, nativePorts, opts.checkpointable ?? false),
+        await this.inner.fork(
+          name,
+          nativePorts,
+          opts.branchable ?? opts.checkpointable ?? false,
+        ),
       );
       await clone.waitUntilReady();
       return clone; // ctor registers for cleanup
@@ -540,7 +549,7 @@ class LocalTransport implements Transport {
     // golden (each is CoW O(metadata) after the first freeze) and clean up what
     // succeeded if any fork fails — best-effort local mirror of the cloud
     // target's all-or-nothing transaction.
-    const names = resolveBatchNames(opts, "fork");
+    const names = resolveBatchNames(opts, "branch");
     const forks: Transport[] = [];
     try {
       for (const name of names) {
@@ -1112,18 +1121,38 @@ class CloudTransport implements Transport {
       port: p.guest,
       hostPort: p.host,
     }));
-    const clone = await cloudFetch<MachineInfo>(
-      this.conn,
-      "POST",
-      `/v1/machines/${this.id}/fork`,
-      {
-        json: {
-          name,
-          ports: portBody,
-          ...(opts.checkpointable ? { forkable: true } : {}),
+    const branchable = opts.branchable ?? opts.checkpointable ?? false;
+    let clone: MachineInfo;
+    try {
+      clone = await cloudFetch<MachineInfo>(
+        this.conn,
+        "POST",
+        `/v1/machines/${this.id}/branches`,
+        {
+          json: {
+            name,
+            ports: portBody,
+            ...(branchable ? { branchable: true } : {}),
+          },
         },
-      },
-    );
+      );
+    } catch (error) {
+      // Older control planes expose only `/fork`. Retain wire compatibility
+      // during the branch-vocabulary rollout.
+      if (!(error instanceof SmolError) || error.code !== "NOT_FOUND") throw error;
+      clone = await cloudFetch<MachineInfo>(
+        this.conn,
+        "POST",
+        `/v1/machines/${this.id}/fork`,
+        {
+          json: {
+            name,
+            ports: portBody,
+            ...(branchable ? { forkable: true } : {}),
+          },
+        },
+      );
+    }
     const cloneId = clone.id;
     const cloneName = clone.name ?? name;
     await waitForReady(this.conn, cloneId);
@@ -1141,12 +1170,23 @@ class CloudTransport implements Transport {
     if (opts.names && opts.names.length > 0) body.names = opts.names;
     if (opts.count !== undefined) body.count = opts.count;
     if (opts.namePrefix !== undefined) body.namePrefix = opts.namePrefix;
-    const resp = await cloudFetch<{ clones: MachineInfo[] }>(
-      this.conn,
-      "POST",
-      `/v1/machines/${this.id}/fork-batch`,
-      { json: body },
-    );
+    let resp: { clones: MachineInfo[] };
+    try {
+      resp = await cloudFetch<{ clones: MachineInfo[] }>(
+        this.conn,
+        "POST",
+        `/v1/machines/${this.id}/branches/batch`,
+        { json: body },
+      );
+    } catch (error) {
+      if (!(error instanceof SmolError) || error.code !== "NOT_FOUND") throw error;
+      resp = await cloudFetch<{ clones: MachineInfo[] }>(
+        this.conn,
+        "POST",
+        `/v1/machines/${this.id}/fork-batch`,
+        { json: body },
+      );
+    }
     const clones = resp.clones ?? [];
     // Clones come back already forked/started; wait for each in parallel so every
     // returned handle is usable.
@@ -1399,7 +1439,7 @@ export async function makeTransport(
       // fork endpoint checks the stored flag, so it MUST be sent here. (The
       // `?forkable=true` start param only affects the boot; without this field the
       // golden is stored non-forkable and every fork() 409s.)
-      ...(config.forkable ? { forkable: true } : {}),
+      ...(resolveBranchable(config) ? { forkable: true } : {}),
     };
     const created = await cloudFetch<MachineInfo>(
       cloudConn,
@@ -1418,7 +1458,7 @@ export async function makeTransport(
       // Best-effort start (cloud may auto-start; waitForReady is the gate).
       // A forkable golden boots with cloneable guest RAM (memfd) so it can later
       // be forked with Machine.fork (live-RAM CoW, RL rollouts).
-      const startPath = `/v1/machines/${id}/start${config.forkable ? "?forkable=true" : ""}`;
+      const startPath = `/v1/machines/${id}/start${resolveBranchable(config) ? "?forkable=true" : ""}`;
       try {
         await cloudFetch(cloudConn, "POST", startPath);
       } catch (e) {
@@ -1455,7 +1495,7 @@ export async function makeTransport(
     transport = new LocalTransport(inner);
     // A forkable golden boots with memfd-backed guest RAM + a control socket so
     // it can be cloned with Machine.fork (local live-RAM fork).
-    if (config.forkable) {
+    if (resolveBranchable(config)) {
       await inner.startForkable();
     } else {
       await inner.start();
