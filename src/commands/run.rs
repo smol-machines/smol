@@ -32,8 +32,8 @@ pub struct RunCmd {
     #[arg(short = 'w', long, value_name = "DIR")]
     pub workdir: Option<String>,
 
-    /// Mount host directory (HOST:GUEST[:ro])
-    #[arg(short = 'v', long = "volume", value_name = "HOST:GUEST[:ro]")]
+    /// Mount a host directory. `:staged` uses a guest-local working copy and syncs on exit.
+    #[arg(short = 'v', long = "volume", value_name = "HOST:GUEST[:ro|rw|staged]")]
     pub volume: Vec<String>,
 
     /// Expose port (HOST:GUEST)
@@ -112,7 +112,7 @@ impl RunCmd {
             .enumerate()
             .map(|(i, m)| {
                 (
-                    HostMount::mount_tag(i),
+                    m.runtime_mount_tag(i),
                     m.target.to_string_lossy().into_owned(),
                     m.read_only,
                 )
@@ -260,6 +260,14 @@ impl RunCmd {
             }
         };
 
+        if mounts.iter().any(|mount| mount.staged) {
+            if let Err(error) = smolvm::staged_mount::sync_mounts(&mounts, &mut client) {
+                manager.detach();
+                return Err(anyhow::anyhow!(
+                    "sync staged mounts: {error}; the ephemeral machine was left running so its guest-local data remains recoverable"
+                ));
+            }
+        }
         manager.kill();
         std::process::exit(exit_code);
     }

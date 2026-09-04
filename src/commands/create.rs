@@ -53,8 +53,8 @@ pub struct CreateCmd {
     #[arg(trailing_var_arg = true, value_name = "COMMAND")]
     pub command: Vec<String>,
 
-    /// Mount host directory (HOST:GUEST[:ro])
-    #[arg(short = 'v', long = "volume", value_name = "HOST:GUEST[:ro]")]
+    /// Mount a host directory. `:staged` uses a guest-local working copy until sync or stop.
+    #[arg(short = 'v', long = "volume", value_name = "HOST:GUEST[:ro|rw|staged]")]
     pub volume: Vec<String>,
 
     /// Expose port (HOST:GUEST)
@@ -147,11 +147,9 @@ impl CreateCmd {
         // them off before the host-directory parse, which would reject an
         // `s3://` source as a missing directory.
         let (host_volume_specs, remote_volumes) = smolvm::remote_volume::split_specs(&self.volume)?;
-        let mounts: Vec<(String, String, bool)> =
-            smolvm::data::storage::HostMount::parse(&host_volume_specs)?
-                .into_iter()
-                .map(|m| m.to_storage_tuple())
-                .collect();
+        let parsed_mounts = smolvm::data::storage::HostMount::parse(&host_volume_specs)?;
+        let (mounts, staged_mounts) =
+            smolvm::data::storage::HostMount::split_storage_tuples(&parsed_mounts);
 
         let ports = smolvm::data::network::PortMapping::to_tuples(&self.port);
 
@@ -180,6 +178,7 @@ impl CreateCmd {
 
         let mut record =
             smolvm::config::VmRecord::new(name.clone(), self.cpus, self.mem, mounts, ports, net);
+        record.staged_mounts = staged_mounts;
         if !allow_cidrs.is_empty() {
             record.allowed_cidrs = Some(allow_cidrs);
         }
@@ -274,11 +273,9 @@ impl CreateCmd {
         // them off before the host-directory parse, which would reject an
         // `s3://` source as a missing directory.
         let (host_volume_specs, remote_volumes) = smolvm::remote_volume::split_specs(&self.volume)?;
-        let mounts: Vec<(String, String, bool)> =
-            smolvm::data::storage::HostMount::parse(&host_volume_specs)?
-                .into_iter()
-                .map(|m| m.to_storage_tuple())
-                .collect();
+        let parsed_mounts = smolvm::data::storage::HostMount::parse(&host_volume_specs)?;
+        let (mounts, staged_mounts) =
+            smolvm::data::storage::HostMount::split_storage_tuples(&parsed_mounts);
         let ports = smolvm::data::network::PortMapping::to_tuples(&self.port);
         let mut env = smolvm::util::parse_env_list(&manifest.env);
         env.extend(smolvm::util::parse_env_list(&self.env));
@@ -291,6 +288,7 @@ impl CreateCmd {
             ports,
             self.net || manifest.network,
         );
+        record.staged_mounts = staged_mounts;
         record.image = Some(manifest.image);
         record.remote_volumes = remote_volumes;
         // CLI trailing args override the artifact's baked (entrypoint, cmd),

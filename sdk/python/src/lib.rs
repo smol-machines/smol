@@ -324,7 +324,7 @@ impl Machine {
                 }
             }
         }
-        // Map the Python `mounts` list (dicts of {source, target, read_only})
+        // Map the Python `mounts` list (dicts of {source, target, read_only, staged})
         // → engine `HostMount` (mirrors smol-node's `HostMount::try_from`).
         // `HostMount::new` validates the paths, so config errors surface here.
         let mut mounts: Vec<smolvm::agent::HostMount> = Vec::new();
@@ -350,20 +350,34 @@ impl Machine {
                         Some(v) if !v.is_none() => v.extract()?,
                         _ => true,
                     };
+                    let staged: bool = match d.get_item("staged")? {
+                        Some(v) if !v.is_none() => v.extract()?,
+                        _ => false,
+                    };
+                    if read_only && staged {
+                        return Err(PyRuntimeError::new_err(
+                            "[MOUNT_ERROR] a staged mount is writable and cannot also be read-only",
+                        ));
+                    }
                     // An `s3://` source is mounted inside the guest by the
                     // agent, not bind-mounted from the host, so it must not go
                     // through the host-directory validation below — which would
                     // reject it as a missing directory.
                     if smolvm::remote_volume::is_remote_source(&source) {
+                        if staged {
+                            return Err(PyRuntimeError::new_err(
+                                "[MOUNT_ERROR] staged mode is only supported for local host directories",
+                            ));
+                        }
                         remote_volumes.push(
                             smolvm::remote_volume::from_parts(&source, &target, read_only)
                                 .map_err(err)?,
                         );
                     } else {
-                        mounts.push(
-                            smolvm::agent::HostMount::new(&source, &target, read_only)
-                                .map_err(err)?,
-                        );
+                        let mut mount = smolvm::agent::HostMount::new(&source, &target, read_only)
+                            .map_err(err)?;
+                        mount.staged = staged;
+                        mounts.push(mount);
                     }
                 }
             }
@@ -513,6 +527,13 @@ impl Machine {
             source_pause_ms: result.source_pause.as_secs_f64() * 1000.0,
             elapsed_ms: result.elapsed.as_secs_f64() * 1000.0,
         })
+    }
+
+    /// Copy guest-local staged mounts back to their host sources.
+    fn sync(&self, py: Python<'_>) -> PyResult<()> {
+        let runtime = runtime().map_err(err)?;
+        py.allow_threads(|| runtime.sync_machine(&self.name))
+            .map_err(err)
     }
 
     /// Fork this running, forkable machine into a new clone via copy-on-write

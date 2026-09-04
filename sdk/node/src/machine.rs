@@ -67,6 +67,11 @@ impl NapiMachine {
         let remote_volumes: Vec<_> = remote_specs
             .into_iter()
             .map(|m| {
+                if m.staged.unwrap_or(false) {
+                    return Err(smolvm::Error::invalid_mount_path(
+                        "staged mode is only supported for local host directories",
+                    ));
+                }
                 smolvm::remote_volume::from_parts(
                     &m.source,
                     &m.target,
@@ -457,6 +462,17 @@ impl NapiMachine {
         .into_napi()?;
 
         Ok(events.into_iter().map(ExecStreamEvent::from).collect())
+    }
+
+    /// Copy guest-local staged mounts back to their host sources.
+    #[napi]
+    pub async fn sync(&self) -> napi::Result<()> {
+        let runtime = runtime().into_napi()?;
+        let name = self.name.clone();
+        tokio::task::spawn_blocking(move || runtime.sync_machine(&name))
+            .await
+            .map_err(join_error)?
+            .into_napi()
     }
 
     /// Stop the machine VM gracefully.

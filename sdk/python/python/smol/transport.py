@@ -117,6 +117,7 @@ class Transport(Protocol):
     def pull_image(self, image: str) -> ImageInfo: ...
     def list_images(self) -> list[ImageInfo]: ...
     def stop(self) -> None: ...
+    def sync(self) -> None: ...
     def start(self) -> None: ...
     def delete(self) -> None: ...
     def delete_with_usage(self) -> MachineUsageReport: ...
@@ -217,7 +218,12 @@ def _native_config(name: str, config: MachineConfig) -> dict:
         cfg["workdir"] = config.workdir
     if config.mounts:
         cfg["mounts"] = [
-            {"source": m.source, "target": m.target, "read_only": m.effective_read_only}
+            {
+                "source": m.source,
+                "target": m.target,
+                "read_only": m.effective_read_only,
+                "staged": m.staged,
+            }
             for m in config.mounts
         ]
     if config.ports:
@@ -437,6 +443,12 @@ class LocalTransport:
     def list_images(self) -> list[ImageInfo]:
         try:
             return [_image_info(i) for i in self._inner.list_images()]
+        except Exception as e:  # noqa: BLE001
+            raise wrap_native_error(e) from e
+
+    def sync(self) -> None:
+        try:
+            self._inner.sync()
         except Exception as e:  # noqa: BLE001
             raise wrap_native_error(e) from e
 
@@ -820,6 +832,11 @@ class CloudTransport:
 
     def list_images(self) -> list[ImageInfo]:
         raise NotSupportedError("list_images is not available on the cloud target.")
+
+    def sync(self) -> None:
+        raise NotSupportedError(
+            "sync() is local-only because cloud machines cannot carry host-directory mounts."
+        )
 
     def stop(self) -> None:
         _cloud_fetch(self._base, self._key, "POST", f"/v1/machines/{self._id}/stop")

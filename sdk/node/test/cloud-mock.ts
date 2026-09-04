@@ -473,6 +473,14 @@ async function main(): Promise<void> {
   }
   check("cloud create rejects host mounts as NotSupported", mountsGated);
 
+  let syncGated = false;
+  try {
+    await m.sync();
+  } catch (e) {
+    syncGated = e instanceof NotSupportedError;
+  }
+  check("cloud sync is gated as NotSupported", syncGated);
+
   // Published ports ARE a cloud feature: create sends only the guest port; the
   // control plane allocates the node host port. (Contrast: host mounts above.)
   await Machine.create(

@@ -53,6 +53,7 @@ impl StatusCmd {
                 "memory_mib": record.as_ref().map(|r| r.mem),
                 "image": record.as_ref().and_then(|r| r.image.clone()),
                 "network": record.as_ref().map(|r| r.network),
+                "mounts": record.as_ref().map(|r| r.mounts.len() + r.staged_mounts.len()),
             });
             println!("{}", serde_json::to_string_pretty(&obj)?);
         } else if is_running {
@@ -68,8 +69,8 @@ impl StatusCmd {
                 if r.network {
                     println!("  Network: enabled");
                 }
-                if !r.mounts.is_empty() {
-                    println!("  Mounts: {}", r.mounts.len());
+                if !r.mounts.is_empty() || !r.staged_mounts.is_empty() {
+                    println!("  Mounts: {}", r.mounts.len() + r.staged_mounts.len());
                 }
                 if !r.ports.is_empty() {
                     println!("  Ports: {}", r.ports.len());

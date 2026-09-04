@@ -65,6 +65,9 @@ pub enum MachineSubcommand {
     /// Copy files between host and machine
     Cp(crate::commands::cp::CpCmd),
 
+    /// Synchronize guest-local staged mounts back to their host directories
+    Sync(crate::commands::sync::SyncCmd),
+
     /// Branch a running, branchable machine into an independent child (CoW RAM + disks)
     #[command(name = "branch", visible_alias = "fork")]
     Branch(crate::commands::fork::ForkCmd),
@@ -125,6 +128,7 @@ impl MachineCmd {
             .run(),
             MachineSubcommand::Logs(cmd) => cmd.run(),
             MachineSubcommand::Cp(cmd) => cmd.run(),
+            MachineSubcommand::Sync(cmd) => cmd.run(),
             MachineSubcommand::Branch(cmd) => cmd.run(),
             MachineSubcommand::BranchBatch(cmd) => cmd.run(),
             MachineSubcommand::Checkpoint(cmd) => cmd.run(),
@@ -205,5 +209,14 @@ mod tests {
             assert_eq!(batch.golden, "source");
             assert_eq!(batch.count, Some(2));
         }
+    }
+
+    #[test]
+    fn sync_is_available_on_the_machine_surface() {
+        let parsed = TestCli::parse_from(["smol", "sync", "--name", "workspace"]);
+        let MachineSubcommand::Sync(sync) = parsed.command else {
+            panic!("expected sync command");
+        };
+        assert_eq!(sync.name.as_deref(), Some("workspace"));
     }
 }

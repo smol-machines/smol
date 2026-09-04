@@ -107,6 +107,7 @@ export interface Transport {
   pullImage(image: string): Promise<ImageInfo>;
   listImages(): Promise<ImageInfo[]>;
   readonly machineId: string;
+  sync(): Promise<void>;
   stop(): Promise<void>;
   start(): Promise<void>;
   delete(): Promise<void>;
@@ -258,6 +259,7 @@ export function toNativeConfig(
       // lowercase `readonly` for backwards compatibility. Undefined → engine
       // default (writable).
       readOnly: m.readOnly ?? m.readonly,
+      staged: m.staged,
     })),
     ports: config.ports?.map((p) => ({ host: p.host, guest: p.guest })),
     resources:
@@ -462,6 +464,14 @@ class LocalTransport implements Transport {
   async listImages(): Promise<ImageInfo[]> {
     try {
       return await this.inner.listImages();
+    } catch (e) {
+      throw wrapNativeError(e);
+    }
+  }
+
+  async sync(): Promise<void> {
+    try {
+      await this.inner.sync();
     } catch (e) {
       throw wrapNativeError(e);
     }
@@ -1082,6 +1092,12 @@ class CloudTransport implements Transport {
   async listImages(): Promise<ImageInfo[]> {
     throw new NotSupportedError(
       "listImages is not available on the cloud target.",
+    );
+  }
+
+  async sync(): Promise<void> {
+    throw new NotSupportedError(
+      "sync() is local-only because cloud machines cannot carry host-directory mounts.",
     );
   }
 

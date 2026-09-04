@@ -240,6 +240,11 @@ export class Machine {
     return this.transport.listImages();
   }
 
+  /** Copy guest-local staged mounts back to their host directories without stopping. */
+  sync(): Promise<void> {
+    return this.transport.sync();
+  }
+
   /** Stop the machine. */
   stop(): Promise<void> {
     return this.transport.stop();

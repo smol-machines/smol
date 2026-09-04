@@ -23,6 +23,7 @@ export interface NativeHostMount {
   source: string;
   target: string;
   readOnly?: boolean | undefined;
+  staged?: boolean | undefined;
 }
 
 export interface NativePortMapping {
@@ -123,6 +124,7 @@ export interface NapiMachine {
   ): Promise<void>;
   readFile(path: string): Promise<Buffer>;
   execStream(command: string[], options?: NativeExecOptions): NativeExecStream;
+  sync(): Promise<void>;
   stop(): Promise<void>;
   delete(): Promise<void>;
 }

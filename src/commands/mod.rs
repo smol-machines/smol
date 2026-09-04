@@ -39,5 +39,6 @@ pub mod scale;
 pub mod start;
 pub mod status;
 pub mod stop;
+pub mod sync;
 pub mod up;
 pub mod update;

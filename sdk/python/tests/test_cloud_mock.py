@@ -509,6 +509,12 @@ def main() -> int:
         except NotSupportedError:
             check("cloud create rejects host mounts", True)
 
+        try:
+            m.sync()
+            check("cloud sync is gated as NotSupported", False, "did not raise")
+        except NotSupportedError:
+            check("cloud sync is gated as NotSupported", True)
+
         # Published ports ARE a cloud feature: create sends only the guest port;
         # the control plane allocates the node host port. (Contrast: mounts above.)
         Machine.create(

@@ -44,7 +44,16 @@ impl StopCmd {
                 }
 
                 println!("Stopping machine '{}'...", name);
+                let _source_lock = smolvm::agent::fork::lock_fork_source(&name)?;
                 let manager = AgentManager::for_vm(&name)?;
+                // Explicit stop still works after detach; this only prevents a
+                // failed sync from stopping the machine through Drop.
+                manager.detach();
+                if !record.staged_mounts.is_empty() {
+                    let mut client =
+                        smolvm::agent::AgentClient::connect_with_retry(manager.vsock_socket())?;
+                    smolvm::staged_mount::sync_staged_mounts(&record, &mut client)?;
+                }
                 manager.stop()?;
 
                 config.update_vm(&name, |r| {

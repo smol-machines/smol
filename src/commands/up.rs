@@ -171,16 +171,7 @@ impl UpCmd {
 
         // Create or update record
         let ports_tuples = PortMapping::to_tuples(&ports);
-        let mounts_tuples: Vec<(String, String, bool)> = mounts
-            .iter()
-            .map(|m| {
-                (
-                    m.source.to_string_lossy().to_string(),
-                    m.target.to_string_lossy().to_string(),
-                    m.read_only,
-                )
-            })
-            .collect();
+        let (mounts_tuples, staged_mounts) = HostMount::split_storage_tuples(&mounts);
         // Virtiofs binding form (tag, guest_target, read_only) for running init
         // inside the image container — computed before `mounts` is consumed by
         // `ensure_running_with_full_config` below.
@@ -189,7 +180,7 @@ impl UpCmd {
             .enumerate()
             .map(|(i, m)| {
                 (
-                    HostMount::mount_tag(i),
+                    m.runtime_mount_tag(i),
                     m.target.to_string_lossy().into_owned(),
                     m.read_only,
                 )
@@ -199,6 +190,7 @@ impl UpCmd {
         if config.get_vm(&name).is_none() {
             let mut record =
                 VmRecord::new(name.clone(), cpus, mem, mounts_tuples, ports_tuples, net);
+            record.staged_mounts = staged_mounts;
             record.image = sf.image.clone();
             record.env = env.clone();
             record.workdir = workdir.clone();

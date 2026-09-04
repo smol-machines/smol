@@ -112,6 +112,14 @@ check('forwards image workload env and workdir to the local engine', () => {
   assert.deepStrictEqual(cfg.env, [{ key: 'SESSION', value: 'golden' }]);
   assert.strictEqual(cfg.workdir, '/workspace');
 });
+check('forwards staged mount mode to the local engine', () => {
+  const cfg = toNativeConfig('m', {
+    mounts: [{ source: '/host/work', target: '/work', staged: true }],
+  });
+  assert.deepStrictEqual(cfg.mounts, [
+    { source: '/host/work', target: '/work', readOnly: undefined, staged: true },
+  ]);
+});
 
 check('rollout adapter digest matches the engine contract', () => {
   const dir = mkdtempSync(join(tmpdir(), 'smol-rollout-unit-'));

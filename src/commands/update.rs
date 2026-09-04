@@ -17,8 +17,8 @@ pub struct UpdateCmd {
     #[arg(short = 'n', long, value_name = "NAME")]
     pub name: String,
 
-    /// Add volume mount (HOST:GUEST[:ro])
-    #[arg(short = 'v', long = "volume", value_name = "HOST:GUEST[:ro]")]
+    /// Add a host mount. `:staged` uses a guest-local working copy until sync or stop.
+    #[arg(short = 'v', long = "volume", value_name = "HOST:GUEST[:ro|rw|staged]")]
     pub volume: Vec<String>,
     /// Remove volume mount (HOST:GUEST)
     #[arg(long = "remove-volume", value_name = "HOST:GUEST")]
@@ -108,6 +108,39 @@ impl UpdateCmd {
             smolvm::remote_volume::split_specs(&self.volume)?;
         let new_mounts = HostMount::parse(&host_volume_specs)?;
 
+        // Preserve mount modes and ordering while applying additions/removals.
+        let mut final_mounts = record.host_mounts();
+        for rm in &self.remove_volume {
+            let rm_without_mode = rm
+                .strip_suffix(":ro")
+                .or_else(|| rm.strip_suffix(":rw"))
+                .or_else(|| rm.strip_suffix(":staged"))
+                .unwrap_or(rm);
+            let canonical_rm = if let Some((rm_src, rm_tgt)) = rm_without_mode.rsplit_once(':') {
+                let resolved = std::fs::canonicalize(rm_src)
+                    .unwrap_or_else(|_| std::path::PathBuf::from(rm_src));
+                Some((resolved, std::path::PathBuf::from(rm_tgt)))
+            } else {
+                None
+            };
+            final_mounts.retain(|mount| {
+                canonical_rm.as_ref().is_none_or(|(source, target)| {
+                    mount.source != *source || mount.target != *target
+                })
+            });
+        }
+        for mount in &new_mounts {
+            if !final_mounts
+                .iter()
+                .any(|current| current.source == mount.source && current.target == mount.target)
+            {
+                final_mounts.push(mount.clone());
+            }
+        }
+        HostMount::ensure_unique_targets(&final_mounts)?;
+        let (final_live_mounts, final_staged_mounts) =
+            HostMount::split_storage_tuples(&final_mounts);
+
         // Reject duplicate host ports after the proposed changes.
         {
             let mut final_ports: Vec<PortMapping> = record
@@ -151,22 +184,27 @@ impl UpdateCmd {
             if let Some(o) = self.overlay {
                 r.overlay_gb = Some(o);
             }
-            for rm in &self.remove_volume {
-                let canonical_rm = if let Some((rm_src, rm_tgt)) = rm.split_once(':') {
-                    let resolved = std::fs::canonicalize(rm_src)
-                        .unwrap_or_else(|_| std::path::PathBuf::from(rm_src));
-                    format!("{}:{}", resolved.display(), rm_tgt)
-                } else {
-                    rm.clone()
-                };
-                let before = r.mounts.len();
-                r.mounts.retain(|(src, tgt, _)| {
-                    let spec = format!("{src}:{tgt}");
-                    spec != canonical_rm && spec != *rm
-                });
-                if r.mounts.len() < before {
+            if !self.remove_volume.is_empty() || !new_mounts.is_empty() {
+                for rm in &self.remove_volume {
                     changes.push(format!("  removed volume: {rm}"));
                 }
+                for mount in &new_mounts {
+                    let mode = if mount.staged {
+                        ":staged"
+                    } else if mount.read_only {
+                        ":ro"
+                    } else {
+                        ""
+                    };
+                    changes.push(format!(
+                        "  added volume: {}:{}{}",
+                        mount.source.display(),
+                        mount.target.display(),
+                        mode
+                    ));
+                }
+                r.mounts = final_live_mounts.clone();
+                r.staged_mounts = final_staged_mounts.clone();
             }
             for rv in &new_remote_volumes {
                 if !r
@@ -181,22 +219,6 @@ impl UpdateCmd {
                         if rv.read_only { ":ro" } else { "" }
                     ));
                     r.remote_volumes.push(rv.clone());
-                }
-            }
-            for m in &new_mounts {
-                let tuple = m.to_storage_tuple();
-                if !r
-                    .mounts
-                    .iter()
-                    .any(|(s, t, _)| *s == tuple.0 && *t == tuple.1)
-                {
-                    changes.push(format!(
-                        "  added volume: {}:{}{}",
-                        tuple.0,
-                        tuple.1,
-                        if tuple.2 { ":ro" } else { "" }
-                    ));
-                    r.mounts.push(tuple);
                 }
             }
             for rm in &self.remove_port {

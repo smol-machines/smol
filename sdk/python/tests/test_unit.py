@@ -22,6 +22,7 @@ from smol.types import (  # noqa: E402
     ConnectOptions,
     ExecResult,
     MachineConfig,
+    MountSpec,
     ResourceSpec,
 )
 
@@ -238,6 +239,20 @@ def test_native_config_forwards_image_workload_env_and_workdir():
     assert native["command"] == ["python", "-m", "service"]
     assert native["env"] == {"SESSION": "golden"}
     assert native["workdir"] == "/workspace"
+
+
+def test_native_config_forwards_staged_mount_mode():
+    cfg = MachineConfig(
+        mounts=[MountSpec(source="/host/work", target="/work", staged=True)]
+    )
+    assert _native_config("m", cfg)["mounts"] == [
+        {
+            "source": "/host/work",
+            "target": "/work",
+            "read_only": False,
+            "staged": True,
+        }
+    ]
 
 
 def test_rollout_adapter_digest_matches_engine_contract():

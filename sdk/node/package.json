@@ -50,6 +50,7 @@
     "build": "npm run build:native && npm run build:ts && npm run bundle:native",
     "bundle:native": "cp binding.js binding.d.ts *.node dist/ 2>/dev/null || true",
     "test:e2e": "napi build --platform --js binding.js --dts binding.d.ts && tsx test/e2e.ts",
+    "test:staged": "tsx test/staged-mount-e2e.ts",
     "gen:openapi": "bash scripts/gen-openapi.sh",
     "test:cloud": "tsx test/cloud-mock.ts",
     "test:unit": "tsx test/unit.ts"

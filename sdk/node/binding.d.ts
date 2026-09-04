@@ -43,6 +43,8 @@ export interface HostMountConfig {
   target: string
   /** Mount as read-only (default: false — writable, matching the CLI). */
   readOnly?: boolean
+  /** Use a guest-local working copy and synchronize changes in batches. */
+  staged?: boolean
 }
 /** A port mapping from host to guest. */
 export interface PortMappingConfig {
@@ -214,6 +216,8 @@ export declare class NapiMachine {
   readFile(path: string): Promise<Buffer>
   /** Execute a command and return streaming stdout/stderr/exit events. */
   execStreaming(command: Array<string>, options?: ExecOptions | undefined | null): Promise<Array<ExecStreamEvent>>
+  /** Copy guest-local staged mounts back to their host sources. */
+  sync(): Promise<void>
   /** Stop the machine VM gracefully. */
   stop(): Promise<void>
   /** Stop the machine and clean up all storage (disks, config). */

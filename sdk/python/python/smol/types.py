@@ -64,6 +64,9 @@ class MountSpec:
     """Mount read-only. Default: False (writable), matching the ``smol -v`` CLI."""
     readonly: Optional[bool] = None
     """Deprecated alias for :attr:`read_only`; kept for backwards compatibility."""
+    staged: bool = False
+    """Use a guest-local working copy and copy changes back on :meth:`Machine.sync`,
+    graceful stop, or delete. Local only; incompatible with read-only mode."""
 
     @property
     def effective_read_only(self) -> bool:

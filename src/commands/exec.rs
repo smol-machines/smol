@@ -168,7 +168,7 @@ impl ExecCmd {
                     .enumerate()
                     .map(|(i, m)| {
                         (
-                            smolvm::data::storage::HostMount::mount_tag(i),
+                            m.runtime_mount_tag(i),
                             m.target.to_string_lossy().into_owned(),
                             m.read_only,
                         )

@@ -52,6 +52,11 @@ export interface MountSpec {
   readOnly?: boolean;
   /** @deprecated Use `readOnly`. Kept for backwards compatibility. */
   readonly?: boolean;
+  /**
+   * Run from a guest-local working copy and copy changes back on `sync()`,
+   * graceful stop, or delete. Local only; cannot be combined with `readOnly`.
+   */
+  staged?: boolean;
 }
 
 /** Host→guest port mapping. */

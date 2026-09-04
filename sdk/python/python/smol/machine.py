@@ -215,6 +215,10 @@ class Machine:
         """List cached OCI images. (local)"""
         return self._t.list_images()
 
+    def sync(self) -> None:
+        """Copy guest-local staged mounts back to their host directories without stopping."""
+        self._t.sync()
+
     def stop(self) -> None:
         """Stop the machine."""
         self._t.stop()

@@ -197,6 +197,10 @@ class AsyncMachine:
         """List cached OCI images. (local)"""
         return await asyncio.to_thread(self._m.list_images)
 
+    async def sync(self) -> None:
+        """Copy guest-local staged mounts back to their host directories without stopping."""
+        await asyncio.to_thread(self._m.sync)
+
     async def stop(self) -> None:
         """Stop the machine."""
         await asyncio.to_thread(self._m.stop)

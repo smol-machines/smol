@@ -6,6 +6,7 @@ becomes visible inside the guest, and a read-only mount rejects writes.
 Needs the native build + boot env (SMOLVM_BOOT_BINARY, SMOLVM_LIB_DIR).
 """
 
+import os
 import sys
 import tempfile
 from pathlib import Path
@@ -61,6 +62,31 @@ def main() -> int:
               Path(host_dir2, "out.txt").exists()
               and Path(host_dir2, "out.txt").read_text().strip() == "FROM_GUEST",
               "guest write not visible on host")
+
+    # Staged mode deliberately hides guest writes until explicit sync, then
+    # synchronizes the final state again during graceful stop.
+    host_dir3 = tempfile.mkdtemp(prefix="smolmount-staged-")
+    Path(host_dir3, "state.txt").write_text("initial\n")
+    m = Machine.create(
+        MachineConfig(
+            name=f"staged-python-{os.getpid()}",
+            persistent=True,
+            mounts=[MountSpec(source=host_dir3, target="/mnt/staged", staged=True)],
+            resources=ResourceSpec(cpus=1, memory_mb=512),
+        )
+    )
+    try:
+        first = m.exec(["sh", "-c", "echo explicit > /mnt/staged/state.txt"])
+        check("staged_write_succeeds", first.exit_code == 0, first.stderr)
+        check("staged_write_isolated", Path(host_dir3, "state.txt").read_text() == "initial\n")
+        m.sync()
+        check("staged_explicit_sync", Path(host_dir3, "state.txt").read_text() == "explicit\n")
+        second = m.exec(["sh", "-c", "echo stopped > /mnt/staged/state.txt"])
+        check("staged_second_write", second.exit_code == 0, second.stderr)
+        m.stop()
+        check("staged_stop_sync", Path(host_dir3, "state.txt").read_text() == "stopped\n")
+    finally:
+        m.delete()
 
     print(f"\n{passed} passed, {failed} failed")
     print("RESULT=PASS" if failed == 0 else "RESULT=FAIL")

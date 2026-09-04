@@ -60,6 +60,8 @@ pub struct HostMountConfig {
     pub target: String,
     /// Mount as read-only (default: false — writable, matching the CLI).
     pub read_only: Option<bool>,
+    /// Use a guest-local working copy and synchronize changes in batches.
+    pub staged: Option<bool>,
 }
 
 /// A port mapping from host to guest.
@@ -193,7 +195,16 @@ impl TryFrom<&HostMountConfig> for HostMount {
         // Default writable, matching the engine's own `HostMount::parse`
         // (host:guest[:ro|:rw] defaults to writable) and the `smol -v` CLI. A
         // read-only mount is opt-in via read_only: true.
-        HostMount::new(&m.source, &m.target, m.read_only.unwrap_or(false))
+        let read_only = m.read_only.unwrap_or(false);
+        let staged = m.staged.unwrap_or(false);
+        if read_only && staged {
+            return Err(smolvm::Error::invalid_mount_path(
+                "a staged mount is writable and cannot also be read-only",
+            ));
+        }
+        let mut mount = HostMount::new(&m.source, &m.target, read_only)?;
+        mount.staged = staged;
+        Ok(mount)
     }
 }
 
