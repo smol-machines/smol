@@ -91,7 +91,9 @@ class MachineConfig:
     name: Optional[str] = None
     """Machine name (auto-generated if omitted)."""
     image: Optional[str] = None
-    """Base image. Required for the cloud target; optional for local."""
+    """Base image. Local machines also accept an absolute/relative rootfs path or
+    ``docker save`` / ``podman save`` archive; cloud machines require a registry
+    image reference."""
     command: Optional[list[str]] = None
     """Workload argv overriding the image entrypoint/CMD."""
     mounts: Optional[list[MountSpec]] = None

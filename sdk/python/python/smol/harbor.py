@@ -14,6 +14,7 @@ import atexit
 import contextlib
 import ipaddress
 import math
+import os
 import re
 import shlex
 import tarfile
@@ -25,6 +26,7 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any, Literal, override
 
+from filelock import AsyncFileLock
 from harbor.environments.base import BaseEnvironment, ExecResult
 from harbor.environments.capabilities import (
     EnvironmentCapabilities,
@@ -51,6 +53,169 @@ _SHELL_USER_EXEC = (
     'exec su -s "$shell" "$2" -c "$1"'
 )
 _TRANSFER_DIR = PurePosixPath("/tmp")
+_DOCKER_OUTPUT_LIMIT = 8_000
+
+
+def _image_cache_root() -> Path:
+    override = os.environ.get("SMOL_HARBOR_IMAGE_CACHE")
+    if override:
+        return Path(override).expanduser()
+    cache_home = os.environ.get("XDG_CACHE_HOME")
+    root = Path(cache_home).expanduser() if cache_home else Path.home() / ".cache"
+    return root / "smol" / "harbor-images"
+
+
+def _docker_error_output(stdout: bytes, stderr: bytes) -> str:
+    output = (stdout + stderr).decode(errors="replace").strip()
+    if len(output) > _DOCKER_OUTPUT_LIMIT:
+        output = output[-_DOCKER_OUTPUT_LIMIT:]
+    return output
+
+
+async def _docker_output(*args: str, timeout_sec: float = 30.0) -> str:
+    try:
+        process = await asyncio.create_subprocess_exec(
+            "docker",
+            *args,
+            stdin=asyncio.subprocess.DEVNULL,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+    except FileNotFoundError as error:
+        raise RuntimeError(
+            "Dockerfile-backed Smol environments require the docker CLI and a "
+            "reachable Docker daemon"
+        ) from error
+    try:
+        stdout, stderr = await asyncio.wait_for(
+            process.communicate(), timeout=timeout_sec
+        )
+    except TimeoutError as error:
+        process.kill()
+        await process.wait()
+        raise RuntimeError(f"docker {' '.join(args)} timed out") from error
+    if process.returncode != 0:
+        detail = _docker_error_output(stdout, stderr)
+        suffix = f": {detail}" if detail else ""
+        raise RuntimeError(f"docker {' '.join(args)} failed{suffix}")
+    return stdout.decode(errors="replace").strip()
+
+
+async def _docker_image_id(image: str) -> str | None:
+    try:
+        return await _docker_output(
+            "image", "inspect", "--format={{.Id}}", image, timeout_sec=30
+        )
+    except RuntimeError as error:
+        # A missing local tag is the normal cache-miss case. Other failures are
+        # surfaced by the following build, with its complete build log path.
+        if "No such image" in str(error) or "No such object" in str(error):
+            return None
+        raise
+
+
+async def _run_docker_logged(
+    *args: str,
+    log_path: Path,
+    timeout_sec: float,
+) -> None:
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        with log_path.open("wb") as log:
+            process = await asyncio.create_subprocess_exec(
+                "docker",
+                *args,
+                stdin=asyncio.subprocess.DEVNULL,
+                stdout=log,
+                stderr=asyncio.subprocess.STDOUT,
+            )
+            try:
+                await asyncio.wait_for(process.wait(), timeout=timeout_sec)
+            except TimeoutError as error:
+                process.kill()
+                await process.wait()
+                raise RuntimeError(
+                    f"docker {' '.join(args)} timed out after {timeout_sec:g}s; "
+                    f"see {log_path}"
+                ) from error
+    except FileNotFoundError as error:
+        raise RuntimeError(
+            "Dockerfile-backed Smol environments require the docker CLI and a "
+            "reachable Docker daemon"
+        ) from error
+    if process.returncode != 0:
+        detail = log_path.read_text(errors="replace")[-_DOCKER_OUTPUT_LIMIT:].strip()
+        suffix = f": {detail}" if detail else ""
+        raise RuntimeError(f"docker {' '.join(args)} failed; see {log_path}{suffix}")
+
+
+async def _prepare_local_dockerfile_image(
+    *,
+    environment_dir: Path,
+    environment_id: str,
+    force_build: bool,
+    timeout_sec: float,
+) -> str:
+    """Build and atomically export a Dockerfile as a SmolVM image archive."""
+
+    platform = await _docker_output(
+        "version", "--format={{.Server.Os}}/{{.Server.Arch}}", timeout_sec=30
+    )
+    if not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", platform):
+        raise RuntimeError(f"docker returned an invalid server platform: {platform!r}")
+    platform_key = platform.replace("/", "-").lower()
+    tag = f"smol-harbor:{environment_id}-{platform_key}"
+    cache_dir = _image_cache_root() / environment_id / platform_key
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    lock = AsyncFileLock(cache_dir / ".build.lock")
+
+    async with lock:
+        image_id = await _docker_image_id(tag)
+        if force_build or image_id is None:
+            await _run_docker_logged(
+                "build",
+                f"--platform={platform}",
+                f"--file={environment_dir / 'Dockerfile'}",
+                f"--tag={tag}",
+                str(environment_dir),
+                log_path=cache_dir / "build.log",
+                timeout_sec=timeout_sec,
+            )
+            image_id = await _docker_image_id(tag)
+            if image_id is None:
+                raise RuntimeError(f"docker build completed without creating {tag}")
+
+        image_key = re.sub(r"[^A-Za-z0-9_.-]+", "-", image_id).strip("-")
+        archive = cache_dir / f"{image_key}.tar"
+        if (
+            archive.is_file()
+            and archive.stat().st_size > 0
+            and tarfile.is_tarfile(archive)
+        ):
+            return str(archive.resolve())
+
+        temporary = cache_dir / f".{image_key}.{uuid.uuid4().hex}.tmp"
+        try:
+            await _run_docker_logged(
+                "image",
+                "save",
+                f"--output={temporary}",
+                tag,
+                log_path=cache_dir / "export.log",
+                timeout_sec=timeout_sec,
+            )
+            if not temporary.is_file() or temporary.stat().st_size == 0:
+                raise RuntimeError(
+                    f"docker image save created an empty archive: {temporary}"
+                )
+            if not tarfile.is_tarfile(temporary):
+                raise RuntimeError(
+                    f"docker image save created an invalid archive: {temporary}"
+                )
+            temporary.replace(archive)
+        finally:
+            temporary.unlink(missing_ok=True)
+        return str(archive.resolve())
 
 
 def _machine_name(value: str) -> str:
@@ -287,6 +452,7 @@ class SmolEnvironment(BaseEnvironment):
         self._gpu_mode = gpu_mode
         self._ready_timeout_sec = ready_timeout_sec
         self._machine: AsyncMachine | None = None
+        self._resolved_image = task_env_config.docker_image
         super().__init__(
             environment_dir,
             environment_name,
@@ -333,11 +499,44 @@ class SmolEnvironment(BaseEnvironment):
             raise ValueError(
                 "SmolEnvironment does not yet support Docker Compose tasks"
             )
-        if not self.task_env_config.docker_image:
+        dockerfile = self.environment_dir / "Dockerfile"
+        if not self.task_env_config.docker_image and not dockerfile.is_file():
             raise ValueError(
-                "SmolEnvironment currently requires [environment].docker_image; "
-                "Dockerfile-only tasks must publish their image first"
+                "SmolEnvironment requires [environment].docker_image or an "
+                "environment/Dockerfile"
             )
+        if not self.task_env_config.docker_image and self._target == "cloud":
+            raise ValueError(
+                "Smol Cloud cannot use a local environment/Dockerfile yet; publish "
+                "the image and set [environment].docker_image"
+            )
+
+    async def _prepare_image(self, *, force_build: bool) -> None:
+        configured = self.task_env_config.docker_image
+        if configured is not None and not force_build:
+            self._resolved_image = configured
+            return
+        dockerfile = self.environment_dir / "Dockerfile"
+        if not dockerfile.is_file():
+            raise ValueError(
+                "force_build requires an environment/Dockerfile for SmolEnvironment"
+            )
+        if self._target != "local":
+            raise ValueError(
+                "Smol Cloud cannot build a local environment/Dockerfile yet; publish "
+                "the image and set [environment].docker_image"
+            )
+        self._resolved_image = await _prepare_local_dockerfile_image(
+            environment_dir=self.environment_dir,
+            environment_id=self.environment_id,
+            force_build=force_build,
+            timeout_sec=self.task_env_config.build_timeout_sec,
+        )
+
+    def _image(self) -> str:
+        if self._resolved_image is None:
+            raise RuntimeError("SmolEnvironment image has not been prepared")
+        return self._resolved_image
 
     def _resource_spec(self) -> ResourceSpec:
         gpus = self._effective_gpus
@@ -432,7 +631,7 @@ class SmolEnvironment(BaseEnvironment):
             self._connect.base_url,
             self._connect.api_key,
             self.environment_id,
-            self.task_env_config.docker_image,
+            self._image(),
             resources.cpus,
             resources.memory_mb,
             resources.storage_gb,
@@ -446,13 +645,10 @@ class SmolEnvironment(BaseEnvironment):
         )
 
     async def _create_golden(self) -> AsyncMachine:
-        image = self.task_env_config.docker_image
-        if image is None:
-            raise RuntimeError("SmolEnvironment image disappeared after validation")
         machine = await AsyncMachine.create(
             MachineConfig(
                 name=f"harbor-golden-{self.environment_id[:12]}-{uuid.uuid4().hex[:6]}",
-                image=image,
+                image=self._image(),
                 resources=self._resource_spec(),
                 checkpoint=True,
                 ready_timeout_seconds=self._ready_timeout_sec,
@@ -506,13 +702,8 @@ class SmolEnvironment(BaseEnvironment):
     async def start(self, force_build: bool) -> None:
         if self._machine is not None:
             return
-        if force_build:
-            raise ValueError(
-                "SmolEnvironment uses a prebuilt docker_image and cannot force-build "
-                "an environment/Dockerfile"
-            )
         name = _machine_name(f"harbor-{self.session_id}-{uuid.uuid4().hex[:8]}")
-        checkpoint = self._resolve_checkpoint()
+        checkpoint = None if force_build else self._resolve_checkpoint()
         try:
             if checkpoint is not None:
                 key = (
@@ -525,26 +716,25 @@ class SmolEnvironment(BaseEnvironment):
                 self._machine = await self._batcher(
                     key, lambda: self._external_golden(checkpoint)
                 ).submit(name)
-            elif self._auto_checkpoint:
-                key = ("auto", *self._golden_key())
-                self._machine = await self._batcher(key, self._auto_golden).submit(name)
             else:
-                image = self.task_env_config.docker_image
-                if image is None:
-                    raise RuntimeError(
-                        "SmolEnvironment image disappeared after validation"
+                await self._prepare_image(force_build=force_build)
+                if self._auto_checkpoint:
+                    key = ("auto", *self._golden_key())
+                    self._machine = await self._batcher(key, self._auto_golden).submit(
+                        name
                     )
-                self._machine = await AsyncMachine.create(
-                    MachineConfig(
-                        name=name,
-                        image=image,
-                        resources=self._resource_spec(),
-                        ready_timeout_seconds=self._ready_timeout_sec,
-                        env=self._startup_env() or None,
-                        workdir=self.task_env_config.workdir,
-                    ),
-                    self._connect,
-                )
+                else:
+                    self._machine = await AsyncMachine.create(
+                        MachineConfig(
+                            name=name,
+                            image=self._image(),
+                            resources=self._resource_spec(),
+                            ready_timeout_seconds=self._ready_timeout_sec,
+                            env=self._startup_env() or None,
+                            workdir=self.task_env_config.workdir,
+                        ),
+                        self._connect,
+                    )
             await self.ensure_dirs(self._mount_targets(writable_only=True))
             await self._upload_environment_dir_after_start()
         except BaseException:

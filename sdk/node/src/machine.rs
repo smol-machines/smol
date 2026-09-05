@@ -10,10 +10,23 @@ use napi_derive::napi;
 use crate::error::IntoNapiResult;
 use crate::types::*;
 use smolvm::agent::ExecEvent;
+use smolvm::data::image_source::{classify, resolve, ResolvedImage};
 use smolvm::embedded::{runtime, MachineSpec};
 
 fn join_error(err: tokio::task::JoinError) -> napi::Error {
     napi::Error::from_reason(format!("Task join error: {}", err))
+}
+
+fn resolve_image(image: Option<String>) -> smolvm::Result<Option<String>> {
+    image
+        .map(|raw| {
+            Ok(match resolve(classify(&raw))? {
+                ResolvedImage::Registry(reference) | ResolvedImage::Local { reference, .. } => {
+                    reference
+                }
+            })
+        })
+        .transpose()
 }
 
 #[napi]
@@ -104,12 +117,13 @@ impl NapiMachine {
             .map(|item| (item.key, item.value))
             .collect();
         let workdir = config.workdir;
+        let image = resolve_image(config.image.clone()).into_napi()?;
         let spec = MachineSpec {
             name: config.name.clone(),
             mounts,
             ports,
             resources,
-            image: config.image.clone(),
+            image,
             persistent: config.persistent.unwrap_or(false),
             forkable: config.forkable.unwrap_or(false),
             runtime_managed: false,
