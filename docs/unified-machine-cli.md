@@ -128,11 +128,13 @@ top of helpers that already exist.
 Landed in this branch:
 
 - `src/commands/resolve.rs` — `Location`, `MachineRef`, `Target`, `list_all()`
-  (enumerates both, cloud best-effort), the ambiguity-strict `resolve()`, and the
-  two routing policies verbs actually use: `locate()` (bare-name miss is an
-  error — for `exec`/`shell`, which need an existing machine) and `route()`
-  (bare-name miss falls back to local — for the lifecycle verbs, which own their
-  local not-found / create-first / bare-`default` messaging).
+  (enumerates both, cloud best-effort), and the two routing policies verbs
+  actually use: `locate()` (bare-name miss is an error — for `exec`/`shell`,
+  which need an existing machine) and `route()` (bare-name miss falls back to
+  local — for the lifecycle verbs, which own their local not-found /
+  create-first / bare-`default` messaging). An ambiguity-strict `resolve()`
+  prototype landed alongside them but was never wired; it was removed once the
+  verbs settled on `locate`/`route` (recoverable from git history).
 - `src/commands/ls.rs` — the unified lister with a `LOCATION` column, driven by
   `resolve::list_all`.
 - **Every location-bearing verb routes by location, not a command path.** Each
