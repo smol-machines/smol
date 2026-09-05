@@ -19,6 +19,7 @@ use pyo3::exceptions::PyRuntimeError;
 use pyo3::prelude::*;
 use pyo3::types::{PyBytes, PyDict};
 use smolvm::agent::ExecEvent;
+use smolvm::data::image_source::{classify, resolve, ResolvedImage};
 use smolvm::embedded::{runtime, MachineSpec};
 use smolvm::error::{AgentErrorKind, Error as SmolvmError};
 
@@ -34,6 +35,18 @@ const CONFIG_ERROR: &str = "CONFIG_ERROR";
 const COMMAND_FAILED: &str = "COMMAND_FAILED";
 const KVM_UNAVAILABLE: &str = "KVM_UNAVAILABLE";
 const SMOLVM_ERROR: &str = "SMOLVM_ERROR";
+
+fn resolve_image(image: Option<String>) -> smolvm::Result<Option<String>> {
+    image
+        .map(|raw| {
+            Ok(match resolve(classify(&raw))? {
+                ResolvedImage::Registry(reference) | ResolvedImage::Local { reference, .. } => {
+                    reference
+                }
+            })
+        })
+        .transpose()
+}
 
 /// Map an engine `smolvm::error::Error` to a `"[CODE] message"` PyErr, mirroring
 /// smol-node's `to_napi_error` so both SDKs surface identical error codes. The
@@ -264,6 +277,7 @@ impl Machine {
             Some(v) if !v.is_none() => Some(v.extract()?),
             _ => None,
         };
+        let image = resolve_image(image).map_err(err)?;
 
         // Map the Python `resources` dict → engine `VmResources` (mirrors
         // smol-node's `to_vm_resources`). `network`/`cpus`/`memory_mib` are
