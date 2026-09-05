@@ -132,7 +132,8 @@ impl CatalogArgs {
             .unwrap_or_else(|| SMOLMACHINES_REGISTRY.to_string());
         let settings = SmolSettings::load()?;
         let config = registry_config_for(&settings, &host);
-        let client = super::common::build_registry_client(&host, config, &settings.cloud)?;
+        // Only the credential matters here; no snapshot is read afterwards.
+        let client = super::common::build_registry_client(&host, config, &settings.cloud)?.client;
 
         let rt = tokio::runtime::Runtime::new()?;
         let repos = rt.block_on(client.list_repositories()).map_err(|e| {
@@ -177,8 +178,9 @@ impl TagsArgs {
             .map_err(|e| anyhow::anyhow!("{}", e))?;
         let settings = SmolSettings::load()?;
         let config = registry_config_for(&settings, &parsed.registry);
+        // Only the credential matters here; no snapshot is read afterwards.
         let client =
-            super::common::build_registry_client(&parsed.registry, config, &settings.cloud)?;
+            super::common::build_registry_client(&parsed.registry, config, &settings.cloud)?.client;
 
         let repo = parsed.repository();
         let rt = tokio::runtime::Runtime::new()?;

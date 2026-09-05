@@ -223,16 +223,33 @@ enum ResolvedCredential {
     Basic { username: String, password: String },
 }
 
+/// A built `RegistryClient`, plus the settings as they exist after building it.
+///
+/// Resolving credentials can silently refresh an expired cloud session, which
+/// rewrites `config.toml`. That leaves the caller's own `SmolSettings` snapshot
+/// stale, so the refreshed copy is handed back here rather than only reaching
+/// disk. Anything that reads credentials afterwards — notably
+/// [`namespaced_repo`], whose `/v1/me` lookup authenticates with the stored
+/// identity token — must use these settings, not the pre-call snapshot.
+pub struct BuiltRegistryClient {
+    pub client: smolvm_registry::RegistryClient,
+    /// `Some` when a refresh replaced the stored tokens; `None` when the call
+    /// made no change and the caller's snapshot is still accurate.
+    pub refreshed_settings: Option<smolvm::SmolSettings>,
+}
+
 /// Build a `RegistryClient` from a registry hostname, applying auth and mirror config.
 ///
 /// Silently refreshes an expired identity token if a `refresh_token` is stored.
 /// On successful refresh the new tokens are persisted to `~/.config/smolvm/config.toml`
-/// so subsequent invocations don't need to re-authenticate.
+/// so subsequent invocations don't need to re-authenticate, **and** are returned
+/// in [`BuiltRegistryClient::refreshed_settings`] so this call cannot invalidate
+/// a snapshot the caller is still holding.
 pub fn build_registry_client(
     registry: &str,
     config: &smolvm::registry::RegistryConfig,
     cloud: &smolvm::settings::CloudSection,
-) -> anyhow::Result<smolvm_registry::RegistryClient> {
+) -> anyhow::Result<BuiltRegistryClient> {
     let effective_registry = config.get_mirror(registry).unwrap_or(registry);
 
     // Docker Hub: user-facing name is "docker.io" but the Distribution API
@@ -255,7 +272,8 @@ pub fn build_registry_client(
     // Credentials are stored by `smol auth login`. Identity tokens are refreshed
     // here if expired. Route based on credential type, not registry hostname,
     // so self-hosted registries using the identity_token path work correctly.
-    match resolve_token(registry, config, cloud)? {
+    let resolved = resolve_token(registry, config, cloud)?;
+    match resolved.credential {
         Some(ResolvedCredential::Identity(token)) => {
             client = client.with_identity_token(token);
         }
@@ -268,7 +286,26 @@ pub fn build_registry_client(
         None => {}
     }
 
-    Ok(client)
+    Ok(BuiltRegistryClient {
+        client,
+        refreshed_settings: resolved.refreshed_settings,
+    })
+}
+
+/// A resolved credential, plus any settings a silent refresh rewrote on the way.
+struct ResolvedToken {
+    credential: Option<ResolvedCredential>,
+    refreshed_settings: Option<smolvm::SmolSettings>,
+}
+
+impl ResolvedToken {
+    /// A resolution that touched no persistent state.
+    fn unchanged(credential: Option<ResolvedCredential>) -> Self {
+        ResolvedToken {
+            credential,
+            refreshed_settings: None,
+        }
+    }
 }
 
 /// Resolve credentials for `registry` from config, refreshing if expired.
@@ -276,11 +313,13 @@ pub fn build_registry_client(
 /// Returns `None` when no credentials are configured for the registry.
 /// Returns the stored credentials unchanged when they have no expiry set.
 /// Only `ResolvedCredential::Identity` is eligible for silent OAuth refresh.
+/// A refresh also yields the rewritten settings, so the caller can replace the
+/// snapshot this call just invalidated.
 fn resolve_token(
     registry: &str,
     config: &smolvm::registry::RegistryConfig,
     cloud: &smolvm::settings::CloudSection,
-) -> anyhow::Result<Option<ResolvedCredential>> {
+) -> anyhow::Result<ResolvedToken> {
     // The smolmachines registry's credential IS the cloud Auth0 session — the
     // registry token endpoint (`/v2/auth`) authenticates that same JWT. Read it
     // LIVE from `[cloud]` (single source of truth) instead of a separate copy in
@@ -289,35 +328,42 @@ fn resolve_token(
     // registries (docker.io, private, self-hosted) keep their own independent
     // per-registry credentials via the entry logic below.
     if registry == smolvm::registry::SMOLMACHINES_REGISTRY {
-        if let Some(cred) = resolve_smolmachines_cloud_token(cloud)? {
-            return Ok(Some(cred));
+        let resolved = resolve_smolmachines_cloud_token(cloud)?;
+        if resolved.credential.is_some() {
+            return Ok(resolved);
         }
         // No cloud session configured → fall through to any manual registry entry.
     }
 
     let entry = match config.registries.get(registry) {
         Some(e) => e,
-        None => return Ok(None),
+        None => return Ok(ResolvedToken::unchanged(None)),
     };
 
     // identity_token (e.g. Auth0 JWT) takes precedence.
     // Direct/Basic credentials are static — they don't expire via OAuth refresh.
     if let Some(identity_token) = &entry.identity_token {
-        return resolve_identity_token(registry, identity_token, entry);
+        return Ok(ResolvedToken::unchanged(resolve_identity_token(
+            registry,
+            identity_token,
+            entry,
+        )?));
     }
 
     if let Some(auth) = config.get_credentials(registry) {
         if auth.username == "token" {
-            return Ok(Some(ResolvedCredential::Direct(auth.password)));
+            return Ok(ResolvedToken::unchanged(Some(ResolvedCredential::Direct(
+                auth.password,
+            ))));
         } else {
-            return Ok(Some(ResolvedCredential::Basic {
+            return Ok(ResolvedToken::unchanged(Some(ResolvedCredential::Basic {
                 username: auth.username,
                 password: auth.password,
-            }));
+            })));
         }
     }
 
-    Ok(None)
+    Ok(ResolvedToken::unchanged(None))
 }
 
 /// Resolve the smolmachines registry credential from the `[cloud]` Auth0 session
@@ -329,16 +375,22 @@ fn resolve_token(
 /// ONLY when the cloud token is actually expired — the common warm path is a
 /// borrow + clone with no I/O, which also keeps the unit tests offline.
 ///
+/// The refreshed settings are returned rather than only written to disk: this
+/// function rewrites the very state its callers are holding, and a caller that
+/// keeps using its pre-call snapshot resolves the wrong tenant namespace.
+///
 /// [`apply_refreshed_smolmachines_tokens`]: super::auth::apply_refreshed_smolmachines_tokens
 fn resolve_smolmachines_cloud_token(
     cloud: &smolvm::settings::CloudSection,
-) -> anyhow::Result<Option<ResolvedCredential>> {
+) -> anyhow::Result<ResolvedToken> {
     let token = match &cloud.api_key {
         Some(t) => t.clone(),
-        None => return Ok(None),
+        None => return Ok(ResolvedToken::unchanged(None)),
     };
     if !cloud.is_token_expired() {
-        return Ok(Some(ResolvedCredential::Identity(token)));
+        return Ok(ResolvedToken::unchanged(Some(
+            ResolvedCredential::Identity(token),
+        )));
     }
 
     // Expired (or within the refresh buffer): silently refresh via the cloud
@@ -350,7 +402,9 @@ fn resolve_smolmachines_cloud_token(
             eprintln!(
                 "warning: cloud session is expired. Run `smol auth login` to re-authenticate."
             );
-            return Ok(Some(ResolvedCredential::Identity(token)));
+            return Ok(ResolvedToken::unchanged(Some(
+                ResolvedCredential::Identity(token),
+            )));
         }
     };
 
@@ -370,7 +424,10 @@ fn resolve_smolmachines_cloud_token(
     super::auth::apply_refreshed_smolmachines_tokens(&mut settings, &new_tokens);
     settings.save()?;
 
-    Ok(Some(ResolvedCredential::Identity(new_tokens.access_token)))
+    Ok(ResolvedToken {
+        credential: Some(ResolvedCredential::Identity(new_tokens.access_token)),
+        refreshed_settings: Some(settings),
+    })
 }
 
 /// Handle expiry check and silent refresh for identity tokens (Auth0 JWTs).
@@ -522,7 +579,8 @@ mod tests {
             &config,
             &smolvm::settings::CloudSection::default(),
         )
-        .unwrap();
+        .unwrap()
+        .client;
         assert_eq!(client.base_url(), "https://registry.smolmachines.com");
     }
 
@@ -534,7 +592,8 @@ mod tests {
             &config,
             &smolvm::settings::CloudSection::default(),
         )
-        .unwrap();
+        .unwrap()
+        .client;
         assert_eq!(client.base_url(), "http://localhost:5050");
     }
 
@@ -546,7 +605,8 @@ mod tests {
             &config,
             &smolvm::settings::CloudSection::default(),
         )
-        .unwrap();
+        .unwrap()
+        .client;
         assert_eq!(client.base_url(), "http://127.0.0.1:5000");
     }
 
@@ -568,7 +628,8 @@ mod tests {
             &config,
             &smolvm::settings::CloudSection::default(),
         )
-        .unwrap();
+        .unwrap()
+        .client;
         assert_eq!(client.base_url(), "https://mirror.example.com");
     }
 
@@ -590,7 +651,8 @@ mod tests {
             &config,
             &smolvm::settings::CloudSection::default(),
         )
-        .unwrap();
+        .unwrap()
+        .client;
         assert_eq!(
             client.identity_token(),
             Some("eyJ_self_hosted_jwt"),
@@ -615,7 +677,8 @@ mod tests {
             &config,
             &smolvm::settings::CloudSection::default(),
         )
-        .unwrap();
+        .unwrap()
+        .client;
         assert_eq!(client.identity_token(), None);
         assert_eq!(
             client.basic_credentials(),
@@ -641,7 +704,8 @@ mod tests {
             &config,
             &smolvm::settings::CloudSection::default(),
         )
-        .unwrap();
+        .unwrap()
+        .client;
         assert_eq!(client.identity_token(), None);
         assert_eq!(client.basic_credentials(), None);
     }
@@ -654,7 +718,8 @@ mod tests {
             &config,
             &smolvm::settings::CloudSection::default(),
         )
-        .unwrap();
+        .unwrap()
+        .client;
         assert_eq!(
             client.base_url(),
             "https://registry-1.docker.io",
@@ -700,6 +765,51 @@ mod tests {
             "registry.smolmachines.com",
             &config,
             &smolvm::settings::CloudSection::default(),
+        );
+    }
+
+    /// `refreshed_settings` means "this call rewrote your settings", so it must
+    /// stay `None` whenever nothing was persisted. A caller that sees `Some`
+    /// replaces its snapshot; one that sees `None` keeps using it, and a false
+    /// positive here would silently discard a caller's own edits.
+    ///
+    /// Both no-write paths are covered offline: a live session (no refresh
+    /// needed) and an expired session with no refresh token (cannot refresh).
+    /// The refresh path itself performs network I/O, so it is exercised by the
+    /// scripted repro in the PR rather than here.
+    #[test]
+    fn no_write_paths_report_settings_unchanged() {
+        let live = smolvm::settings::CloudSection {
+            api_key: Some("live_jwt".to_string()),
+            token_expires_at: Some(4000000000), // year 2096
+            ..Default::default()
+        };
+        let built = build_registry_client(
+            "registry.smolmachines.com",
+            &RegistryConfig::default(),
+            &live,
+        )
+        .unwrap();
+        assert!(
+            built.refreshed_settings.is_none(),
+            "a live session performs no refresh, so nothing was rewritten"
+        );
+
+        let expired_no_refresh = smolvm::settings::CloudSection {
+            api_key: Some("expired_jwt".to_string()),
+            token_expires_at: Some(1), // 1970 — expired
+            refresh_token: None,       // ...and no way to refresh
+            ..Default::default()
+        };
+        let built = build_registry_client(
+            "registry.smolmachines.com",
+            &RegistryConfig::default(),
+            &expired_no_refresh,
+        )
+        .unwrap();
+        assert!(
+            built.refreshed_settings.is_none(),
+            "an expired session with no refresh token cannot rewrite anything"
         );
     }
 }

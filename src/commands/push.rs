@@ -35,12 +35,19 @@ impl PushCmd {
             super::common::require_ref(self.reference.as_deref(), self.ref_flag.as_deref())?;
         let parsed =
             smolvm::registry::Reference::parse(reference).map_err(|e| anyhow::anyhow!("{}", e))?;
-        let settings = smolvm::SmolSettings::load()?;
-        let client = super::common::build_registry_client(
+        let mut settings = smolvm::SmolSettings::load()?;
+        let built = super::common::build_registry_client(
             &parsed.registry,
             &settings.machines,
             &settings.cloud,
         )?;
+        // Building the client may have refreshed an expired cloud session and
+        // rewritten config.toml; adopt that state before resolving the namespace
+        // below, which authenticates with the stored identity token.
+        if let Some(refreshed) = built.refreshed_settings {
+            settings = refreshed;
+        }
+        let client = built.client;
 
         // For the smolmachines registry, scope a bare repo under the caller's
         // tenant (`tenants/<tenant>/<name>`) — the registry token only grants the
