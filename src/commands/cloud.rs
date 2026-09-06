@@ -647,6 +647,10 @@ pub struct CloudExecArgs {
     #[arg(short = 'w', long, value_name = "DIR")]
     pub workdir: Option<String>,
 
+    /// Run as this user (name or `uid[:gid]`), overriding the image's USER.
+    #[arg(short = 'u', long, value_name = "USER")]
+    pub user: Option<String>,
+
     /// Command timeout in seconds (default 600)
     #[arg(long, value_name = "SECONDS")]
     pub timeout: Option<u64>,
@@ -747,6 +751,7 @@ impl CloudCmd {
                 stream: false,
                 env: vec![],
                 workdir: None,
+                user: None,
                 secret_env: vec![],
                 secret_file: vec![],
                 timeout: None,
@@ -776,6 +781,7 @@ impl CloudCmd {
                     stream: a.follow,
                     env: vec![],
                     workdir: None,
+                    user: None,
                     secret_env: vec![],
                     secret_file: vec![],
                     timeout: None,
@@ -823,6 +829,7 @@ impl CloudCmd {
                     stream: false,
                     env,
                     workdir: a.workdir,
+                    user: a.user,
                     secret_env: a.secret_env,
                     secret_file: a.secret_file,
                     timeout: a.timeout,

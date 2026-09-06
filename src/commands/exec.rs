@@ -63,6 +63,11 @@ pub struct ExecCmd {
     #[arg(short = 'w', long, value_name = "DIR")]
     pub workdir: Option<String>,
 
+    /// Run as this user (a name from the image or a numeric `uid[:gid]`),
+    /// overriding the image's USER.
+    #[arg(short = 'u', long, value_name = "USER")]
+    pub user: Option<String>,
+
     /// Inject a secret from a host env var (GUEST_VAR=HOST_VAR), resolved on the
     /// host for this exec; never persisted
     #[arg(long = "secret-env", value_name = "GUEST_VAR=HOST_VAR")]
@@ -205,6 +210,7 @@ impl ExecCmd {
                 let config = RunConfig::new(image, command.clone())
                     .with_env(env)
                     .with_workdir(self.workdir.clone())
+                    .with_user(self.user.clone())
                     .with_timeout(timeout)
                     .with_mounts(mount_bindings.clone())
                     .with_persistent_overlay(Some(overlay_owner.clone()));
@@ -226,6 +232,7 @@ impl ExecCmd {
                 let config = RunConfig::new(image, command.clone())
                     .with_env(env)
                     .with_workdir(self.workdir.clone())
+                    .with_user(self.user.clone())
                     .with_timeout(timeout)
                     .with_tty(self.tty)
                     .with_mounts(mount_bindings.clone())
@@ -238,6 +245,7 @@ impl ExecCmd {
             let config = RunConfig::new(image, command.clone())
                 .with_env(env)
                 .with_workdir(self.workdir.clone())
+                .with_user(self.user.clone())
                 .with_timeout(timeout)
                 .with_mounts(mount_bindings)
                 .with_persistent_overlay(Some(overlay_owner));
