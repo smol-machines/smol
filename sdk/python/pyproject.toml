@@ -42,7 +42,7 @@ verifiers = ["verifiers>=0.2"]
 # Use smol as a NeMo Gym sandbox provider: `pip install smolmachines[nemo-gym]`.
 nemo-gym = ["nemo-gym>=0.5.0"]
 # Use SmolVM as a Harbor evaluation environment: `pip install smolmachines[harbor]`.
-harbor = ["harbor>=0.22,<0.23"]
+harbor = ["filelock>=3,<4", "harbor>=0.22,<0.23"]
 
 [project.entry-points."nemo_gym.sandbox_providers"]
 smol = "smol.nemo_gym:SmolProvider"

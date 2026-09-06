@@ -122,8 +122,8 @@ export interface AssignOptions {
 export interface MachineConfig {
   /** Machine name (auto-generated if omitted). */
   name?: string;
-  /** Base image. Required for the cloud target; optional for local (where you
-   *  typically `run(image, …)` per command instead). */
+  /** Registry image, or a local rootfs/archive path when target is local;
+   *  cloud machines require a registry image. */
   image?: string;
   /** Host directories to mount. (local) */
   mounts?: MountSpec[];

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import tarfile
 from pathlib import Path
 from typing import ClassVar
 
@@ -106,6 +107,32 @@ def _environment(
         network_policy=network_policy or NetworkPolicy(),
         auto_checkpoint=auto_checkpoint,
         checkpoints=checkpoints,
+        fork_batch_window_ms=0,
+    )
+
+
+def _dockerfile_environment(
+    tmp_path: Path,
+    *,
+    session_id: str = "dockerfile__trial__env",
+    target: str = "local",
+) -> adapter.SmolEnvironment:
+    environment_dir = tmp_path / session_id / "environment"
+    environment_dir.mkdir(parents=True)
+    (environment_dir / "Dockerfile").write_text("FROM alpine:3.20\n")
+    trial_paths = TrialPaths(tmp_path / session_id / "trial")
+    trial_paths.mkdir()
+    return adapter.SmolEnvironment(
+        environment_dir=environment_dir,
+        environment_name="dockerfile-task",
+        session_id=session_id,
+        trial_paths=trial_paths,
+        task_env_config=EnvironmentConfig(
+            cpus=1,
+            memory_mb=512,
+            build_timeout_sec=45,
+        ),
+        target=target,
         fork_batch_window_ms=0,
     )
 
@@ -263,16 +290,151 @@ def test_network_and_definition_validation(tmp_path: Path) -> None:
             ),
         )
 
-    environment_dir = tmp_path / "no-image" / "environment"
+    environment_dir = tmp_path / "no-definition" / "environment"
     environment_dir.mkdir(parents=True)
-    (environment_dir / "Dockerfile").write_text("FROM alpine\n")
-    trial_paths = TrialPaths(tmp_path / "no-image" / "trial")
+    trial_paths = TrialPaths(tmp_path / "no-definition" / "trial")
     trial_paths.mkdir()
-    with pytest.raises(ValueError, match=r"requires \[environment\].docker_image"):
+    with pytest.raises(ValueError, match="docker_image or an environment/Dockerfile"):
         adapter.SmolEnvironment(
             environment_dir=environment_dir,
-            environment_name="no-image",
-            session_id="no-image",
+            environment_name="no-definition",
+            session_id="no-definition",
             trial_paths=trial_paths,
             task_env_config=EnvironmentConfig(),
         )
+
+    with pytest.raises(ValueError, match="publish the image"):
+        _dockerfile_environment(tmp_path, target="cloud")
+
+
+@pytest.mark.asyncio
+async def test_dockerfile_task_builds_archive_for_local_smol(
+    tmp_path: Path, monkeypatch
+) -> None:
+    archive = tmp_path / "cache" / "task.tar"
+    archive.parent.mkdir()
+    archive.write_bytes(b"docker archive")
+    calls = []
+
+    async def prepare(**kwargs):
+        calls.append(kwargs)
+        return str(archive)
+
+    monkeypatch.setattr(adapter, "_prepare_local_dockerfile_image", prepare)
+    env = _dockerfile_environment(tmp_path)
+    await env.start(force_build=False)
+
+    assert calls == [
+        {
+            "environment_dir": env.environment_dir,
+            "environment_id": env.environment_id,
+            "force_build": False,
+            "timeout_sec": 45.0,
+        }
+    ]
+    golden_config, _ = FakeMachine.created[0]
+    assert golden_config.image == str(archive)
+    await env.stop(True)
+
+
+@pytest.mark.asyncio
+async def test_force_build_uses_dockerfile_instead_of_prebuilt_image(
+    tmp_path: Path, monkeypatch
+) -> None:
+    archive = tmp_path / "rebuilt.tar"
+    archive.write_bytes(b"rebuilt")
+    force_values = []
+
+    async def prepare(**kwargs):
+        force_values.append(kwargs["force_build"])
+        return str(archive)
+
+    monkeypatch.setattr(adapter, "_prepare_local_dockerfile_image", prepare)
+    env = _environment(tmp_path, auto_checkpoint=False)
+    await env.start(force_build=True)
+
+    assert force_values == [True]
+    config, _ = FakeMachine.created[0]
+    assert config.image == str(archive)
+
+    missing = _environment(
+        tmp_path,
+        session_id="missing-dockerfile__env",
+        auto_checkpoint=False,
+    )
+    (missing.environment_dir / "Dockerfile").unlink()
+    with pytest.raises(ValueError, match="force_build requires"):
+        await missing.start(force_build=True)
+
+
+@pytest.mark.asyncio
+async def test_dockerfile_archive_cache_is_atomic_and_content_addressed(
+    tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.setenv("SMOL_HARBOR_IMAGE_CACHE", str(tmp_path / "image-cache"))
+    image_id = None
+    builds = 0
+    exports = 0
+
+    async def docker_output(*args, **kwargs):
+        assert args[:2] == ("version", "--format={{.Server.Os}}/{{.Server.Arch}}")
+        return "linux/amd64"
+
+    async def docker_image_id(tag):
+        assert tag.startswith("smol-harbor:")
+        return image_id
+
+    async def run_logged(*args, log_path, timeout_sec):
+        nonlocal image_id, builds, exports
+        assert timeout_sec == 90
+        if args[0] == "build":
+            builds += 1
+            image_id = f"sha256:image-{builds}"
+            return
+        assert args[:2] == ("image", "save")
+        exports += 1
+        output = Path(
+            next(
+                arg.removeprefix("--output=")
+                for arg in args
+                if arg.startswith("--output=")
+            )
+        )
+        with tarfile.open(output, "w") as archive:
+            payload = tmp_path / "payload"
+            payload.write_text(image_id or "missing")
+            archive.add(payload, arcname="payload")
+
+    monkeypatch.setattr(adapter, "_docker_output", docker_output)
+    monkeypatch.setattr(adapter, "_docker_image_id", docker_image_id)
+    monkeypatch.setattr(adapter, "_run_docker_logged", run_logged)
+    environment = tmp_path / "context"
+    environment.mkdir()
+    (environment / "Dockerfile").write_text("FROM scratch\n")
+
+    first, second = await asyncio.gather(
+        *(
+            adapter._prepare_local_dockerfile_image(
+                environment_dir=environment,
+                environment_id="abc123",
+                force_build=False,
+                timeout_sec=90,
+            )
+            for _ in range(2)
+        )
+    )
+    assert first == second
+    assert Path(first).is_file()
+    assert builds == 1
+    assert exports == 1
+    assert not list((tmp_path / "image-cache").rglob("*.tmp"))
+
+    rebuilt = await adapter._prepare_local_dockerfile_image(
+        environment_dir=environment,
+        environment_id="abc123",
+        force_build=True,
+        timeout_sec=90,
+    )
+    assert rebuilt != first
+    assert builds == 2
+    assert exports == 2
