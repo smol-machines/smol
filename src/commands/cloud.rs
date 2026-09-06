@@ -647,7 +647,7 @@ pub struct CloudExecArgs {
     #[arg(short = 'w', long, value_name = "DIR")]
     pub workdir: Option<String>,
 
-    /// Run as this user (name or `uid[:gid]`), overriding the image's USER.
+    /// Run as this user (a name from the image or a numeric `uid[:gid]`), overriding the image's USER.
     #[arg(short = 'u', long, value_name = "USER")]
     pub user: Option<String>,
 
