@@ -127,6 +127,10 @@ class MachineConfig:
     workdir: Optional[str] = None
     """Working directory for the image workload, set at create. Overrides the
     image's own workdir."""
+    user: Optional[str] = None
+    """Run the workload as this user: a name from the image or a numeric
+    ``uid[:gid]``. Overrides the image's USER, so a workload can match the owner
+    of a mounted host directory."""
 
     def __post_init__(self) -> None:
         # Native/cloud transports retain the compatibility `forkable` field.

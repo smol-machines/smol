@@ -421,6 +421,11 @@ impl Machine {
             .filter(|value| !value.is_none())
             .map(|value| value.extract())
             .transpose()?;
+        let user = config
+            .get_item("user")?
+            .filter(|value| !value.is_none())
+            .map(|value| value.extract())
+            .transpose()?;
         let command = config
             .get_item("command")?
             .filter(|value| !value.is_none())
@@ -443,7 +448,7 @@ impl Machine {
             ..Default::default()
         };
         let runtime = runtime().map_err(err)?;
-        py.allow_threads(|| runtime.create_machine_with_workload(spec, env, workdir))
+        py.allow_threads(|| runtime.create_machine_with_workload(spec, env, workdir, user))
             .map_err(err)?;
         Ok(Self { name })
     }

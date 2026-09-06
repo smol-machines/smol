@@ -38,6 +38,8 @@ pub struct MachineConfig {
     pub env: Option<Vec<EnvVar>>,
     /// Working directory for the image workload.
     pub workdir: Option<String>,
+    /// Run the workload as this user (image user name or `uid[:gid]`).
+    pub user: Option<String>,
     /// Host directories to mount into the VM.
     pub mounts: Option<Vec<HostMountConfig>>,
     /// Port mappings from host to guest.
