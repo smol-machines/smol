@@ -92,6 +92,41 @@ pub struct ExecCmd {
     pub local: bool,
 }
 
+/// The control plane only started carrying `user` recently, and an older one
+/// silently drops unknown fields. Sending `user` to such a control plane would
+/// run the command as the default account with no sign anything was ignored,
+/// so every user-bearing exec verifies the control plane echoed the user back.
+fn verify_cloud_user_echo(result: &serde_json::Value, requested: &str) -> anyhow::Result<()> {
+    match result.get("user").and_then(|u| u.as_str()) {
+        Some(echoed) if echoed == requested => Ok(()),
+        _ => anyhow::bail!(
+            "the control plane did not honour --user {requested}: it predates that field and \
+             would have run the command as the image's default account. It needs upgrading \
+             before --user can be used on cloud machines."
+        ),
+    }
+}
+
+/// Prove the control plane honours `user` with a cheap `true`, for paths whose
+/// own response cannot carry the echo (streaming).
+async fn probe_cloud_user(
+    http: &reqwest::Client,
+    endpoint: &str,
+    id: &str,
+    user: &str,
+) -> anyhow::Result<()> {
+    let body = serde_json::json!({ "command": ["true"], "user": user, "timeoutSeconds": 30 });
+    let resp = http
+        .post(format!("{}/v1/machines/{}/exec", endpoint, id))
+        .json(&body)
+        .timeout(std::time::Duration::from_secs(40))
+        .send()
+        .await?;
+    let resp = super::cloud::check_response(resp, "exec").await?;
+    let result: serde_json::Value = resp.json().await?;
+    verify_cloud_user_echo(&result, user)
+}
+
 impl ExecCmd {
     pub fn run(mut self) -> anyhow::Result<()> {
         use super::resolve::{self, Location, Target};
@@ -282,6 +317,7 @@ impl ExecCmd {
     }
 
     fn run_cloud(self) -> anyhow::Result<()> {
+        let user = self.user.clone();
         // Pre-validate before entering the cloud command helper
         let command = strip_separator(&self.command);
         if command.is_empty() {
@@ -304,12 +340,15 @@ impl ExecCmd {
         }
 
         super::cloud::run_cloud_command(name, |http, endpoint, id| async move {
-            let body = serde_json::json!({
+            let mut body = serde_json::json!({
                 "command": command,
                 "env": env,
                 "cwd": workdir,
                 "timeoutSeconds": timeout.unwrap_or(600),
             });
+            if let Some(u) = &user {
+                body["user"] = serde_json::json!(u);
+            }
 
             let resp = http
                 .post(format!("{}/v1/machines/{}/exec", endpoint, id))
@@ -321,6 +360,9 @@ impl ExecCmd {
             let resp = super::cloud::check_response(resp, "exec").await?;
 
             let result: serde_json::Value = resp.json().await?;
+            if let Some(u) = &user {
+                verify_cloud_user_echo(&result, u)?;
+            }
             let exit_code = exec_exit_code(&result);
 
             // Prefer the byte-exact base64 output (binary-safe, untruncated);
@@ -366,6 +408,8 @@ impl ExecCmd {
     /// `event: stdout|stderr|error|exit` + `data:` lines (SSE); the `exit`
     /// event's data is JSON `{ "exitCode": N }`.
     fn run_cloud_streaming(self) -> anyhow::Result<()> {
+        let user = self.user.clone();
+
         let command = strip_separator(&self.command);
         if command.is_empty() {
             anyhow::bail!(
@@ -387,12 +431,20 @@ impl ExecCmd {
             use futures_util::StreamExt;
             use std::io::Write as _;
 
-            let body = serde_json::json!({
+            // A stream carries no response object to echo the user in, so prove
+            // the control plane honours it first; then it goes in this body too.
+            if let Some(u) = &user {
+                probe_cloud_user(&http, &endpoint, &id, u).await?;
+            }
+            let mut body = serde_json::json!({
                 "command": command,
                 "env": env,
                 "cwd": workdir,
                 "timeoutSeconds": timeout.unwrap_or(600),
             });
+            if let Some(u) = &user {
+                body["user"] = serde_json::json!(u);
+            }
             let resp = http
                 .post(format!("{}/v1/machines/{}/exec/stream", endpoint, id))
                 .json(&body)
@@ -460,6 +512,16 @@ impl ExecCmd {
     /// frames, stdout arrives as binary frames, and resize/exit are JSON text
     /// frames — matching the node's protocol.
     fn run_cloud_interactive(self) -> anyhow::Result<()> {
+        // The interactive session is a WebSocket whose query carries only the
+        // command and terminal size; the control plane and node do not yet take
+        // a user on it. Refuse rather than open a shell as the wrong account.
+        if self.user.is_some() {
+            anyhow::bail!(
+                "--user is not yet supported for interactive cloud sessions; use a \
+                 non-interactive exec, or a local machine"
+            );
+        }
+
         use futures_util::{SinkExt, StreamExt};
         use smolvm::agent::terminal;
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
