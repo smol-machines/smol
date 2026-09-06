@@ -216,6 +216,8 @@ def _native_config(name: str, config: MachineConfig) -> dict:
         cfg["env"] = dict(config.env)
     if config.workdir is not None:
         cfg["workdir"] = config.workdir
+    if config.user is not None:
+        cfg["user"] = config.user
     if config.mounts:
         cfg["mounts"] = [
             {

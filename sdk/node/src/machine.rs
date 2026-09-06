@@ -104,6 +104,7 @@ impl NapiMachine {
             .map(|item| (item.key, item.value))
             .collect();
         let workdir = config.workdir;
+        let user = config.user;
         let spec = MachineSpec {
             name: config.name.clone(),
             mounts,
@@ -119,7 +120,7 @@ impl NapiMachine {
 
         runtime()
             .into_napi()?
-            .create_machine_with_workload(spec, env, workdir)
+            .create_machine_with_workload(spec, env, workdir, user)
             .into_napi()?;
 
         Ok(Self { name: config.name })
