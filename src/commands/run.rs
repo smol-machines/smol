@@ -32,6 +32,11 @@ pub struct RunCmd {
     #[arg(short = 'w', long, value_name = "DIR")]
     pub workdir: Option<String>,
 
+    /// Run as this user (a name from the image or a numeric `uid[:gid]`),
+    /// overriding the image's USER.
+    #[arg(short = 'u', long, value_name = "USER")]
+    pub user: Option<String>,
+
     /// Mount a host directory. `:staged` uses a guest-local working copy and syncs on exit.
     #[arg(short = 'v', long = "volume", value_name = "HOST:GUEST[:ro|rw|staged]")]
     pub volume: Vec<String>,
@@ -226,6 +231,7 @@ impl RunCmd {
                 let config = RunConfig::new(img, command)
                     .with_env(env)
                     .with_workdir(self.workdir)
+                    .with_user(self.user.clone())
                     .with_mounts(mount_bindings.clone())
                     .with_tty(self.tty);
                 client.run_interactive(config)?
@@ -233,6 +239,7 @@ impl RunCmd {
                 let config = RunConfig::new(img, command)
                     .with_env(env)
                     .with_workdir(self.workdir)
+                    .with_user(self.user.clone())
                     .with_mounts(mount_bindings.clone());
                 let (exit_code, stdout, stderr) = client.run_non_interactive(config)?;
                 if !stdout.is_empty() {

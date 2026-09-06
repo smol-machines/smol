@@ -107,6 +107,12 @@ pub struct CreateCmd {
     #[arg(short = 'w', long, value_name = "DIR")]
     pub workdir: Option<String>,
 
+    /// Run the workload as this user, like `docker run --user`: a name from the
+    /// image or a numeric `uid[:gid]`. Overrides the image's USER, so a workload
+    /// can match the owner of a mounted host directory.
+    #[arg(short = 'u', long, value_name = "USER")]
+    pub user: Option<String>,
+
     /// Inject a secret from a host env var (GUEST_VAR=HOST_VAR), resolved at
     /// each start/exec; only the reference is stored, never the plaintext
     #[arg(long = "secret-env", value_name = "GUEST_VAR=HOST_VAR")]
@@ -196,6 +202,7 @@ impl CreateCmd {
         }
         record.env = env;
         record.workdir = self.workdir;
+        record.user = self.user;
         record.init = self.init;
         record.ssh_agent = self.ssh_agent;
         // Store secret references (not plaintext); resolved at each start/exec.
@@ -302,6 +309,7 @@ impl CreateCmd {
         }
         record.env = env;
         record.workdir = manifest.workdir;
+        record.user = self.user.or(manifest.user);
         record.init = self.init;
         record.ssh_agent = self.ssh_agent;
         record.network_backend = self.net_backend;

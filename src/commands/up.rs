@@ -168,6 +168,9 @@ impl UpCmd {
 
         // Workdir: [dev].workdir > top-level workdir
         let workdir = dev.workdir.or(sf.workdir);
+        // User: same precedence, so a checked-in Smolfile can run the workload
+        // as the account that owns a mounted host directory.
+        let user = dev.user.or(sf.user);
 
         // Create or update record
         let ports_tuples = PortMapping::to_tuples(&ports);
@@ -194,6 +197,7 @@ impl UpCmd {
             record.image = sf.image.clone();
             record.env = env.clone();
             record.workdir = workdir.clone();
+            record.user = user.clone();
             record.init = init_cmds.clone();
             record.entrypoint = sf.entrypoint.clone();
             record.cmd = sf.cmd.clone();
@@ -310,6 +314,7 @@ impl UpCmd {
                     let config = RunConfig::new(image, argv)
                         .with_env(env.clone())
                         .with_workdir(workdir.clone())
+                        .with_user(user.clone())
                         .with_mounts(mount_bindings.clone())
                         .with_s3_volumes(smolvm::remote_volume::to_s3_volumes(
                             &remote_volumes,
