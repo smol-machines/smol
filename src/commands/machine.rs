@@ -119,6 +119,7 @@ impl MachineCmd {
                 stream: false,
                 env: vec![],
                 workdir: None,
+                user: None,
                 secret_env: vec![],
                 secret_file: vec![],
                 timeout: None,
