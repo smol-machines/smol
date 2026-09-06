@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import threading
 from pathlib import Path
 from typing import ClassVar
 
@@ -155,6 +156,71 @@ async def test_cold_environment_maps_resources_exec_and_files(tmp_path: Path) ->
     machine = env._machine
     await env.stop(delete=True)
     assert machine.deleted is True
+
+
+@pytest.mark.asyncio
+async def test_local_transfer_work_runs_off_the_event_loop(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    env = _environment(tmp_path, auto_checkpoint=False)
+    await env.start(force_build=False)
+
+    source_file = tmp_path / "source.txt"
+    source_file.write_text("file payload")
+    source_dir = tmp_path / "source-dir"
+    (source_dir / "nested").mkdir(parents=True)
+    (source_dir / "nested" / "payload.txt").write_text("directory payload")
+    directory_payload = adapter._archive_directory(source_dir)
+
+    event_loop_thread = threading.get_ident()
+    worker_threads: dict[str, int] = {}
+
+    def record_thread(name, function):
+        def wrapper(*args):
+            worker_threads[name] = threading.get_ident()
+            return function(*args)
+
+        return wrapper
+
+    for name in (
+        "_read_local_file",
+        "_write_local_file",
+        "_archive_directory",
+        "_extract_directory",
+    ):
+        monkeypatch.setattr(
+            adapter,
+            name,
+            record_thread(name, getattr(adapter, name)),
+        )
+
+    await env.upload_file(source_file, "/workspace/source.txt")
+    await env.upload_dir(source_dir, "/workspace/source-dir")
+
+    env._machine.files["/workspace/result.txt"] = b"downloaded file"
+
+    async def read_file(path: str) -> bytes:
+        if path.startswith("/tmp/smol-harbor-"):
+            return directory_payload
+        return env._machine.files[path]
+
+    monkeypatch.setattr(env._machine, "read_file", read_file)
+    downloaded_file = tmp_path / "downloaded" / "result.txt"
+    downloaded_dir = tmp_path / "downloaded-dir"
+    await env.download_file("/workspace/result.txt", downloaded_file)
+    await env.download_dir("/workspace/source-dir", downloaded_dir)
+
+    assert downloaded_file.read_bytes() == b"downloaded file"
+    assert (downloaded_dir / "nested" / "payload.txt").read_text() == (
+        "directory payload"
+    )
+    assert set(worker_threads) == {
+        "_read_local_file",
+        "_write_local_file",
+        "_archive_directory",
+        "_extract_directory",
+    }
+    assert all(thread != event_loop_thread for thread in worker_threads.values())
 
 
 @pytest.mark.asyncio

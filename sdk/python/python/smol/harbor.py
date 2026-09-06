@@ -53,6 +53,33 @@ _SHELL_USER_EXEC = (
 _TRANSFER_DIR = PurePosixPath("/tmp")
 
 
+def _read_local_file(source: Path) -> tuple[bytes, int]:
+    return source.read_bytes(), source.stat().st_mode & 0o777
+
+
+def _write_local_file(target: Path, payload: bytes) -> None:
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_bytes(payload)
+
+
+def _archive_directory(source: Path) -> bytes:
+    with tempfile.TemporaryDirectory() as tmp:
+        archive = Path(tmp) / "upload.tar.gz"
+        with tarfile.open(archive, "w:gz") as bundle:
+            for child in source.iterdir():
+                bundle.add(child, arcname=child.name, recursive=True)
+        return archive.read_bytes()
+
+
+def _extract_directory(payload: bytes, target: Path) -> None:
+    target.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory() as tmp:
+        archive = Path(tmp) / "download.tar.gz"
+        archive.write_bytes(payload)
+        with tarfile.open(archive, "r:gz") as bundle:
+            bundle.extractall(target, filter="data")
+
+
 def _machine_name(value: str) -> str:
     normalized = re.sub(r"[^A-Za-z0-9-]+", "-", value).strip("-").lower()
     return (normalized or "harbor")[:128].rstrip("-")
@@ -627,11 +654,8 @@ class SmolEnvironment(BaseEnvironment):
                 raise RuntimeError(
                     f"failed to create upload directory {parent!r}: {result.stderr}"
                 )
-        await machine.write_file(
-            target_path,
-            source.read_bytes(),
-            mode=source.stat().st_mode & 0o777,
-        )
+        payload, mode = await asyncio.to_thread(_read_local_file, source)
+        await machine.write_file(target_path, payload, mode=mode)
 
     @override
     async def upload_dir(self, source_dir: Path | str, target_dir: str) -> None:
@@ -639,14 +663,8 @@ class SmolEnvironment(BaseEnvironment):
         if not source.is_dir():
             raise NotADirectoryError(source)
         transfer = _TRANSFER_DIR / f"smol-harbor-{uuid.uuid4().hex}.tar.gz"
-        with tempfile.TemporaryDirectory() as tmp:
-            archive = Path(tmp) / "upload.tar.gz"
-            with tarfile.open(archive, "w:gz") as bundle:
-                for child in source.iterdir():
-                    bundle.add(child, arcname=child.name, recursive=True)
-            await self._require_machine().write_file(
-                str(transfer), archive.read_bytes()
-            )
+        payload = await asyncio.to_thread(_archive_directory, source)
+        await self._require_machine().write_file(str(transfer), payload)
         command = (
             f"mkdir -p {shlex.quote(target_dir)} && "
             f"tar xzf {shlex.quote(str(transfer))} -C {shlex.quote(target_dir)}; "
@@ -661,8 +679,8 @@ class SmolEnvironment(BaseEnvironment):
     @override
     async def download_file(self, source_path: str, target_path: Path | str) -> None:
         target = Path(target_path)
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_bytes(await self._require_machine().read_file(source_path))
+        payload = await self._require_machine().read_file(source_path)
+        await asyncio.to_thread(_write_local_file, target, payload)
 
     @override
     async def download_dir(self, source_dir: str, target_dir: Path | str) -> None:
@@ -678,13 +696,7 @@ class SmolEnvironment(BaseEnvironment):
         finally:
             with contextlib.suppress(Exception):
                 await self.exec(f"rm -f {shlex.quote(str(transfer))}", user="root")
-        target = Path(target_dir)
-        target.mkdir(parents=True, exist_ok=True)
-        with tempfile.TemporaryDirectory() as tmp:
-            archive = Path(tmp) / "download.tar.gz"
-            archive.write_bytes(payload)
-            with tarfile.open(archive, "r:gz") as bundle:
-                bundle.extractall(target, filter="data")
+        await asyncio.to_thread(_extract_directory, payload, Path(target_dir))
 
 
 __all__ = ["SmolEnvironment", "close_harbor_goldens"]
