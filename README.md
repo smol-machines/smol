@@ -17,14 +17,14 @@ directly in your **Node** or **Python** app.
 **The same code runs on your laptop and in the cloud.** One `Machine` API, two
 transports: `local` boots a microVM on the machine you are sitting at (bundled
 engine, no server, no account), `cloud` runs the identical calls on
-**smolfleet**. Develop and test against a real VM offline, then move the same
+**smol cloud**. Develop and test against a real VM offline, then move the same
 program to managed capacity by changing where it connects — not what it does:
 
 ```ts
 const spec = { image: 'alpine', network: true };
 
 const dev  = await Machine.create(spec);                       // local: this machine
-const prod = await Machine.create(spec, { target: 'cloud' });  // smolfleet
+const prod = await Machine.create(spec, { target: 'cloud' });  // smol cloud
 ```
 
 Create, exec, files, state, stop, delete — and branching — behave the same on
@@ -34,7 +34,7 @@ up front on cloud rather than silently dropped.)
 ```
 ┌──────────────┐     ┌──────────────────────────── one Machine API ┐
 │   smol CLI   │     │  LocalTransport  ──▶ embedded smolvm microVM  │
-│  (Rust)      │     │  CloudTransport  ──▶ smolfleet /v1 (REST)     │
+│  (Rust)      │     │  CloudTransport  ──▶ smol cloud /v1 (REST)    │
 └──────────────┘     └──────────────────────────────────────────────┘
 ```
 
@@ -99,7 +99,7 @@ const fleet = await source.branchBatch({ count: 8, namePrefix: 'run' });
 
 Branches are the unit of work for agents and CI: a fresh, VM-isolated machine
 per task without paying boot + setup each time. They work on both transports —
-locally against the machine in front of you, and on smolfleet, where a batch is
+locally against the machine in front of you, and on smol cloud, where a batch is
 atomic (all N branches or none). A branch is always node-local: it lives on the
 same host as its parent, because it shares that parent's memory pages.
 
@@ -119,7 +119,7 @@ try {
   await m.delete();
 }
 
-// Cloud: same API, just point at smolfleet.
+// Cloud: same API, just point at smol cloud.
 const c = await Machine.create(
   { image: 'alpine:3.20' },
   { target: 'cloud' }, // uses SMOL_CLOUD_TOKEN
@@ -163,7 +163,7 @@ smol machine exec --name mybox -- apk add curl
 smol machine ls                                    # lists local + cloud
 smol machine rm mybox
 
-# cloud (smolfleet)
+# smol cloud
 smol auth login
 smol cloud deploy --image alpine:3.20
 smol machine ls --cloud
