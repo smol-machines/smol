@@ -1,7 +1,7 @@
 # smol CLI reference
 
 `smol` manages microVM sandboxes locally (in-process, via the bundled smolvm
-engine) and on the **smolfleet** cloud. Run `smol <command> --help` for the
+engine) and on **smol cloud**. Run `smol <command> --help` for the
 exact flags of any command — this page is the map.
 
 Global behavior:
@@ -12,10 +12,10 @@ Global behavior:
 - Commands are grouped under nouns: `smol machine …` (a machine's whole
   lifecycle), `smol file …` (Smolfile), `smol pack …` (artifacts),
   `smol registry …` (registries), `smol auth …` (login), `smol cloud …`
-  (smolfleet), and `smol rollout …` (fused policy generation). `smol run`
+  (hosted machines), and `smol rollout …` (fused policy generation). `smol run`
   (ephemeral one-shot) stays top-level.
 - **Local or cloud is resolved automatically.** `smol machine …` commands find a
-  machine wherever it lives — local engine or smolfleet — so `smol machine ls`
+  machine wherever it lives — local engine or smol cloud — so `smol machine ls`
   shows both. Force one side with `--local` / `--cloud`, or with a `local/<name>`
   / `cloud/<name>` prefix (a `mach-…` id is always cloud).
 
@@ -87,9 +87,9 @@ pass `--api-url` when it listens elsewhere.
 
 | Command | Description |
 |---------|-------------|
-| `smol auth login` / `smol auth logout` | Authenticate to the registry and cloud (OAuth device flow) — one token covers both the artifact registry and the smolfleet API. |
+| `smol auth login` / `smol auth logout` | Authenticate to the registry and cloud (OAuth device flow) — one token covers both the artifact registry and the smol cloud API. |
 
-## Cloud (smolfleet) — `smol cloud …`
+## smol cloud — `smol cloud …`
 
 Cloud machines are also reachable through `smol machine …` with `--cloud` (or a
 `cloud/<name>` prefix); this group holds the cloud-only operations.
