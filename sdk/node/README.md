@@ -10,7 +10,7 @@ guest escape lands there and not in your application.
 > Linux 2023). The **cloud** transport works anywhere the package installs.
 > Not yet prebuilt: macOS Intel, and Linux with glibc < 2.34.
 
-Run the **same code** against the local embedded engine or the smolfleet **cloud** —
+Run the **same code** against the local embedded engine or **smol cloud** —
 the backend is chosen by `ConnectOptions`:
 
 ```ts
@@ -23,7 +23,7 @@ const local = await Machine.create({ resources: { cpus: 2, memoryMb: 1024 } });
 const source = await Machine.create({ image: 'alpine', network: true, branchable: true });
 const branch = await source.branch('b1');
 
-// Cloud (smolfleet) — pass an API key, or set SMOL_CLOUD_TOKEN.
+// smol cloud — pass an API key, or set SMOL_CLOUD_TOKEN.
 const cloud = await Machine.create(
   { image: 'python:3.12' },
   { target: 'cloud' }, // uses SMOL_CLOUD_TOKEN

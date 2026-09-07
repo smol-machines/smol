@@ -1,7 +1,7 @@
 # smol — Python SDK
 
 Embed isolated **microVM sandboxes** directly in your Python code. Same API
-locally (embedded engine, no server) or against the **smolfleet cloud** — the
+locally (embedded engine, no server) or against **smol cloud** — the
 backend is chosen via `ConnectOptions` / `SMOL_CLOUD_TOKEN`. Mirrors the
 [Node SDK](../node).
 
@@ -28,7 +28,7 @@ with Machine.create(MachineConfig(resources=ResourceSpec(cpus=2, memory_mb=1024,
 source = Machine.create(MachineConfig(image="alpine", network=True, branchable=True))
 branch = source.branch("b1")
 
-# Cloud (smolfleet) — create() waits until it is ready for work.
+# smol cloud — create() waits until it is ready for work.
 from smol import ConnectOptions
 m = Machine.create(
     MachineConfig(image="alpine:3.20"),
@@ -244,8 +244,8 @@ Dockerfile-only tasks fail clearly instead of silently changing semantics.
   `smol-node` NAPI crate. The local API is **synchronous** (the engine blocks).
   The extension is in your process; the VMM is not — it runs as a separate
   `smol-vmm` helper, seccomp- and Landlock-confined on Linux.
-- **Cloud transport**: a REST client to smolfleet `/v1` whose request/response
-  shapes match smolfleet's OpenAPI contract (Bearer `smk_…`).
+- **Cloud transport**: a REST client to smol cloud `/v1` whose request/response
+  shapes match smol cloud's OpenAPI contract (Bearer `smk_…`).
 
 ### Disposable workers: wait for `ready`, then connect (cloud)
 
