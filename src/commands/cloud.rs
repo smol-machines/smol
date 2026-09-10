@@ -655,6 +655,14 @@ pub struct CloudExecArgs {
     #[arg(long, value_name = "SECONDS")]
     pub timeout: Option<u64>,
 
+    /// Write output as it is produced instead of buffering until the command
+    /// exits. Without this a command that prints over ten minutes returns
+    /// nothing for ten minutes, which reads as a hang to whoever is watching
+    /// and hides progress from an agent deciding what to do next. Streaming
+    /// also lifts the buffered path's cap on captured output.
+    #[arg(long, conflicts_with = "detach")]
+    pub stream: bool,
+
     /// Start the command and return immediately, leaving it running in the
     /// machine. Its output is appended to a log under /workspace, which
     /// survives stop/start; read it back with `smol cloud logs`.
@@ -826,7 +834,7 @@ impl CloudCmd {
                     command,
                     interactive: false,
                     tty: false,
-                    stream: false,
+                    stream: a.stream,
                     env,
                     workdir: a.workdir,
                     user: a.user,
