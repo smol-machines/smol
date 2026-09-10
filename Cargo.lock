@@ -2412,7 +2412,7 @@ dependencies = [
 
 [[package]]
 name = "smolfile"
-version = "1.13.1"
+version = "1.14.5"
 dependencies = [
  "serde",
  "smolvm-protocol",
@@ -2437,7 +2437,7 @@ dependencies = [
 
 [[package]]
 name = "smolvm"
-version = "1.13.1"
+version = "1.14.5"
 dependencies = [
  "async-stream",
  "axum",
@@ -2496,7 +2496,7 @@ dependencies = [
 
 [[package]]
 name = "smolvm-cuda"
-version = "1.13.1"
+version = "1.14.5"
 dependencies = [
  "getrandom 0.3.4",
  "libc",
@@ -2505,7 +2505,7 @@ dependencies = [
 
 [[package]]
 name = "smolvm-network"
-version = "1.13.1"
+version = "1.14.5"
 dependencies = [
  "crossbeam-queue",
  "humantime",
@@ -2518,7 +2518,7 @@ dependencies = [
 
 [[package]]
 name = "smolvm-pack"
-version = "1.13.1"
+version = "1.14.5"
 dependencies = [
  "crc32fast",
  "dirs",
@@ -2537,7 +2537,7 @@ dependencies = [
 
 [[package]]
 name = "smolvm-protocol"
-version = "1.13.1"
+version = "1.14.5"
 dependencies = [
  "base64",
  "serde",
@@ -2547,7 +2547,7 @@ dependencies = [
 
 [[package]]
 name = "smolvm-registry"
-version = "1.13.1"
+version = "1.14.5"
 dependencies = [
  "bytes",
  "dirs",

@@ -43,6 +43,12 @@ pub struct DeployCmd {
     #[arg(long)]
     pub network: bool,
 
+    /// Make the machine branchable (copy-on-write memory and disks) so
+    /// `smol machine branch --cloud` can fork it. Branchability is decided
+    /// when the machine is created and cannot be turned on later.
+    #[arg(long = "branchable", visible_alias = "forkable")]
+    pub branchable: bool,
+
     /// Scope egress to these CIDR ranges (repeatable). Implies `--network`;
     /// the machine can reach only the listed CIDRs (plus any `--allow-host`).
     #[arg(long = "allow-cidr", value_name = "CIDR")]
@@ -247,6 +253,12 @@ impl DeployCmd {
             "ports": [{ "port": self.port }],
             "public": self.public,
         });
+        // Only sent when asked: a branchable machine backs its guest RAM with a
+        // memfd and keeps a control socket, which an ordinary deploy does not
+        // need. Same field name the fork request uses.
+        if self.branchable {
+            body["branchable"] = serde_json::json!(true);
+        }
         // Optional command override, shell-split into argv. Omitted when unset so
         // the machine runs the source image's/artifact's own entrypoint (default).
         if let Some(cmd) = &self.command {
