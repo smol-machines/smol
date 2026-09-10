@@ -272,6 +272,17 @@ export interface MachineCostBreakdown {
 /** Per-machine usage + cost report (cloud target). Returned by
  *  `Machine.usage()` and `Machine.delete({ includeUsage: true })`; usage
  *  records survive deletion for 30 days. */
+/** An anonymous share link for a machine's published app. Anyone holding the
+ *  URL reaches the app without a smolmachines account, so treat it as a
+ *  credential. Minting again replaces the previous token. */
+export interface ShareLink {
+  /** The share token. Attach as `?t=<token>` when `url` is null. */
+  token: string;
+  /** Ready-to-use URL, or null when the tenant has no apps domain configured
+   *  or the machine name is not DNS-safe. */
+  url: string | null;
+}
+
 export interface MachineUsageReport {
   machineId: string;
   /** Report window (RFC 3339). Starts at the current billing period. */

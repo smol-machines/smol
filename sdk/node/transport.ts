@@ -33,6 +33,7 @@ import type {
   ImageInfo,
   MachineConfig,
   MachineUsageReport,
+  ShareLink,
   PortableCheckpointInfo,
   PortEndpoint,
   PortSpec,
@@ -115,6 +116,11 @@ export interface Transport {
   deleteWithUsage(): Promise<MachineUsageReport>;
   /** Cloud only: metered usage + cost; readable up to 30 days after delete. */
   usage(): Promise<MachineUsageReport>;
+  /** Cloud only: mint an anonymous share link for the machine's published app.
+   *  Minting again replaces the previous token. */
+  share(): Promise<ShareLink>;
+  /** Cloud only: revoke the machine's anonymous share link. */
+  unshare(): Promise<void>;
   checkpoint(output?: string): Promise<PortableCheckpointInfo>;
   checkpoints(): Promise<PortableCheckpointInfo[]>;
   fork(name: string, options?: PortSpec[] | ForkOptions): Promise<Transport>;
@@ -514,6 +520,18 @@ class LocalTransport implements Transport {
   async usage(): Promise<MachineUsageReport> {
     throw new NotSupportedError(
       "usage() is a cloud-only metering feature; the local target has no billing.",
+    );
+  }
+
+  async share(): Promise<ShareLink> {
+    throw new NotSupportedError(
+      "share() is cloud-only; a local machine has no published app URL to hand out.",
+    );
+  }
+
+  async unshare(): Promise<void> {
+    throw new NotSupportedError(
+      "unshare() is cloud-only; a local machine has no share link to revoke.",
     );
   }
 
@@ -1131,6 +1149,25 @@ class CloudTransport implements Transport {
       this.conn,
       "GET",
       `/v1/machines/${this.id}/usage`,
+    );
+  }
+
+  async share(): Promise<ShareLink> {
+    const out = await cloudFetch<{ token: string; url?: string | null }>(
+      this.conn,
+      "POST",
+      `/v1/machines/${this.id}/share`,
+    );
+    // The control plane omits `url` when there is no apps domain or the name is
+    // not DNS-safe; the caller can still attach the token as `?t=`.
+    return { token: out.token, url: out.url ?? null };
+  }
+
+  async unshare(): Promise<void> {
+    await cloudFetch<unknown>(
+      this.conn,
+      "DELETE",
+      `/v1/machines/${this.id}/share`,
     );
   }
 

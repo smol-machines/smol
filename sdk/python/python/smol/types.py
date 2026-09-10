@@ -215,6 +215,20 @@ class ImageInfo:
 
 
 @dataclass
+class ShareLink:
+    """An anonymous share link for a machine's published app (cloud target).
+
+    Anyone holding ``url`` reaches the app without a smolmachines account, so
+    treat it as a credential. ``url`` is ``None`` when the tenant has no apps
+    domain configured or the machine name is not DNS-safe; attach ``token`` as
+    ``?t=<token>`` in that case. Minting again replaces the previous token.
+    """
+
+    token: str
+    url: Optional[str] = None
+
+
+@dataclass
 class MachineUsageReport:
     """Per-machine usage + cost report (cloud target). Returned by
     :meth:`Machine.usage` and ``Machine.delete(include_usage=True)``; usage
