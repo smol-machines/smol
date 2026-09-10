@@ -28,6 +28,7 @@ from .types import (
     ImageInfo,
     MachineConfig,
     MachineUsageReport,
+    ShareLink,
     PortableCheckpointInfo,
     PortEndpoint,
     PortSpec,
@@ -245,6 +246,18 @@ class Machine:
         samples every few minutes, so a mid-life read is a lower bound; the
         report is final once the machine stops or is deleted."""
         return self._t.usage()
+
+    def share(self) -> ShareLink:
+        """Mint an anonymous share link for this machine's published app (cloud
+        target). Anyone holding the URL reaches the app without a smolmachines
+        account, so treat it as a credential. Minting again replaces the
+        previous token; :meth:`unshare` revokes it."""
+        return self._t.share()
+
+    def unshare(self) -> None:
+        """Revoke this machine's anonymous share link (cloud target). The
+        existing URL immediately stops granting access."""
+        self._t.unshare()
 
     def checkpoint(self, output: Optional[str] = None) -> PortableCheckpointInfo:
         """Capture this machine; local capture requires a `.smolcheckpoint` path."""

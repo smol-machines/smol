@@ -30,6 +30,7 @@ import type {
   ImageInfo,
   MachineConfig,
   MachineUsageReport,
+  ShareLink,
   PortableCheckpointInfo,
   PortEndpoint,
   PortSpec,
@@ -276,6 +277,20 @@ export class Machine {
    *  final once the machine stops or is deleted. */
   usage(): Promise<MachineUsageReport> {
     return this.transport.usage();
+  }
+
+  /** Mint an anonymous share link for this machine's published app (cloud
+   *  target). Anyone holding the URL reaches the app without a smolmachines
+   *  account, so treat it as a credential. Minting again replaces the previous
+   *  token, and {@link unshare} revokes it. */
+  share(): Promise<ShareLink> {
+    return this.transport.share();
+  }
+
+  /** Revoke this machine's anonymous share link (cloud target). The existing
+   *  URL immediately stops granting access. */
+  unshare(): Promise<void> {
+    return this.transport.unshare();
   }
 
   /** Capture this running checkpointable machine. Local capture requires an

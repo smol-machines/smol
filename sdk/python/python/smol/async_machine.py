@@ -37,6 +37,7 @@ from .types import (
     ImageInfo,
     MachineConfig,
     MachineUsageReport,
+    ShareLink,
     PortableCheckpointInfo,
     PortEndpoint,
     PortSpec,
@@ -220,6 +221,16 @@ class AsyncMachine:
         """Metered usage + cost for this machine (cloud target); readable up to
         30 days after deletion."""
         return await asyncio.to_thread(self._m.usage)
+
+    async def share(self) -> ShareLink:
+        """Mint an anonymous share link for this machine's published app (cloud
+        target). Anyone holding the URL reaches the app without a smolmachines
+        account, so treat it as a credential."""
+        return await asyncio.to_thread(self._m.share)
+
+    async def unshare(self) -> None:
+        """Revoke this machine's anonymous share link (cloud target)."""
+        await asyncio.to_thread(self._m.unshare)
 
     async def checkpoint(self, output: Optional[str] = None) -> PortableCheckpointInfo:
         """Capture this machine; local capture requires a `.smolcheckpoint` path."""

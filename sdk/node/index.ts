@@ -47,6 +47,7 @@ export type {
   ExecOptions,
   ExecResult,
   MachineUsageReport,
+  ShareLink,
   PortableCheckpointInfo,
   MachineUsageTotals,
   MachineCostBreakdown,

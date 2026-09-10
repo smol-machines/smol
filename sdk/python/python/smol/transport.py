@@ -34,6 +34,7 @@ from .types import (
     ImageInfo,
     MachineConfig,
     MachineUsageReport,
+    ShareLink,
     PortableCheckpointInfo,
     PortEndpoint,
     PortSpec,
@@ -122,6 +123,8 @@ class Transport(Protocol):
     def delete(self) -> None: ...
     def delete_with_usage(self) -> MachineUsageReport: ...
     def usage(self) -> MachineUsageReport: ...
+    def share(self) -> ShareLink: ...
+    def unshare(self) -> None: ...
     def checkpoint(self, output: Optional[str] = None) -> PortableCheckpointInfo: ...
     def checkpoints(self) -> "list[PortableCheckpointInfo]": ...
     def fork(
@@ -485,6 +488,16 @@ class LocalTransport:
     def usage(self) -> MachineUsageReport:
         raise NotSupportedError(
             "usage() is a cloud-only metering feature; the local target has no billing."
+        )
+
+    def share(self) -> ShareLink:
+        raise NotSupportedError(
+            "share() is cloud-only; a local machine has no published app URL to hand out."
+        )
+
+    def unshare(self) -> None:
+        raise NotSupportedError(
+            "unshare() is cloud-only; a local machine has no share link to revoke."
         )
 
     def checkpoint(self, output: Optional[str] = None) -> PortableCheckpointInfo:
@@ -867,6 +880,15 @@ class CloudTransport:
     def usage(self) -> MachineUsageReport:
         r = _cloud_fetch(self._base, self._key, "GET", f"/v1/machines/{self._id}/usage") or {}
         return _usage_report_from(r, self._id)
+
+    def share(self) -> ShareLink:
+        r = _cloud_fetch(self._base, self._key, "POST", f"/v1/machines/{self._id}/share") or {}
+        # The control plane omits ``url`` when there is no apps domain or the
+        # name is not DNS-safe; report None rather than inventing a URL.
+        return ShareLink(token=str(r.get("token", "")), url=r.get("url") or None)
+
+    def unshare(self) -> None:
+        _cloud_fetch(self._base, self._key, "DELETE", f"/v1/machines/{self._id}/share")
 
     def checkpoint(self, output: Optional[str] = None) -> PortableCheckpointInfo:
         if output:

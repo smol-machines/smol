@@ -100,6 +100,14 @@ class Handler(BaseHTTPRequestHandler):
                 "env": {}, "ephemeral": False, "ports": captured["fork_body"].get("ports") or [],
                 "createdAt": "2026-05-30T00:00:00Z", "updatedAt": "2026-05-30T00:00:00Z",
             }).encode())
+        if self.path == f"/v1/machines/{MACHINE_ID}/share":
+            return self._send(200, json.dumps({
+                "token": "msh_tok123",
+                "url": "https://app-abc.apps.smolmachines.com?t=msh_tok123",
+            }).encode())
+        if self.path == f"/v1/machines/{CLONE_ID}/share":
+            # No apps domain configured: a token and no url.
+            return self._send(200, json.dumps({"token": "msh_tok456"}).encode())
         if self.path == f"/v1/machines/{MACHINE_ID}/fork":
             captured["legacy_fork_body"] = json.loads(self._read() or b"{}")
             return self._send(201, json.dumps({
@@ -250,6 +258,9 @@ class Handler(BaseHTTPRequestHandler):
         captured["hits"].append(f"DELETE {self.path}")
         if not self._auth_ok():
             return self._send(401, b"bad token")
+        if self.path == f"/v1/machines/{MACHINE_ID}/share":
+            captured["unshared"] = True
+            return self._send(204)
         if self.path == f"/v1/machines/{MACHINE_ID}":
             return self._send(204)
         if self.path == f"/v1/machines/{CLONE_ID}":
@@ -536,6 +547,23 @@ def main() -> int:
         except SmolError as e:
             rid_msg = str(e)
         check("error surfaces x-request-id", "[request id: req-test-xyz]" in rid_msg, rid_msg)
+
+        link = m.share()
+        check("share() returns the token and the ready-to-use URL",
+              link.token == "msh_tok123"
+              and link.url == "https://app-abc.apps.smolmachines.com?t=msh_tok123",
+              f"{link.token} {link.url}")
+        # No apps domain configured: a token and no url. The SDK must report
+        # None rather than inventing a URL.
+        bare = Machine.connect(
+            CLONE_ID, ConnectOptions(target="cloud", base_url=base, api_key="smk_testkey")
+        ).share()
+        check("share() reports url=None when the control plane omits it",
+              bare.token == "msh_tok456" and bare.url is None,
+              f"{bare.token} {bare.url}")
+        m.unshare()
+        check("unshare() issues DELETE on the share route",
+              captured.get("unshared") is True)
 
         m.stop()
         check("stop hit POST /stop", f"POST /v1/machines/{MACHINE_ID}/stop" in captured["hits"])

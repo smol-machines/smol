@@ -273,6 +273,20 @@ const server = createServer(async (req, res) => {
     res.writeHead(200, { "content-type": "application/octet-stream" });
     return res.end(b);
   }
+  if (method === "POST" && url === "/v1/machines/m1/share")
+    return json(200, {
+      token: "msh_tok123",
+      url: "https://app-abc.apps.smolmachines.com?t=msh_tok123",
+    });
+  // A tenant with no apps domain (or a name that is not DNS-safe) gets a token
+  // and no URL; the SDK must surface null rather than inventing one.
+  if (method === "POST" && url === "/v1/machines/m2/share")
+    return json(200, { token: "msh_tok456" });
+  if (method === "DELETE" && url === "/v1/machines/m1/share") {
+    seen.unshared = true;
+    res.writeHead(204);
+    return res.end();
+  }
   if (method === "POST" && url === "/v1/machines/m1/stop")
     return json(200, { state: "stopped" });
   if (method === "DELETE" && url === "/v1/machines/m1") {
@@ -661,6 +675,29 @@ async function main(): Promise<void> {
     ridErrMsg.includes("[request id: req-test-abc]"),
     ridErrMsg,
   );
+
+  const link = await m.share();
+  check(
+    "share() returns the token and the ready-to-use URL",
+    link.token === "msh_tok123" &&
+      link.url === "https://app-abc.apps.smolmachines.com?t=msh_tok123",
+    JSON.stringify(link),
+  );
+  // No apps domain configured: the control plane sends a token and no url, and
+  // the SDK must report null rather than fabricating a URL.
+  const m2 = await Machine.connect("m2", {
+    target: "cloud",
+    baseUrl,
+    apiKey: "smk_test123",
+  });
+  const bare = await m2.share();
+  check(
+    "share() reports url=null when the control plane omits it",
+    bare.token === "msh_tok456" && bare.url === null,
+    JSON.stringify(bare),
+  );
+  await m.unshare();
+  check("unshare() issues DELETE on the share route", seen.unshared === true);
 
   await m.stop();
   await m.delete();
