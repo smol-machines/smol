@@ -954,6 +954,9 @@ fn checkpoint(args: CloudCheckpointArgs) -> Result<()> {
                     .await?;
                 let response = http
                     .post(format!("{endpoint}/v1/machines/{}/start", machine.id))
+                    .timeout(std::time::Duration::from_secs(
+                        super::common::HTTP_LONG_OPERATION_TIMEOUT_SECS,
+                    ))
                     .send()
                     .await?;
                 check_response(response, "start restored machine").await?;

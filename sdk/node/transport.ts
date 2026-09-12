@@ -654,6 +654,10 @@ const DEFAULT_CLOUD_URL = "https://api.smolmachines.com";
 
 /** Default per-request timeout for cloud calls (ms). Override via opts.timeoutMs. */
 const CLOUD_TIMEOUT_MS = 30_000;
+// Starting can include a cold image pull. Keep ordinary API calls short, but
+// give this explicitly long-running operation the same bounded window already
+// used by checkpoint restore.
+const CLOUD_START_TIMEOUT_MS = 30 * 60 * 1_000;
 // Grace before falling back to the guest-agent probe for a machine with no
 // published port: give `ready` time to flip first, so the probe stays a last
 // resort and never preempts a machine legitimately about to become ready.
@@ -1125,7 +1129,9 @@ class CloudTransport implements Transport {
 
   async start(): Promise<void> {
     // Resume a stopped machine, then wait for its agent so the handle is usable.
-    await cloudFetch(this.conn, "POST", `/v1/machines/${this.id}/start`);
+    await cloudFetch(this.conn, "POST", `/v1/machines/${this.id}/start`, {
+      timeoutMs: CLOUD_START_TIMEOUT_MS,
+    });
     await waitForReady(this.conn, this.id);
   }
 
@@ -1540,7 +1546,9 @@ export async function makeTransport(
       // be forked with Machine.fork (live-RAM CoW, RL rollouts).
       const startPath = `/v1/machines/${id}/start${resolveBranchable(config) ? "?forkable=true" : ""}`;
       try {
-        await cloudFetch(cloudConn, "POST", startPath);
+        await cloudFetch(cloudConn, "POST", startPath, {
+          timeoutMs: CLOUD_START_TIMEOUT_MS,
+        });
       } catch (e) {
         // waitForReady decides readiness; remember why start failed so a
         // subsequent readiness failure can surface it (the machine record

@@ -294,6 +294,9 @@ impl DeployCmd {
 
         let start_resp = http
             .post(format!("{}/v1/machines/{}/start", endpoint, machine.id))
+            .timeout(std::time::Duration::from_secs(
+                super::common::HTTP_LONG_OPERATION_TIMEOUT_SECS,
+            ))
             .send()
             .await?;
 

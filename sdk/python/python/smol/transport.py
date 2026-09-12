@@ -42,6 +42,10 @@ from .types import (
 
 DEFAULT_CLOUD_URL = "https://api.smolmachines.com"
 CLOUD_TIMEOUT_S = 30.0
+# Starting can include a cold image pull. Keep ordinary API calls short, but
+# give this explicitly long-running operation the same bounded window already
+# used by checkpoint restore.
+CLOUD_START_TIMEOUT_S = 30 * 60.0
 # Grace before falling back to the guest-agent probe for a machine with no
 # published port: give the `ready` flag time to flip first, so the probe stays a
 # last resort and never preempts a machine that is legitimately about to become
@@ -859,7 +863,13 @@ class CloudTransport:
     def start(self) -> None:
         # Resume a stopped machine, then wait for its agent so the returned handle
         # is usable (the control plane returns as soon as it's `started`).
-        _cloud_fetch(self._base, self._key, "POST", f"/v1/machines/{self._id}/start")
+        _cloud_fetch(
+            self._base,
+            self._key,
+            "POST",
+            f"/v1/machines/{self._id}/start",
+            timeout=CLOUD_START_TIMEOUT_S,
+        )
         _wait_for_ready(self._base, self._key, self._id)
 
     def delete(self) -> None:
@@ -1461,7 +1471,13 @@ def make_transport(config: MachineConfig, conn: Optional[ConnectOptions] = None)
         start_error: Optional[str] = None
         try:
             try:
-                _cloud_fetch(base_url, api_key, "POST", start_path)
+                _cloud_fetch(
+                    base_url,
+                    api_key,
+                    "POST",
+                    start_path,
+                    timeout=CLOUD_START_TIMEOUT_S,
+                )
             except SmolError as e:
                 # Best-effort; _wait_for_ready is the gate. Remember the reason so
                 # a subsequent readiness failure can surface WHY start failed — the
