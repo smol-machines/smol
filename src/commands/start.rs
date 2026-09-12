@@ -256,6 +256,9 @@ impl StartCmd {
         super::cloud::run_cloud_command(self.name, move |http, endpoint, id| async move {
             eprintln!("Starting {}...", id);
             let mut req = http.post(format!("{}/v1/machines/{}/start", endpoint, id));
+            req = req.timeout(std::time::Duration::from_secs(
+                super::common::HTTP_LONG_OPERATION_TIMEOUT_SECS,
+            ));
             if forkable {
                 // Start with cloneable live RAM so it can be branched later.
                 req = req.query(&[("forkable", "true")]);
