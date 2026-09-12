@@ -24,6 +24,7 @@ import {
   wrapNativeError,
 } from "./errors";
 import type {
+  CheckpointOptions,
   ConnectOptions,
   ExecEvent,
   ExecOptions,
@@ -121,7 +122,7 @@ export interface Transport {
   share(): Promise<ShareLink>;
   /** Cloud only: revoke the machine's anonymous share link. */
   unshare(): Promise<void>;
-  checkpoint(output?: string): Promise<PortableCheckpointInfo>;
+  checkpoint(output?: string, options?: CheckpointOptions): Promise<PortableCheckpointInfo>;
   checkpoints(): Promise<PortableCheckpointInfo[]>;
   fork(name: string, options?: PortSpec[] | ForkOptions): Promise<Transport>;
   forkBatch(opts: ForkBatchOptions): Promise<Transport[]>;
@@ -535,19 +536,24 @@ class LocalTransport implements Transport {
     );
   }
 
-  async checkpoint(output?: string): Promise<PortableCheckpointInfo> {
+  async checkpoint(
+    output?: string,
+    options: CheckpointOptions = {},
+  ): Promise<PortableCheckpointInfo> {
     if (!output) {
       throw new InvalidConfigError(
         "local checkpoint capture requires an output .smolcheckpoint path.",
       );
     }
     const path = resolvePath(output);
-    const result = await this.inner.checkpoint(path);
+    const store = options.store ? resolvePath(options.store) : undefined;
+    const result = await this.inner.checkpoint(path, store);
     return {
       id: path,
       machineId: this.name,
       status: "available",
       sizeBytes: result.sizeBytes,
+      reusedBytes: result.reusedBytes,
       arch: process.arch,
       createdAt: new Date().toISOString(),
       downloadUrl: "",
@@ -1171,7 +1177,15 @@ class CloudTransport implements Transport {
     );
   }
 
-  async checkpoint(output?: string): Promise<PortableCheckpointInfo> {
+  async checkpoint(
+    output?: string,
+    options: CheckpointOptions = {},
+  ): Promise<PortableCheckpointInfo> {
+    if (options.store) {
+      throw new InvalidConfigError(
+        "checkpoint stores are local-only; cloud checkpoints are managed by Smol Cloud.",
+      );
+    }
     if (output) {
       throw new InvalidConfigError(
         "cloud checkpoint capture returns durable metadata; use its downloadUrl to save an artifact.",

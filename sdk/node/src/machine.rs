@@ -148,6 +148,25 @@ impl NapiMachine {
         Ok(Self { name })
     }
 
+    /// Export a stored checkpoint directory as one portable checkpoint file.
+    #[napi]
+    pub fn export_checkpoint(source: String, output: String) -> napi::Result<f64> {
+        smolvm::checkpoint_store::export(
+            std::path::Path::new(&source),
+            std::path::Path::new(&output),
+        )
+        .map(|bytes| bytes as f64)
+        .map_err(|error| napi::Error::from_reason(format!("export checkpoint: {error}")))
+    }
+
+    /// Remove objects that no retained checkpoint in a local store references.
+    #[napi]
+    pub fn prune_checkpoint_store(store: String) -> napi::Result<f64> {
+        smolvm::checkpoint_store::prune(std::path::Path::new(&store))
+            .map(|bytes| bytes as f64)
+            .map_err(|error| napi::Error::from_reason(format!("prune checkpoint store: {error}")))
+    }
+
     /// Get the machine name.
     #[napi(getter)]
     pub fn name(&self) -> String {
@@ -248,24 +267,26 @@ impl NapiMachine {
 
     /// Capture this running checkpointable machine to local disk.
     #[napi]
-    pub async fn checkpoint(&self, output: String) -> napi::Result<LocalCheckpointResult> {
+    pub async fn checkpoint(
+        &self,
+        output: String,
+        store: Option<String>,
+    ) -> napi::Result<LocalCheckpointResult> {
         let name = self.name.clone();
         let result = tokio::task::spawn_blocking(move || {
             let options = smolvm::portable_checkpoint::CaptureOptions {
+                store_dir: store.map(std::path::PathBuf::from),
                 rootfs_dir: Some(smolvm::agent::AgentManager::default_rootfs_path()?),
                 ..Default::default()
             };
-            runtime()?.checkpoint_machine(
-                &name,
-                std::path::Path::new(&output),
-                &options,
-            )
+            runtime()?.checkpoint_machine(&name, std::path::Path::new(&output), &options)
         })
         .await
         .map_err(join_error)?
         .into_napi()?;
         Ok(LocalCheckpointResult {
             size_bytes: result.size_bytes as f64,
+            reused_bytes: result.reused_bytes as f64,
             source_pause_ms: result.source_pause.as_secs_f64() * 1000.0,
             elapsed_ms: result.elapsed.as_secs_f64() * 1000.0,
         })

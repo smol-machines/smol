@@ -85,6 +85,9 @@ def _checkpoint_from(r: dict[str, Any]) -> PortableCheckpointInfo:
         machine_id=str(r.get("machineId", "")),
         status=str(r.get("status", "")),
         size_bytes=int(r.get("sizeBytes", 0)),
+        reused_bytes=(
+            int(r["reusedBytes"]) if r.get("reusedBytes") is not None else None
+        ),
         arch=str(r.get("arch", "")),
         created_at=str(r.get("createdAt", "")),
         download_url=str(r.get("downloadUrl", "")),
@@ -125,7 +128,9 @@ class Transport(Protocol):
     def usage(self) -> MachineUsageReport: ...
     def share(self) -> ShareLink: ...
     def unshare(self) -> None: ...
-    def checkpoint(self, output: Optional[str] = None) -> PortableCheckpointInfo: ...
+    def checkpoint(
+        self, output: Optional[str] = None, *, store: Optional[str] = None
+    ) -> PortableCheckpointInfo: ...
     def checkpoints(self) -> "list[PortableCheckpointInfo]": ...
     def fork(
         self,
@@ -500,14 +505,17 @@ class LocalTransport:
             "unshare() is cloud-only; a local machine has no share link to revoke."
         )
 
-    def checkpoint(self, output: Optional[str] = None) -> PortableCheckpointInfo:
+    def checkpoint(
+        self, output: Optional[str] = None, *, store: Optional[str] = None
+    ) -> PortableCheckpointInfo:
         if not output:
             raise InvalidConfigError(
                 "local checkpoint capture requires an output .smolcheckpoint path."
             )
         path = os.path.abspath(os.fspath(output))
         try:
-            result = self._inner.checkpoint(path)
+            store_path = os.path.abspath(os.fspath(store)) if store else None
+            result = self._inner.checkpoint(path, store_path)
         except Exception as e:  # noqa: BLE001
             raise wrap_native_error(e) from e
         return PortableCheckpointInfo(
@@ -515,6 +523,7 @@ class LocalTransport:
             machine_id=self.name,
             status="available",
             size_bytes=int(result.size_bytes),
+            reused_bytes=int(result.reused_bytes),
             arch=platform.machine(),
             created_at=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
             download_url="",
@@ -890,7 +899,13 @@ class CloudTransport:
     def unshare(self) -> None:
         _cloud_fetch(self._base, self._key, "DELETE", f"/v1/machines/{self._id}/share")
 
-    def checkpoint(self, output: Optional[str] = None) -> PortableCheckpointInfo:
+    def checkpoint(
+        self, output: Optional[str] = None, *, store: Optional[str] = None
+    ) -> PortableCheckpointInfo:
+        if store:
+            raise InvalidConfigError(
+                "checkpoint stores are local-only; cloud checkpoints are managed by Smol Cloud."
+            )
         if output:
             raise InvalidConfigError(
                 "cloud checkpoint capture returns durable metadata; use its download_url to save an artifact."
