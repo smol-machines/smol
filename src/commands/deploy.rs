@@ -27,9 +27,15 @@ pub struct DeployCmd {
     #[arg(short = 'n', long, value_name = "NAME")]
     pub name: Option<String>,
 
-    /// Service port inside the VM
-    #[arg(long, default_value = "8080")]
-    pub port: u16,
+    /// Publish this guest port and wait for it to accept connections before
+    /// reporting the deployment ready.
+    ///
+    /// Opt-in on purpose. Readiness for a machine with a published port means
+    /// that port is serving, so defaulting to one made every deployment whose
+    /// app does not listen there — any non-web image — wait out the full
+    /// readiness timeout and then report a healthy machine as unconfirmed.
+    #[arg(long)]
+    pub port: Option<u16>,
 
     /// Number of vCPUs
     #[arg(long, default_value = "1")]
@@ -246,13 +252,15 @@ impl DeployCmd {
             },
             "network": network,
             "env": env,
-            // Publish the service port. Send only the guest port; the control
-            // plane allocates the node host port. The app's URL always requires a
-            // smolmachines login: owner-only by default, any signed-in user when
-            // `--public` is set (never anonymous).
-            "ports": [{ "port": self.port }],
             "public": self.public,
         });
+        // Publish the service port only when asked. Send just the guest port; the
+        // control plane allocates the node host port. The app's URL always requires
+        // a smolmachines login: owner-only by default, any signed-in user when
+        // `--public` is set (never anonymous).
+        if let Some(port) = self.port {
+            body["ports"] = serde_json::json!([{ "port": port }]);
+        }
         // Only sent when asked: a branchable machine backs its guest RAM with a
         // memfd and keeps a control socket, which an ordinary deploy does not
         // need. Same field name the fork request uses.
@@ -329,16 +337,29 @@ impl DeployCmd {
                 started.state
             );
         }
-        // `started` only confirms that the VM process launched. Poll the
-        // control plane's readiness signal; for this deployment's published
-        // port, ready also means the port is accepting connections.
+        // `started` only confirms that the VM process launched. Poll the control
+        // plane's readiness signal. With a published port the control plane only
+        // reports ready once that port accepts connections, so the URL is worth
+        // waiting for; without one, the agent answering is the whole contract and
+        // waiting for a URL that will never arrive would hang every deployment.
+        let wants_url = self.port.is_some();
         let mut ready = started.ready == Some(true);
         let mut url = started.url.clone();
         let mut last_state = started.state.clone();
-        if !ready || url.is_none() {
-            eprintln!("Waiting until ready (guest agent and published port)...");
-            for _ in 0..15 {
-                tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+        if !ready || (wants_url && url.is_none()) {
+            eprintln!(
+                "{}",
+                match self.port {
+                    Some(p) => format!("Waiting until ready (guest agent and port {p})..."),
+                    None => "Waiting until ready (guest agent)...".to_string(),
+                }
+            );
+            // Machines answer in about a second, so poll quickly at first and back
+            // off; a flat two-second tick spent most of its budget on quantisation.
+            let mut delay = std::time::Duration::from_millis(250);
+            for _ in 0..30 {
+                tokio::time::sleep(delay).await;
+                delay = (delay * 2).min(std::time::Duration::from_secs(2));
                 let Ok(resp) = http
                     .get(format!("{}/v1/machines/{}", endpoint, machine.id))
                     .send()
@@ -352,7 +373,7 @@ impl DeployCmd {
                     if m.url.is_some() {
                         url = m.url;
                     }
-                    if ready && url.is_some() {
+                    if ready && (!wants_url || url.is_some()) {
                         break;
                     }
                     if matches!(last_state.as_str(), "error" | "stopped" | "deleted") {
@@ -365,9 +386,15 @@ impl DeployCmd {
             eprintln!("Ready for work.");
         } else {
             eprintln!(
-                "VM launched, but readiness was not confirmed (state: {}). \
+                "VM launched, but readiness was not confirmed (state: {}).{} \
                  Wait for ready=true before exec, connect, or expecting the app to respond.",
-                last_state
+                last_state,
+                match self.port {
+                    // The likeliest cause by far, and the one worth naming: the
+                    // machine is up but nothing is listening where we were told.
+                    Some(p) => format!(" Nothing is accepting connections on port {p} yet."),
+                    None => String::new(),
+                }
             );
         }
         match url.as_deref() {
@@ -388,11 +415,20 @@ impl DeployCmd {
             }
             None => {
                 let who = machine.name.as_deref().unwrap_or(&machine.id);
-                eprintln!(
-                    "No URL yet (the port may still be starting) — check `smol machine ls`. \
-                     After ready=true, use `smol machine exec --cloud --name {who}` / \
-                     `smol machine shell --cloud --name {who}`."
-                );
+                // Without `--port` there is no URL to be waiting for, so saying one
+                // is on its way would send people back to `ls` for nothing.
+                match self.port {
+                    Some(_) => eprintln!(
+                        "No URL yet (the port may still be starting) — check `smol machine ls`. \
+                         Reach it meanwhile with `smol machine exec --cloud --name {who}` / \
+                         `smol machine shell --cloud --name {who}`."
+                    ),
+                    None => eprintln!(
+                        "No port published — pass `--port <PORT>` to expose one. \
+                         Use `smol machine exec --cloud --name {who}` / \
+                         `smol machine shell --cloud --name {who}`."
+                    ),
+                }
             }
         }
         Ok(())
