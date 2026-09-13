@@ -25,14 +25,14 @@ async function main(): Promise<void> {
       branchable: true,
     });
     await source.writeFile("/dev/shm/ram-marker", "RAM-STATE");
-    await source.writeFile("/tmp/disk-marker", "DISK-STATE");
+    await source.writeFile("/root/disk-marker", "DISK-STATE");
 
     const first = await source.checkpoint(firstArtifact, { store });
     if (first.path !== firstArtifact || first.sizeBytes <= 0) {
       throw new Error("local checkpoint metadata was incomplete");
     }
     await source.writeFile("/dev/shm/ram-marker", "RAM-STATE-2");
-    await source.writeFile("/tmp/disk-marker", "DISK-STATE-2");
+    await source.writeFile("/root/disk-marker", "DISK-STATE-2");
     const second = await source.checkpoint(secondArtifact, { store });
     if (!second.reusedBytes || second.reusedBytes <= 0) {
       throw new Error("periodic checkpoint did not reuse existing objects");
@@ -55,7 +55,7 @@ async function main(): Promise<void> {
 
     restored = await Machine.restoreCheckpoint(secondArtifact, `sdk-restored-${suffix}`);
     const ram = (await restored.readFile("/dev/shm/ram-marker")).toString();
-    const disk = (await restored.readFile("/tmp/disk-marker")).toString();
+    const disk = (await restored.readFile("/root/disk-marker")).toString();
     if (ram !== "RAM-STATE-2" || disk !== "DISK-STATE-2") {
       throw new Error(`restored state mismatch: ram=${ram} disk=${disk}`);
     }
