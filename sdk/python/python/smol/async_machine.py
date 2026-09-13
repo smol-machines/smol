@@ -103,6 +103,16 @@ class AsyncMachine:
         """Restore a local artifact or cloud checkpoint; alias of ``restore_checkpoint``."""
         return await cls.restore_checkpoint(checkpoint_id, name, conn)
 
+    @staticmethod
+    async def export_checkpoint(source: str, output: str) -> int:
+        """Export a local stored checkpoint directory as one portable file."""
+        return await asyncio.to_thread(Machine.export_checkpoint, source, output)
+
+    @staticmethod
+    async def prune_checkpoint_store(store: str) -> int:
+        """Remove objects unreferenced by retained checkpoints in a local store."""
+        return await asyncio.to_thread(Machine.prune_checkpoint_store, store)
+
     @property
     def name(self) -> str:
         """The machine's name / identifier."""
@@ -232,9 +242,11 @@ class AsyncMachine:
         """Revoke this machine's anonymous share link (cloud target)."""
         await asyncio.to_thread(self._m.unshare)
 
-    async def checkpoint(self, output: Optional[str] = None) -> PortableCheckpointInfo:
-        """Capture this machine; local capture requires a `.smolcheckpoint` path."""
-        return await asyncio.to_thread(self._m.checkpoint, output)
+    async def checkpoint(
+        self, output: Optional[str] = None, *, store: Optional[str] = None
+    ) -> PortableCheckpointInfo:
+        """Capture this machine, optionally reusing a local checkpoint store."""
+        return await asyncio.to_thread(self._m.checkpoint, output, store=store)
 
     async def checkpoints(self) -> "list[PortableCheckpointInfo]":
         """List durable portable checkpoints captured from this machine."""

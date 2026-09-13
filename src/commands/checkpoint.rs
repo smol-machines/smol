@@ -8,10 +8,23 @@ use tokio::io::AsyncWriteExt;
 #[derive(Args, Debug)]
 pub struct CheckpointCmd {
     /// Running checkpointable machine (name, `local/name`, or `cloud/name`).
-    #[arg(short = 'n', long = "name")]
-    pub machine: String,
+    #[arg(
+        short = 'n',
+        long = "name",
+        required_unless_present = "export_from",
+        conflicts_with = "export_from"
+    )]
+    pub machine: Option<String>,
 
-    /// Destination `.smolcheckpoint` file.
+    /// Export a stored checkpoint directory as one portable file.
+    #[arg(long, value_name = "CHECKPOINT", conflicts_with_all = ["store", "cloud"])]
+    pub export_from: Option<PathBuf>,
+
+    /// Reuse unchanged chunks here; output becomes a self-contained directory.
+    #[arg(long, value_name = "DIR", conflicts_with = "cloud")]
+    pub store: Option<PathBuf>,
+
+    /// Destination `.smolcheckpoint` file or stored checkpoint directory.
     #[arg(short, long, value_name = "PATH")]
     pub output: PathBuf,
 
@@ -31,39 +44,62 @@ impl CheckpointCmd {
         if self.output.exists() {
             anyhow::bail!("refusing to overwrite {}", self.output.display());
         }
-        let (location, handle) = resolve::route(
-            Some(&self.machine),
-            Target::from_flags(self.local, self.cloud)?,
-        )?;
-        self.machine = handle;
+        if let Some(source) = self.export_from.as_deref() {
+            let bytes = smolvm::checkpoint_store::export(source, &self.output)?;
+            println!(
+                "Exported checkpoint to {} ({:.1} MiB)",
+                self.output.display(),
+                bytes as f64 / (1024.0 * 1024.0),
+            );
+            return Ok(());
+        }
+        let machine = self
+            .machine
+            .as_deref()
+            .ok_or_else(|| anyhow::anyhow!("--name is required"))?;
+        let (location, handle) =
+            resolve::route(Some(machine), Target::from_flags(self.local, self.cloud)?)?;
+        self.machine = Some(handle);
         match location {
             Location::Local => self.run_local(),
+            Location::Cloud if self.store.is_some() => {
+                anyhow::bail!("--store is available only for local checkpoints")
+            }
             Location::Cloud => self.run_cloud(),
         }
     }
 
     fn run_local(self) -> anyhow::Result<()> {
+        let machine = self.machine.expect("machine was resolved");
         let runtime = smolvm::embedded::EmbeddedRuntime::new()?;
         let options = smolvm::portable_checkpoint::CaptureOptions {
+            store_dir: self.store.clone(),
             rootfs_dir: Some(smolvm::agent::AgentManager::default_rootfs_path()?),
             ..Default::default()
         };
-        let result = runtime.checkpoint_machine(&self.machine, &self.output, &options)?;
+        let result = runtime.checkpoint_machine(&machine, &self.output, &options)?;
         println!(
-            "Checkpointed '{}' to {} ({:.1} MiB, {:.1} ms pause, {:.1} ms total)",
-            self.machine,
+            "Checkpointed '{}' to {} ({:.1} MiB written, {:.1} ms pause, {:.1} ms total)",
+            machine,
             self.output.display(),
             result.size_bytes as f64 / (1024.0 * 1024.0),
             result.source_pause.as_secs_f64() * 1000.0,
             result.elapsed.as_secs_f64() * 1000.0,
         );
+        if self.store.is_some() {
+            println!(
+                "Reused {:.1} MiB from existing checkpoint objects",
+                result.reused_bytes as f64 / (1024.0 * 1024.0),
+            );
+        }
         Ok(())
     }
 
     fn run_cloud(self) -> anyhow::Result<()> {
+        let machine = self.machine.expect("machine was resolved");
         let output = self.output;
         super::cloud::run_cloud_command(
-            Some(self.machine),
+            Some(machine),
             move |http, endpoint, machine_id| async move {
                 let response = http
                     .post(format!("{endpoint}/v1/machines/{machine_id}/checkpoints"))
@@ -110,6 +146,25 @@ impl CheckpointCmd {
                 Ok(())
             },
         )
+    }
+}
+
+/// Remove objects that no retained checkpoint in a local store references.
+#[derive(Args, Debug)]
+pub struct CheckpointPruneCmd {
+    /// Store used by `machine checkpoint --store`.
+    #[arg(long, value_name = "DIR")]
+    pub store: PathBuf,
+}
+
+impl CheckpointPruneCmd {
+    pub fn run(self) -> anyhow::Result<()> {
+        let bytes = smolvm::checkpoint_store::prune(&self.store)?;
+        println!(
+            "Reclaimed {:.1} MiB of unreferenced checkpoint objects",
+            bytes as f64 / (1024.0 * 1024.0),
+        );
+        Ok(())
     }
 }
 

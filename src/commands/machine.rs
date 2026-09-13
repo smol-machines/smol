@@ -79,6 +79,10 @@ pub enum MachineSubcommand {
     /// Persist a live machine as a portable rollback point
     Checkpoint(crate::commands::checkpoint::CheckpointCmd),
 
+    /// Remove unused objects from a local incremental checkpoint store
+    #[command(name = "checkpoint-prune")]
+    CheckpointPrune(crate::commands::checkpoint::CheckpointPruneCmd),
+
     /// Restore a portable rollback point as a running fork source
     Restore(crate::commands::restore::RestoreCmd),
 
@@ -133,6 +137,7 @@ impl MachineCmd {
             MachineSubcommand::Branch(cmd) => cmd.run(),
             MachineSubcommand::BranchBatch(cmd) => cmd.run(),
             MachineSubcommand::Checkpoint(cmd) => cmd.run(),
+            MachineSubcommand::CheckpointPrune(cmd) => cmd.run(),
             MachineSubcommand::Restore(cmd) => cmd.run(),
             // maintenance
             MachineSubcommand::Images(cmd) => cmd.run(),
@@ -210,6 +215,51 @@ mod tests {
             assert_eq!(batch.golden, "source");
             assert_eq!(batch.count, Some(2));
         }
+    }
+
+    #[test]
+    fn checkpoint_supports_incremental_capture_export_and_prune() {
+        let parsed = TestCli::parse_from([
+            "smol",
+            "checkpoint",
+            "--name",
+            "source",
+            "--store",
+            "/tmp/store",
+            "--output",
+            "/tmp/point.smolcheckpoint",
+        ]);
+        let MachineSubcommand::Checkpoint(checkpoint) = parsed.command else {
+            panic!("expected checkpoint command");
+        };
+        assert_eq!(checkpoint.machine.as_deref(), Some("source"));
+        assert_eq!(
+            checkpoint.store.as_deref(),
+            Some(std::path::Path::new("/tmp/store"))
+        );
+
+        let parsed = TestCli::parse_from([
+            "smol",
+            "checkpoint",
+            "--export-from",
+            "/tmp/point.smolcheckpoint",
+            "--output",
+            "/tmp/point-portable.smolcheckpoint",
+        ]);
+        let MachineSubcommand::Checkpoint(checkpoint) = parsed.command else {
+            panic!("expected checkpoint export");
+        };
+        assert!(checkpoint.machine.is_none());
+        assert_eq!(
+            checkpoint.export_from.as_deref(),
+            Some(std::path::Path::new("/tmp/point.smolcheckpoint"))
+        );
+
+        let parsed = TestCli::parse_from(["smol", "checkpoint-prune", "--store", "/tmp/store"]);
+        let MachineSubcommand::CheckpointPrune(prune) = parsed.command else {
+            panic!("expected checkpoint prune");
+        };
+        assert_eq!(prune.store, std::path::PathBuf::from("/tmp/store"));
     }
 
     #[test]

@@ -28,6 +28,13 @@ with Machine.create(MachineConfig(resources=ResourceSpec(cpus=2, memory_mb=1024,
 source = Machine.create(MachineConfig(image="alpine", network=True, branchable=True))
 branch = source.branch("b1")
 
+# Periodic local rollback points reuse unchanged RAM and disk chunks.
+first = source.checkpoint("./points/1.smolcheckpoint", store="./points/store")
+second = source.checkpoint("./points/2.smolcheckpoint", store="./points/store")
+restored = Machine.restore_checkpoint("./points/2.smolcheckpoint", "restored")
+Machine.export_checkpoint("./points/2.smolcheckpoint", "./point-2.smolcheckpoint")
+Machine.prune_checkpoint_store("./points/store")
+
 # smol cloud — create() waits until it is ready for work.
 from smol import ConnectOptions
 m = Machine.create(

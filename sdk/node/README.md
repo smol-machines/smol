@@ -23,6 +23,13 @@ const local = await Machine.create({ resources: { cpus: 2, memoryMb: 1024 } });
 const source = await Machine.create({ image: 'alpine', network: true, branchable: true });
 const branch = await source.branch('b1');
 
+// Periodic local rollback points reuse unchanged RAM and disk chunks.
+const first = await source.checkpoint('./points/1.smolcheckpoint', { store: './points/store' });
+const second = await source.checkpoint('./points/2.smolcheckpoint', { store: './points/store' });
+await Machine.restoreCheckpoint('./points/2.smolcheckpoint', 'restored');
+Machine.exportCheckpoint('./points/2.smolcheckpoint', './point-2.smolcheckpoint');
+Machine.pruneCheckpointStore('./points/store');
+
 // smol cloud — pass an API key, or set SMOL_CLOUD_TOKEN.
 const cloud = await Machine.create(
   { image: 'python:3.12' },
@@ -161,6 +168,8 @@ try {
 - `machine.readFile(path)` / `machine.writeFile(path, data, mode?)`.
 - `machine.pullImage(image)` / `machine.listImages()`.
 - `machine.branch(name, options?)` / `machine.branchBatch(options)`.
+- `machine.checkpoint(output, { store? })`, `Machine.restoreCheckpoint(...)`,
+  `Machine.exportCheckpoint(...)`, and `Machine.pruneCheckpointStore(...)`.
 - `machine.stop()` / `machine.delete()` / `await machine.state()`. Cloud
   `"started"` means VM launched, not ready for work.
 

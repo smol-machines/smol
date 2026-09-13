@@ -63,13 +63,10 @@ fn is_lfs_pointer(path: &Path) -> bool {
     false
 }
 
-/// Link libkrun — weak on macOS so the binary can start without it
-/// (packed binary mode uses dlopen instead of link-time symbols).
+/// Linux loads libkrun through the engine; macOS retains weak linking.
 fn link_krun() {
     #[cfg(target_os = "macos")]
     println!("cargo:rustc-link-arg=-Wl,-weak-lkrun");
-    #[cfg(not(target_os = "macos"))]
-    println!("cargo:rustc-link-lib=krun");
 }
 
 fn main() {

@@ -98,6 +98,13 @@ export interface BranchBatchOptions {
 /** Backwards-compatible name for {@link BranchBatchOptions}. */
 export type ForkBatchOptions = BranchBatchOptions;
 
+/** Options for a local checkpoint capture. A store reuses unchanged chunks
+ * across periodic captures; cloud checkpoints are deduplicated server-side. */
+export interface CheckpointOptions {
+  /** Local content-addressed checkpoint store directory. */
+  store?: string;
+}
+
 /** Options for assigning an RL episode — fork + provision one clone of a forkable
  *  golden under an idempotent lease. Cloud target only. */
 export interface AssignOptions {
@@ -298,6 +305,8 @@ export interface PortableCheckpointInfo {
   machineId: string;
   status: string;
   sizeBytes: number;
+  /** Logical bytes reused from prior captures in the local store. */
+  reusedBytes?: number;
   arch: string;
   createdAt: string;
   downloadUrl: string;

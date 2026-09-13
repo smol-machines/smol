@@ -9,7 +9,9 @@
  */
 
 import { randomUUID } from "node:crypto";
-import { ExecutionError } from "./errors";
+import { resolve as resolvePath } from "node:path";
+import { ExecutionError, wrapNativeError } from "./errors";
+import { getNapiMachine } from "./native";
 import {
   makeTransport,
   connectTransport,
@@ -21,6 +23,7 @@ import type {
   AssignOptions,
   BranchBatchOptions,
   BranchOptions,
+  CheckpointOptions,
   ConnectOptions,
   ExecEvent,
   ExecOptions,
@@ -110,6 +113,24 @@ export class Machine {
     conn?: ConnectOptions,
   ): Promise<Machine> {
     return new Machine(await restoreCheckpointTransport(checkpointId, name, conn));
+  }
+
+  /** Export a local stored checkpoint directory as one portable file. */
+  static exportCheckpoint(source: string, output: string): number {
+    try {
+      return getNapiMachine().exportCheckpoint(resolvePath(source), resolvePath(output));
+    } catch (error) {
+      throw wrapNativeError(error);
+    }
+  }
+
+  /** Remove objects that no retained checkpoint in a local store references. */
+  static pruneCheckpointStore(store: string): number {
+    try {
+      return getNapiMachine().pruneCheckpointStore(resolvePath(store));
+    } catch (error) {
+      throw wrapNativeError(error);
+    }
   }
 
   /** Restore a local `.smolcheckpoint` path or durable cloud checkpoint id.
@@ -294,9 +315,13 @@ export class Machine {
   }
 
   /** Capture this running checkpointable machine. Local capture requires an
-   * output `.smolcheckpoint` path; cloud capture stores the artifact durably. */
-  checkpoint(output?: string): Promise<PortableCheckpointInfo> {
-    return this.transport.checkpoint(output);
+   * output path; with `store`, it is a self-contained directory, otherwise a
+   * `.smolcheckpoint` file. Cloud capture stores the artifact durably. */
+  checkpoint(
+    output?: string,
+    options?: CheckpointOptions,
+  ): Promise<PortableCheckpointInfo> {
+    return this.transport.checkpoint(output, options);
   }
 
   /** List durable portable checkpoints captured from this machine. */

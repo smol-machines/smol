@@ -133,6 +133,8 @@ struct LocalCheckpointResult {
     #[pyo3(get)]
     size_bytes: u64,
     #[pyo3(get)]
+    reused_bytes: u64,
+    #[pyo3(get)]
     source_pause_ms: f64,
     #[pyo3(get)]
     elapsed_ms: f64,
@@ -475,6 +477,23 @@ impl Machine {
         Ok(Self { name })
     }
 
+    /// Export a stored checkpoint directory as one portable checkpoint file.
+    #[staticmethod]
+    fn export_checkpoint(source: String, output: String) -> PyResult<u64> {
+        smolvm::checkpoint_store::export(
+            std::path::Path::new(&source),
+            std::path::Path::new(&output),
+        )
+        .map_err(|error| PyRuntimeError::new_err(format!("export checkpoint: {error}")))
+    }
+
+    /// Remove objects that no retained checkpoint in a local store references.
+    #[staticmethod]
+    fn prune_checkpoint_store(store: String) -> PyResult<u64> {
+        smolvm::checkpoint_store::prune(std::path::Path::new(&store))
+            .map_err(|error| PyRuntimeError::new_err(format!("prune checkpoint store: {error}")))
+    }
+
     #[getter]
     fn name(&self) -> String {
         self.name.clone()
@@ -512,23 +531,27 @@ impl Machine {
     }
 
     /// Capture this running checkpointable machine to local disk.
-    fn checkpoint(&self, py: Python<'_>, output: String) -> PyResult<LocalCheckpointResult> {
+    #[pyo3(signature = (output, store=None))]
+    fn checkpoint(
+        &self,
+        py: Python<'_>,
+        output: String,
+        store: Option<String>,
+    ) -> PyResult<LocalCheckpointResult> {
         let runtime = runtime().map_err(err)?;
         let result = py
             .allow_threads(|| {
                 let options = smolvm::portable_checkpoint::CaptureOptions {
+                    store_dir: store.map(std::path::PathBuf::from),
                     rootfs_dir: Some(smolvm::agent::AgentManager::default_rootfs_path()?),
                     ..Default::default()
                 };
-                runtime.checkpoint_machine(
-                    &self.name,
-                    std::path::Path::new(&output),
-                    &options,
-                )
+                runtime.checkpoint_machine(&self.name, std::path::Path::new(&output), &options)
             })
             .map_err(err)?;
         Ok(LocalCheckpointResult {
             size_bytes: result.size_bytes,
+            reused_bytes: result.reused_bytes,
             source_pause_ms: result.source_pause.as_secs_f64() * 1000.0,
             elapsed_ms: result.elapsed.as_secs_f64() * 1000.0,
         })
