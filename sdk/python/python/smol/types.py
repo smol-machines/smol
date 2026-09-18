@@ -7,6 +7,7 @@ from typing import Callable, Literal, Optional
 
 __all__ = [
     "ResourceSpec",
+    "ResizeOptions",
     "MountSpec",
     "PortSpec",
     "MachineConfig",
@@ -23,6 +24,31 @@ __all__ = [
 # Lifecycle state. Cloud "started" means the VM process launched, not that the
 # guest agent or workload is ready; use ready()/wait_until_ready() before work.
 MachineState = str  # "created" | "started" | "running" | "stopped"
+
+
+@dataclass(frozen=True)
+class ResizeOptions:
+    """Absolute live-growth targets; CPU, RAM and disks use separate calls.
+
+    RAM is in MiB; disk capacities are in GiB. Neither resources nor filesystems
+    are shrunk. Retrying the same targets finishes an interrupted operation.
+    """
+
+    cpus: Optional[int] = None
+    memory_mb: Optional[int] = None
+    storage_gb: Optional[int] = None
+    overlay_gb: Optional[int] = None
+
+    def __post_init__(self) -> None:
+        for name, maximum in (("cpus", 255), ("memory_mb", 2**32 - 1),
+                              ("storage_gb", 2**34 - 1), ("overlay_gb", 2**34 - 1)):
+            value = getattr(self, name)
+            if value is not None and (type(value) is not int or not 1 <= value <= maximum):
+                raise ValueError(f"{name} must be a positive integer no larger than {maximum}")
+        kinds = (int(self.cpus is not None) + int(self.memory_mb is not None)
+                 + int(self.storage_gb is not None or self.overlay_gb is not None))
+        if kinds != 1:
+            raise ValueError("specify exactly one resource kind: CPUs, RAM, or disks")
 
 
 @dataclass

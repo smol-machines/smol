@@ -234,6 +234,19 @@ impl NapiMachine {
             .into_napi()
     }
 
+    /// Grow running resources without restarting the machine.
+    #[napi]
+    pub async fn resize(&self, options: ResizeOptions) -> napi::Result<()> {
+        let spec = options.into_spec()?;
+        let runtime = runtime().into_napi()?;
+        let name = self.name.clone();
+        tokio::task::spawn_blocking(move || runtime.resize_machine(&name, spec))
+            .await
+            .map_err(join_error)?
+            .into_napi()?;
+        Ok(())
+    }
+
     /// Start this machine as a forkable fork base (memfd-backed guest RAM +
     /// control socket) so it can later be `fork()`-ed.
     #[napi]
@@ -255,11 +268,7 @@ impl NapiMachine {
                 rootfs_dir: Some(smolvm::agent::AgentManager::default_rootfs_path()?),
                 ..Default::default()
             };
-            runtime()?.checkpoint_machine(
-                &name,
-                std::path::Path::new(&output),
-                &options,
-            )
+            runtime()?.checkpoint_machine(&name, std::path::Path::new(&output), &options)
         })
         .await
         .map_err(join_error)?

@@ -29,6 +29,7 @@ import type {
   ForkOptions,
   ImageInfo,
   MachineConfig,
+  ResizeOptions,
   MachineUsageReport,
   ShareLink,
   PortableCheckpointInfo,
@@ -244,6 +245,12 @@ export class Machine {
   /** Copy guest-local staged mounts back to their host directories without stopping. */
   sync(): Promise<void> {
     return this.transport.sync();
+  }
+
+  /** Grow a running machine without rebooting. Retry identical absolute targets
+   * after an interrupted call; success means the guest can use the resources. */
+  resize(options: ResizeOptions): Promise<void> {
+    return this.transport.resize(options);
   }
 
   /** Stop the machine. */

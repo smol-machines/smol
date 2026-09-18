@@ -6,6 +6,18 @@
  * `waitUntilReady()` before doing work. */
 export type MachineState = "created" | "started" | "running" | "stopped";
 
+/** Absolute live-growth targets. Use separate calls for CPU, RAM and disks.
+ * Both disks may grow together; no resource can shrink while running. */
+export interface ResizeOptions {
+  cpus?: number;
+  /** Total guest RAM in MiB. */
+  memoryMb?: number;
+  /** Total storage capacity in GiB. */
+  storageGb?: number;
+  /** Total writable root overlay capacity in GiB. */
+  overlayGb?: number;
+}
+
 /** CPU / memory / disk / network allocation for a machine. */
 export interface ResourceSpec {
   /** Number of vCPUs. */

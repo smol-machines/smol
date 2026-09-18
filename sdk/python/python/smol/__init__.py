@@ -87,6 +87,7 @@ from .types import (
     PortEndpoint,
     PortSpec,
     ResourceSpec,
+    ResizeOptions,
 )
 
 __version__ = "1.9.0"
@@ -98,6 +99,7 @@ __all__ = [
     "AsyncEpisode",
     "MachineConfig",
     "ResourceSpec",
+    "ResizeOptions",
     "MountSpec",
     "PortSpec",
     "PortEndpoint",

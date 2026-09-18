@@ -27,6 +27,7 @@ from .types import (
     ExecResult,
     ImageInfo,
     MachineConfig,
+    ResizeOptions,
     MachineUsageReport,
     ShareLink,
     PortableCheckpointInfo,
@@ -219,6 +220,10 @@ class Machine:
     def sync(self) -> None:
         """Copy guest-local staged mounts back to their host directories without stopping."""
         self._t.sync()
+
+    def resize(self, options: ResizeOptions) -> None:
+        """Grow running resources without rebooting; targets are absolute."""
+        self._t.resize(options)
 
     def stop(self) -> None:
         """Stop the machine."""
