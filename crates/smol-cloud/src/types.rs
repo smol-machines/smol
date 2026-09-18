@@ -21,12 +21,20 @@ pub struct Port {
 /// What a machine boots from.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Source {
-    /// Source kind, `image` or `pack`.
+    /// Source kind, `image` or `smolmachine`.
     #[serde(rename = "type")]
     pub source_type: String,
     /// Image reference or pack name.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reference: Option<String>,
+    /// CPU architecture, `arm64` or `amd64`.
+    ///
+    /// Requested on the way in, reported on the way out. Leaving it unset lets
+    /// the control plane place the machine on whatever it has, which is usually
+    /// what you want — set it when something downstream cares, such as a
+    /// checkpoint, which only restores on the architecture it was taken on.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub arch: Option<String>,
 }
 
 /// What a machine was given.
@@ -177,6 +185,9 @@ pub struct CreateMachine {
     #[serde(skip_serializing_if = "Option::is_none")]
     /// Workload working directory.
     pub workdir: Option<String>,
+    /// Command overriding the image entrypoint. Empty keeps the image default.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub command: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     /// Idle seconds before the machine stops on its own.
     pub auto_stop_seconds: Option<u64>,
@@ -187,7 +198,23 @@ pub struct CreateMachine {
     /// and the branch endpoint checks the stored flag. Sending it only at start
     /// time stores the source non-branchable and every branch 409s.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub branchable: bool,
+    /// The older spelling of [`CreateMachine::branchable`], sent alongside it.
+    ///
+    /// The control plane is mid-rollout from fork to branch vocabulary. Sending
+    /// both means neither an old nor a new one stores the machine
+    /// non-branchable, which would only surface later as a 409 on the first
+    /// branch.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub forkable: bool,
+}
+
+impl CreateMachine {
+    /// Ask for a branchable machine, in both vocabularies.
+    pub fn set_branchable(&mut self, branchable: bool) {
+        self.branchable = branchable;
+        self.forkable = branchable;
+    }
 }
 
 /// A command to run in a machine.
@@ -396,6 +423,7 @@ mod tests {
             source: Some(Source {
                 source_type: "image".into(),
                 reference: Some("alpine".into()),
+                arch: None,
             }),
             ..Default::default()
         })
@@ -405,6 +433,39 @@ mod tests {
         assert!(body.get("ttlSeconds").is_none());
         assert!(body.get("ports").is_none());
         // False must not be sent either: it is the absence that means default.
+        assert!(body.get("branchable").is_none());
         assert!(body.get("forkable").is_none());
+        assert!(body.get("command").is_none());
+    }
+
+    #[test]
+    fn asking_for_a_branchable_machine_sends_both_vocabularies() {
+        let mut request = CreateMachine::default();
+        request.set_branchable(true);
+        let body = serde_json::to_value(&request).expect("serialize");
+        // An older control plane reads `forkable`, a newer one `branchable`.
+        // Sending one would leave the other storing it non-branchable, which
+        // only shows up as a 409 on the first branch.
+        assert_eq!(body["branchable"], true);
+        assert_eq!(body["forkable"], true);
+    }
+
+    #[test]
+    fn an_architecture_rides_on_the_source() {
+        let body = serde_json::to_value(Source {
+            source_type: "image".into(),
+            reference: Some("alpine".into()),
+            arch: Some("arm64".into()),
+        })
+        .expect("serialize");
+        assert_eq!(body["arch"], "arm64");
+        // Unset means "place it wherever", not "amd64".
+        let unset = serde_json::to_value(Source {
+            source_type: "image".into(),
+            reference: Some("alpine".into()),
+            arch: None,
+        })
+        .expect("serialize");
+        assert!(unset.get("arch").is_none());
     }
 }

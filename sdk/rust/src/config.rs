@@ -153,6 +153,22 @@ pub struct MachineConfig {
     pub auto_stop_seconds: Option<u64>,
     /// Hard lifetime, after which the machine is deleted. Cloud only.
     pub ttl_seconds: Option<u64>,
+    /// CPU architecture to run on, `arm64` or `amd64`.
+    ///
+    /// On the cloud this places the machine. Locally there is only the host's
+    /// architecture, so asking for a different one is rejected rather than
+    /// quietly ignored.
+    pub arch: Option<String>,
+}
+
+/// The canonical name for an architecture, so `aarch64` and `arm64` — or
+/// `x86_64` and `amd64` — are not treated as two different places.
+fn canonical_arch(arch: &str) -> &str {
+    match arch {
+        "aarch64" | "arm64" => "arm64",
+        "x86_64" | "amd64" | "x86-64" => "amd64",
+        other => other,
+    }
 }
 
 impl MachineConfig {
@@ -168,6 +184,18 @@ impl MachineConfig {
     /// volumes. The workload environment travels beside the spec because the
     /// engine takes it as separate arguments.
     pub(crate) fn into_request(self) -> Result<CreateRequest> {
+        if let Some(arch) = &self.arch {
+            let host = canonical_arch(std::env::consts::ARCH);
+            if canonical_arch(arch) != host {
+                return Err(Error::new(
+                    ErrorKind::Config,
+                    format!(
+                        "this machine runs on the host, which is {host}, so it cannot be {arch}; \
+                         drop .arch(), or create it on the cloud where placement is a choice"
+                    ),
+                ));
+            }
+        }
         let (remote, local): (Vec<Mount>, Vec<Mount>) =
             self.mounts.into_iter().partition(Mount::is_remote);
 
@@ -283,6 +311,7 @@ impl MachineConfig {
             source: Some(wire::Source {
                 source_type: "image".to_string(),
                 reference: Some(image),
+                arch: self.arch,
             }),
             resources: Some(wire::Resources {
                 cpus: self.resources.cpus.map(u32::from),
@@ -302,8 +331,13 @@ impl MachineConfig {
                 .collect(),
             env: (!self.env.is_empty()).then(|| self.env.into_iter().collect()),
             workdir: self.workdir,
+            // The config already carries a command for the local target; not
+            // sending it here would silently boot the image's own entrypoint
+            // instead of the one that was asked for.
+            command: self.command,
             auto_stop_seconds: self.auto_stop_seconds,
             ttl_seconds: self.ttl_seconds,
+            branchable: self.branchable,
             forkable: self.branchable,
         })
     }
@@ -466,6 +500,16 @@ impl MachineBuilder {
     /// Delete the machine after this many seconds, idle or not. Cloud only.
     pub fn ttl_seconds(mut self, seconds: u64) -> Self {
         self.config.ttl_seconds = Some(seconds);
+        self
+    }
+
+    /// Run on this CPU architecture, `arm64` or `amd64`.
+    ///
+    /// Worth setting when something downstream cares which one you got — a
+    /// checkpoint only restores on the architecture it was taken on. Leaving it
+    /// unset lets the cloud place the machine wherever it has room.
+    pub fn arch(mut self, arch: impl Into<String>) -> Self {
+        self.config.arch = Some(arch.into());
         self
     }
 
