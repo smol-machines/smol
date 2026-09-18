@@ -1905,6 +1905,7 @@ checksum = "eddd3ca559203180a307f12d114c268abf583f59b03cb906fd0b3ff8646c1147"
 dependencies = [
  "base64",
  "bytes",
+ "futures-channel",
  "futures-core",
  "futures-util",
  "http",
@@ -2288,6 +2289,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ba467056f1b547ed52077911161fc86985becbc60e8e1857c8a144dab0def891"
 
 [[package]]
+name = "smol-cloud"
+version = "1.9.0"
+dependencies = [
+ "base64",
+ "reqwest",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "smolfile"
 version = "1.16.1"
 dependencies = [
@@ -2301,6 +2312,8 @@ dependencies = [
 name = "smolmachines"
 version = "1.9.0"
 dependencies = [
+ "serde_json",
+ "smol-cloud",
  "smolvm",
  "smolvm-protocol",
 ]

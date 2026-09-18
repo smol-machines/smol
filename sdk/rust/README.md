@@ -1,13 +1,14 @@
 # smolmachines — Rust SDK
 
-Embed isolated **microVMs** directly in a Rust program. No daemon, no socket:
-the engine is a library in your process and the VM is its child. Mirrors the
-[Node SDK](../node) and [Python SDK](../python), which wrap this same engine
-through NAPI and pyo3.
+Run isolated **microVMs** from Rust, either embedded in your own process or on
+**smol cloud** — one `Machine` API, the target chosen by `ConnectOptions`.
+Locally there is no daemon and no socket: the engine is a library in your
+process and the VM is its child. Mirrors the [Node SDK](../node) and
+[Python SDK](../python), which wrap the same engine through NAPI and pyo3.
 
-> **Supported platforms**: macOS on Apple Silicon, and Linux x64/arm64 with
-> glibc ≥ 2.34. The host needs a hypervisor: KVM on Linux, the Hypervisor
-> framework on macOS.
+> **Supported platforms** (local target): macOS on Apple Silicon, and Linux
+> x64/arm64 with glibc ≥ 2.34, with a hypervisor — KVM on Linux, the Hypervisor
+> framework on macOS. The **cloud** target works anywhere the crate builds.
 
 ```rust
 use smolmachines::{Machine, Port};
@@ -26,7 +27,54 @@ println!("{}", result.stdout_utf8());
 machine.delete()?;
 ```
 
+## Local or cloud
+
+The default is local. Only an **explicit** credential moves that — an `api_key`
+or `SMOL_CLOUD_TOKEN` — so a `smol auth login` session on disk never silently
+redirects a program that meant to run locally.
+
+```rust
+use smolmachines::{ConnectOptions, Machine};
+
+// Local: the engine runs in this process.
+let local = Machine::builder("here").image("alpine:latest").create()?;
+
+// Cloud: the control plane runs it. create_with also starts the machine and
+// waits for its agent, so it is ready to work when this returns.
+let remote = Machine::builder("there")
+    .image("alpine:latest")
+    .auto_stop_seconds(300)
+    .create_with(&ConnectOptions::cloud())?;
+
+println!("{}", remote.exec(["uname", "-a"])?.stdout_utf8());
+println!("{} µ$ so far", remote.usage()?.cost.total_micros);
+```
+
+The two targets are not one machine at a different address, and the SDK does not
+pretend otherwise:
+
+| | local | cloud |
+|---|---|---|
+| `exec`, `exec_stream`, files, `branch`, `checkpoint` | ✅ | ✅ |
+| host mounts, `run(image, …)`, `pull_image`, `list_images`, `sync` | ✅ | ❌ |
+| `usage`, `share`, `unshare`, `checkpoints`, `list_cloud_machines` | ❌ | ✅ |
+| `pid` | the VM's child process | `None` — it runs on someone else's node |
+
+Asking for the wrong one returns `ErrorKind::NotSupported` naming the target it
+needs, rather than failing obscurely later. Two config mistakes are caught up
+front for the same reason: a cloud machine needs an image (there is no local
+rootfs to fall back on), and cannot take host bind-mounts (there is no host
+filesystem to bind), so a config carrying either is rejected instead of quietly
+producing a machine missing its data.
+
+`checkpoint` returns a `Checkpoint` enum, because a capture is a different
+object on each target: locally a file you chose the path for, whose interesting
+part is what it cost; on the cloud a durable object the control plane holds,
+whose interesting part is how to get it back.
+
 ## The boot helper
+
+*Local target only — a cloud machine boots on someone else's node.*
 
 To boot a VM the engine re-executes a binary that knows how to be a VM. In a
 CLI that binary is the CLI itself; in an embedded process it is your program,
@@ -54,6 +102,10 @@ same layout the Node and Python SDKs use:
 [dependencies]
 smolmachines = { path = "../smol/sdk/rust" }
 ```
+
+The control-plane wire types and client live in [`smol-cloud`](../../crates/smol-cloud),
+shared with the `smol` CLI so the two clients of one API cannot drift. It is
+re-exported as `smolmachines::smol_cloud` if you need the raw API.
 
 ## Branching
 
@@ -89,11 +141,13 @@ cheap enough to take often.
 
 ```rust
 use smolmachines::{CheckpointOptions, Machine};
+use std::path::Path;
 
-let result = machine.checkpoint_with(
-    "state.smolcheckpoint",
+let captured = machine.checkpoint_with(
+    Some(Path::new("state.smolcheckpoint")),
     CheckpointOptions::new().store_dir("/var/lib/checkpoints"),
 )?;
+let result = captured.local().expect("a local machine captures locally");
 println!("{} MiB written, {} MiB reused", result.size_bytes >> 20, result.reused_bytes >> 20);
 
 let restored = Machine::restore_checkpoint("restored", "state.smolcheckpoint")?;
@@ -102,6 +156,9 @@ restored.start()?;
 
 `result.source_pause` is the only part the workload notices; `result.elapsed`
 covers the whole capture.
+
+On the cloud, pass `None` instead: the control plane stores the capture and
+`captured.cloud()` carries its id, size and download URL.
 
 ## Streaming output
 
@@ -153,8 +210,10 @@ to the caller rather than made for them.
 ## Errors
 
 Every failure is a `smolmachines::Error` carrying an `ErrorKind` and the
-engine's own message. The kinds and their string codes match the Node and
-Python SDKs, so the three agree on what a failure is called:
+underlying message. The kinds and their string codes match the Node and Python
+SDKs, so the three agree on what a failure is called. A cloud error also keeps
+the server's `x-request-id` in its message — the caller never sees response
+headers, and support needs that id to find the call:
 
 ```rust
 use smolmachines::ErrorKind;
@@ -191,4 +250,5 @@ configure_runtime_assets(
 cargo run --example hello       # boot, exec, tear down
 cargo run --example fanout      # branch one warm machine into eight
 cargo run --example checkpoint  # cold capture, warm capture, restore
+cargo run --example cloud       # the same API against smol cloud
 ```

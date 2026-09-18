@@ -38,8 +38,11 @@ fn main() -> Result<()> {
     for (round, note) in [("cold", "first"), ("warm", "second")] {
         machine.exec(["sh", "-c", &format!("echo {note} > /tmp/note")])?;
         let output = workdir.join(format!("{round}.smolcheckpoint"));
-        let result =
-            machine.checkpoint_with(&output, CheckpointOptions::new().store_dir(&store))?;
+        let captured =
+            machine.checkpoint_with(Some(&output), CheckpointOptions::new().store_dir(&store))?;
+        // A local capture reports what it cost; a cloud one reports where it
+        // is stored. This machine is local, so the local arm is the live one.
+        let result = captured.local().expect("a local machine captures locally");
         println!(
             "{round}: {:?} wall, {:?} paused, {} MiB written, {} MiB reused",
             result.elapsed,

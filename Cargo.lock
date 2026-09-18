@@ -2009,6 +2009,7 @@ checksum = "eddd3ca559203180a307f12d114c268abf583f59b03cb906fd0b3ff8646c1147"
 dependencies = [
  "base64",
  "bytes",
+ "futures-channel",
  "futures-core",
  "futures-util",
  "http",
@@ -2398,6 +2399,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
+ "smol-cloud",
  "smolvm",
  "smolvm-pack",
  "smolvm-protocol",
@@ -2409,6 +2411,16 @@ dependencies = [
  "toml",
  "tracing",
  "tracing-subscriber",
+]
+
+[[package]]
+name = "smol-cloud"
+version = "1.9.0"
+dependencies = [
+ "base64",
+ "reqwest",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

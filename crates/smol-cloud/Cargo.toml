@@ -1,0 +1,27 @@
+# The smolfleet /v1 wire contract, in one place.
+#
+# Both the `smol` CLI and the Rust SDK talk to the same control plane. Before
+# this crate they each carried their own copy of the machine, checkpoint and
+# usage shapes, and their own copy of "where is the API and what is my key" —
+# which is how the two drift.
+[package]
+name = "smol-cloud"
+version = "1.9.0"
+edition = "2021"
+description = "Wire types and client for the smol cloud control plane"
+license = "Apache-2.0"
+repository = "https://github.com/smol-machines/smol"
+
+[features]
+default = []
+# A synchronous client, for callers that are not already async.
+blocking = ["reqwest/blocking"]
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+base64 = "0.22"
+reqwest = { version = "0.12", default-features = false, features = [
+    "rustls-tls",
+    "json",
+] }

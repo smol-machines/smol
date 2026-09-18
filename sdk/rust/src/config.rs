@@ -146,6 +146,13 @@ pub struct MachineConfig {
     /// Back guest RAM with a memfd on every start, so the machine can be
     /// branched.
     pub branchable: bool,
+    /// CIDRs the machine may reach. Cloud only; locally, egress is governed by
+    /// the network flag and the host.
+    pub allowed_cidrs: Vec<String>,
+    /// Idle seconds before the machine stops on its own. Cloud only.
+    pub auto_stop_seconds: Option<u64>,
+    /// Hard lifetime, after which the machine is deleted. Cloud only.
+    pub ttl_seconds: Option<u64>,
 }
 
 impl MachineConfig {
@@ -227,6 +234,79 @@ pub(crate) struct CreateRequest {
     pub(crate) env: Vec<(String, String)>,
     pub(crate) workdir: Option<String>,
     pub(crate) user: Option<String>,
+}
+
+impl MachineConfig {
+    /// Translate into the control plane's create request.
+    ///
+    /// Two things are rejected rather than silently dropped. A cloud machine
+    /// has to come from an image, because there is no local rootfs to fall back
+    /// on. And a host bind-mount has no meaning on a machine with no access to
+    /// your filesystem — the API has no field for one, so sending the config
+    /// anyway would quietly produce a machine missing the data it was supposed
+    /// to have.
+    pub(crate) fn into_cloud_request(self) -> Result<smol_cloud::types::CreateMachine> {
+        use smol_cloud::types as wire;
+
+        let image = self.image.ok_or_else(|| {
+            Error::new(
+                ErrorKind::Config,
+                "a cloud machine needs an image; pass .image(\"…\") to the builder",
+            )
+        })?;
+        if !self.mounts.is_empty() {
+            return Err(Error::new(
+                ErrorKind::NotSupported,
+                "host mounts are local-only and are not applied on the cloud target; \
+                 use cloud volumes for persistent storage instead",
+            ));
+        }
+
+        let network = if !self.allowed_cidrs.is_empty() || !self.allowed_hosts.is_empty() {
+            Some(wire::Network {
+                mode: Some("allowCidrs".to_string()),
+                cidrs: self.allowed_cidrs,
+                hosts: self.allowed_hosts,
+            })
+        } else if self.resources.network.unwrap_or(false) {
+            Some(wire::Network {
+                mode: Some("open".to_string()),
+                cidrs: Vec::new(),
+                hosts: Vec::new(),
+            })
+        } else {
+            None
+        };
+
+        Ok(wire::CreateMachine {
+            name: Some(self.name),
+            source: Some(wire::Source {
+                source_type: "image".to_string(),
+                reference: Some(image),
+            }),
+            resources: Some(wire::Resources {
+                cpus: self.resources.cpus.map(u32::from),
+                memory_mb: self.resources.memory_mib,
+                disk_gb: self.resources.storage_gib.map(|gib| gib as u32),
+            }),
+            network,
+            // Supply only the guest port: the control plane allocates the node
+            // host port, so a host port chosen here would be ignored.
+            ports: self
+                .ports
+                .into_iter()
+                .map(|port| wire::Port {
+                    port: port.guest,
+                    host_port: None,
+                })
+                .collect(),
+            env: (!self.env.is_empty()).then(|| self.env.into_iter().collect()),
+            workdir: self.workdir,
+            auto_stop_seconds: self.auto_stop_seconds,
+            ttl_seconds: self.ttl_seconds,
+            forkable: self.branchable,
+        })
+    }
 }
 
 /// Fluent front end for [`MachineConfig`], returned by
@@ -368,14 +448,40 @@ impl MachineBuilder {
         self
     }
 
+    /// Permit a CIDR through the egress filter. Cloud only.
+    pub fn allow_cidr(mut self, cidr: impl Into<String>) -> Self {
+        self.config.allowed_cidrs.push(cidr.into());
+        self
+    }
+
+    /// Stop the machine after this many idle seconds. Cloud only.
+    ///
+    /// Worth setting on anything disposable: without it an idle machine runs,
+    /// and bills, until something stops it.
+    pub fn auto_stop_seconds(mut self, seconds: u64) -> Self {
+        self.config.auto_stop_seconds = Some(seconds);
+        self
+    }
+
+    /// Delete the machine after this many seconds, idle or not. Cloud only.
+    pub fn ttl_seconds(mut self, seconds: u64) -> Self {
+        self.config.ttl_seconds = Some(seconds);
+        self
+    }
+
     /// The config assembled so far.
     pub fn build(self) -> MachineConfig {
         self.config
     }
 
-    /// Create the machine. It is not started yet.
+    /// Create the machine locally. It is not started yet.
     pub fn create(self) -> Result<crate::Machine> {
         crate::Machine::create(self.config)
+    }
+
+    /// Create the machine on the target these options select.
+    pub fn create_with(self, connect: &crate::ConnectOptions) -> Result<crate::Machine> {
+        crate::Machine::create_with(self.config, connect)
     }
 }
 

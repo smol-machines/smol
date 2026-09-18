@@ -6,8 +6,10 @@ name: SDK CI
 #             via a dynamic require, so `tsc --noEmit` needs no built binary).
 #   * Python: the pure-stdlib unit + cloud-mock test scripts (the native
 #             extension is imported lazily, only when a local Machine is created).
-#   * Rust:   fmt, clippy and the unit tests. These compile the engine but never
-#             boot a VM, so they need the monorepo layout but no hypervisor.
+#   * Rust:   fmt, clippy and the unit tests, for the SDK and the shared
+#             `smol-cloud` crate. These compile the engine but never boot a VM,
+#             and the cloud tests run against a loopback mock, so they need the
+#             monorepo layout but no hypervisor and no credentials.
 #
 # The native build and the local/live-cloud end-to-end tests need a microVM
 # (libkrun + hypervisor) AND the monorepo layout (the crates depend on the
@@ -90,6 +92,14 @@ jobs:
         run: cargo clippy --all-targets -- -D warnings
       - name: Unit tests
         run: cargo test
+      # The shared control-plane crate is in the CLI workspace, not the SDK's,
+      # so it needs its own pass. --all-features reaches the blocking client.
+      - name: Shared cloud crate
+        working-directory: monorepo/smol/crates/smol-cloud
+        run: |
+          cargo fmt --check
+          cargo clippy --all-targets --all-features -- -D warnings
+          cargo test --all-features
 
   bun-local-e2e:
     name: Bun · local microVM

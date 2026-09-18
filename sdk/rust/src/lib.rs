@@ -52,6 +52,37 @@
 //! # }
 //! ```
 //!
+//! # Local or cloud
+//!
+//! The same [`Machine`] drives both. [`ConnectOptions`] chooses which, and the
+//! default is local: only an explicit API key or `SMOL_CLOUD_TOKEN` selects the
+//! cloud, so a `smol auth login` session on disk never silently redirects a
+//! program that meant to run locally.
+//!
+//! ```no_run
+//! use smolmachines::{ConnectOptions, Machine};
+//!
+//! # fn main() -> smolmachines::Result<()> {
+//! let machine = Machine::builder("remote")
+//!     .image("alpine:latest")
+//!     .auto_stop_seconds(300)
+//!     .create_with(&ConnectOptions::cloud())?;
+//!
+//! // Creating on the cloud also starts it and waits for readiness.
+//! println!("{}", machine.exec(["uname", "-a"])?.stdout_utf8());
+//! println!("this machine has cost {} µ$", machine.usage()?.cost.total_micros);
+//! machine.delete()?;
+//! # Ok(())
+//! # }
+//! ```
+//!
+//! The two targets are not one machine at a different address, and the SDK does
+//! not pretend otherwise. A local machine can bind host directories and pull
+//! images into its own store; a cloud machine cannot. A cloud machine reports
+//! usage and cost and can be shared over public ingress; a local one has
+//! neither. Asking for the wrong one returns [`ErrorKind::NotSupported`] naming
+//! the target it needs, instead of failing obscurely later.
+//!
 //! # Blocking
 //!
 //! Every call blocks. The engine is synchronous, so an async caller should run
@@ -90,17 +121,27 @@
 
 mod assets;
 mod config;
+mod connect;
 mod error;
 mod exec;
 mod machine;
+mod transport;
 
 pub use assets::{configure_runtime_assets, RuntimeAssets};
 pub use config::{MachineBuilder, MachineConfig, Mount, Port, Resources};
+pub use connect::{ConnectOptions, Target};
 pub use error::{Error, ErrorKind, Result};
 pub use exec::{ExecEvent, ExecOptions, ExecResult, ExecStream};
 pub use machine::{
-    BranchOptions, CheckpointOptions, CheckpointResult, ImageInfo, Machine, MachineState,
+    list_cloud_machines, BranchOptions, Checkpoint, CheckpointOptions, CheckpointResult,
+    CloudCheckpoint, CostBreakdown, ImageInfo, Machine, MachineState, PortEndpoint, ShareLink,
+    UsageReport, UsageTotals,
 };
+pub use transport::ReadyOptions;
+
+/// The shared control-plane crate, re-exported so a caller can reach the raw
+/// API without taking a second dependency on it.
+pub use smol_cloud;
 
 /// The SDK version, which tracks the engine it embeds.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");

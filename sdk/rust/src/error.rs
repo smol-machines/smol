@@ -32,6 +32,14 @@ pub enum ErrorKind {
     Config,
     /// A command ran but failed.
     CommandFailed,
+    /// The credential was missing, rejected or expired.
+    Unauthorized,
+    /// The request could not be delivered.
+    Connection,
+    /// The request outlived its deadline.
+    Timeout,
+    /// The operation exists, but not on this target.
+    NotSupported,
     /// Anything the SDK does not classify further.
     Other,
 }
@@ -49,6 +57,10 @@ impl ErrorKind {
             Self::Mount => "MOUNT_ERROR",
             Self::Config => "CONFIG_ERROR",
             Self::CommandFailed => "COMMAND_FAILED",
+            Self::Unauthorized => "UNAUTHORIZED",
+            Self::Connection => "CONNECTION",
+            Self::Timeout => "TIMEOUT",
+            Self::NotSupported => "NOT_SUPPORTED",
             Self::Other => "SMOLVM_ERROR",
         }
     }
@@ -164,6 +176,27 @@ impl From<EngineError> for Error {
                 format!("KVM permission denied: {reason}"),
             ),
             _ => (ErrorKind::Other, err.to_string()),
+        };
+        Self { kind, message }
+    }
+}
+
+impl From<smol_cloud::Error> for Error {
+    fn from(err: smol_cloud::Error) -> Self {
+        let kind = match err.kind() {
+            smol_cloud::ErrorKind::NotFound => ErrorKind::NotFound,
+            smol_cloud::ErrorKind::Unauthorized => ErrorKind::Unauthorized,
+            smol_cloud::ErrorKind::Conflict => ErrorKind::Conflict,
+            smol_cloud::ErrorKind::Timeout => ErrorKind::Timeout,
+            smol_cloud::ErrorKind::Connection => ErrorKind::Connection,
+            _ => ErrorKind::Other,
+        };
+        // Keep the correlation id in the message: a caller sees the message,
+        // never the response headers, and support needs that id to find the
+        // call.
+        let message = match err.request_id() {
+            Some(request_id) => format!("{} [request id: {request_id}]", err.message()),
+            None => err.message().to_string(),
         };
         Self { kind, message }
     }
