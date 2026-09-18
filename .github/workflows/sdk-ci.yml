@@ -64,7 +64,7 @@ jobs:
         with:
           repository: smol-machines/smolvm
           # Same tested engine revision as CLI CI; includes live resize APIs.
-          ref: 10390002445ccb9a7e3df36017c2c57f223e7dc7
+          ref: 44cec33202afa85af42b3c1f8c88d767aed1bb77
           path: monorepo
           lfs: true
       - name: Checkout smol SDK
@@ -124,6 +124,15 @@ jobs:
           bun test/fork-service-e2e.ts
           bun test/checkpoint-branch-e2e.ts
           bun test/staged-mount-e2e.ts
+
+      - name: Verify live growth with enforced machine limits
+        run: |
+          sudo env \
+            XDG_DATA_HOME="${{ runner.temp }}/resize-smol-data" \
+            XDG_CACHE_HOME="${{ runner.temp }}/resize-smol-cache" \
+            XDG_CONFIG_HOME="${{ runner.temp }}/resize-smol-config" \
+            SMOLVM_VM_USE_SCOPE=1 \
+            "$(command -v bun)" test/resize-local.ts
 
   python-check:
     name: Python · unit + cloud-mock
