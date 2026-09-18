@@ -50,6 +50,22 @@ println!("{}", remote.exec(["uname", "-a"])?.stdout_utf8());
 println!("{} µ$ so far", remote.usage()?.cost.total_micros);
 ```
 
+smol cloud runs both **arm64 and amd64**, and `.arch()` picks one. Leaving it
+unset lets the control plane place the machine wherever it has room, which is
+usually what you want — set it when something downstream cares:
+
+```rust
+let machine = Machine::builder("on-arm")
+    .image("alpine:latest")
+    .arch("arm64")
+    .create_with(&ConnectOptions::cloud())?;
+```
+
+A checkpoint is the usual reason to care: a capture only restores on the
+architecture it was taken on, and `captured.cloud().arch` reports which that
+was. Locally there is only the host's architecture, so asking for a different
+one is an error rather than a silent no-op.
+
 The two targets are not one machine at a different address, and the SDK does not
 pretend otherwise:
 

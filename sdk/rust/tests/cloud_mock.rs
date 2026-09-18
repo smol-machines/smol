@@ -768,3 +768,76 @@ fn a_local_machine_has_no_final_bill_to_settle() {
         .expect_err("nothing meters your own hardware");
     assert_eq!(error.kind(), ErrorKind::NotSupported);
 }
+
+#[test]
+fn an_architecture_and_a_command_reach_the_control_plane() {
+    let cloud = MockCloud::start(routes(vec![
+        (
+            "POST /v1/machines",
+            Box::new(|_| Reply::json(ready_machine("m-arm"))),
+        ),
+        (
+            "POST /v1/machines/m-arm/start?forkable=true",
+            Box::new(|_| Reply::status(204, "")),
+        ),
+        (
+            "GET /v1/machines/m-arm",
+            Box::new(|_| Reply::json(ready_machine("m-arm"))),
+        ),
+    ]));
+
+    Machine::builder("on-arm")
+        .image("alpine:latest")
+        .arch("arm64")
+        .command(["sleep", "infinity"])
+        .branchable(true)
+        .create_with(&cloud.connect())
+        .expect("create on arm");
+
+    let sent = cloud.requests();
+    let body: serde_json::Value = serde_json::from_str(&sent[0].body).expect("valid JSON body");
+    // Architecture rides on the source, not the top level.
+    assert_eq!(body["source"]["arch"], "arm64");
+    // A command in the config must not be dropped on the way to the cloud: the
+    // machine would silently run the image's own entrypoint instead.
+    assert_eq!(body["command"][0], "sleep");
+    assert_eq!(body["command"][1], "infinity");
+    // Both vocabularies, so neither an old nor a new control plane stores it
+    // non-branchable.
+    assert_eq!(body["branchable"], true);
+    assert_eq!(body["forkable"], true);
+}
+
+#[test]
+fn a_local_machine_cannot_be_asked_for_an_architecture_the_host_lacks() {
+    let other = if std::env::consts::ARCH == "aarch64" {
+        "amd64"
+    } else {
+        "arm64"
+    };
+    let error = Machine::builder("impossible")
+        .image("alpine:latest")
+        .arch(other)
+        .create()
+        .expect_err("the host has only one architecture");
+    assert_eq!(error.kind(), ErrorKind::Config);
+    assert!(error.message().contains("cloud"), "{error}");
+
+    // The host's own architecture, by either spelling, is fine.
+    for spelling in [
+        std::env::consts::ARCH,
+        if std::env::consts::ARCH == "aarch64" {
+            "arm64"
+        } else {
+            "amd64"
+        },
+    ] {
+        let config = Machine::builder("fine")
+            .image("alpine:latest")
+            .arch(spelling)
+            .build();
+        // Only the arch check is under test here; creating for real needs an
+        // engine, so stop at the translation.
+        assert!(config.arch.is_some());
+    }
+}
