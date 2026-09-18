@@ -197,24 +197,12 @@ pub struct CreateMachine {
     /// Branchability is a create-time property: the control plane persists it
     /// and the branch endpoint checks the stored flag. Sending it only at start
     /// time stores the source non-branchable and every branch 409s.
+    ///
+    /// Send this name only. The server accepts the older `forkable` as an alias
+    /// for the same field, so a body carrying both is rejected outright as a
+    /// duplicate — they are two spellings of one thing, not two fields.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub branchable: bool,
-    /// The older spelling of [`CreateMachine::branchable`], sent alongside it.
-    ///
-    /// The control plane is mid-rollout from fork to branch vocabulary. Sending
-    /// both means neither an old nor a new one stores the machine
-    /// non-branchable, which would only surface later as a 409 on the first
-    /// branch.
-    #[serde(skip_serializing_if = "std::ops::Not::not")]
-    pub forkable: bool,
-}
-
-impl CreateMachine {
-    /// Ask for a branchable machine, in both vocabularies.
-    pub fn set_branchable(&mut self, branchable: bool) {
-        self.branchable = branchable;
-        self.forkable = branchable;
-    }
 }
 
 /// A command to run in a machine.
@@ -434,20 +422,20 @@ mod tests {
         assert!(body.get("ports").is_none());
         // False must not be sent either: it is the absence that means default.
         assert!(body.get("branchable").is_none());
-        assert!(body.get("forkable").is_none());
         assert!(body.get("command").is_none());
     }
 
     #[test]
-    fn asking_for_a_branchable_machine_sends_both_vocabularies() {
-        let mut request = CreateMachine::default();
-        request.set_branchable(true);
+    fn a_branchable_machine_is_asked_for_by_one_name_only() {
+        let request = CreateMachine {
+            branchable: true,
+            ..Default::default()
+        };
         let body = serde_json::to_value(&request).expect("serialize");
-        // An older control plane reads `forkable`, a newer one `branchable`.
-        // Sending one would leave the other storing it non-branchable, which
-        // only shows up as a 409 on the first branch.
         assert_eq!(body["branchable"], true);
-        assert_eq!(body["forkable"], true);
+        // `forkable` is the server's alias for the same field, so sending both
+        // is a duplicate-field 422 that fails every create.
+        assert!(body.get("forkable").is_none());
     }
 
     #[test]
