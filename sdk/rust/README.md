@@ -57,7 +57,7 @@ pretend otherwise:
 |---|---|---|
 | `exec`, `exec_stream`, files, `branch`, `checkpoint` | ✅ | ✅ |
 | host mounts, `run(image, …)`, `pull_image`, `list_images`, `sync` | ✅ | ❌ |
-| `usage`, `share`, `unshare`, `checkpoints`, `list_cloud_machines` | ❌ | ✅ |
+| `usage`, `delete_with_usage`, `share`, `unshare`, `checkpoints`, `list_cloud_machines` | ❌ | ✅ |
 | `pid` | the VM's child process | `None` — it runs on someone else's node |
 
 Asking for the wrong one returns `ErrorKind::NotSupported` naming the target it
@@ -158,7 +158,20 @@ restored.start()?;
 covers the whole capture.
 
 On the cloud, pass `None` instead: the control plane stores the capture and
-`captured.cloud()` carries its id, size and download URL.
+`captured.cloud()` carries its id, size and download URL. Restoring goes by that
+id, not a path — the artifact never touches your disk:
+
+```rust
+let captured = machine.checkpoint(None)?;
+let stored = captured.cloud().expect("a cloud machine captures to the cloud");
+
+let restored = Machine::restore_cloud_checkpoint("revived", &stored.id, &ConnectOptions::cloud())?;
+println!("{}", restored.exec(["cat", "/tmp/note"])?.stdout_utf8());
+```
+
+Unlike the local restore, this starts the machine and waits for it, and deletes
+it if it cannot become ready — a cloud machine that exists but never came up is
+an orphan that bills.
 
 ## Streaming output
 
@@ -251,4 +264,5 @@ cargo run --example hello       # boot, exec, tear down
 cargo run --example fanout      # branch one warm machine into eight
 cargo run --example checkpoint  # cold capture, warm capture, restore
 cargo run --example cloud       # the same API against smol cloud
+cargo run --example cloud_checkpoint  # capture a cloud machine and bring it back
 ```

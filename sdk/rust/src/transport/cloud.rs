@@ -317,6 +317,10 @@ impl Transport for CloudTransport {
         Ok(self.client.usage(&self.id)?.into())
     }
 
+    fn delete_with_usage(&self) -> Result<UsageReport> {
+        Ok(self.client.delete_with_usage(&self.id)?.into())
+    }
+
     fn share(&self) -> Result<ShareLink> {
         let share = self.client.share(&self.id)?;
         Ok(ShareLink {

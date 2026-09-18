@@ -653,3 +653,118 @@ fn a_slow_control_plane_times_out_instead_of_hanging_forever() {
     );
     assert!(started.elapsed() < Duration::from_secs(90));
 }
+
+#[test]
+fn a_cloud_capture_can_be_restored_into_a_new_machine() {
+    let cloud = MockCloud::start(routes(vec![
+        (
+            "POST /v1/checkpoints/ckpt-1/restore",
+            Box::new(|_| Reply::json(ready_machine("m-restored"))),
+        ),
+        (
+            "POST /v1/machines/m-restored/start",
+            Box::new(|_| Reply::status(204, "")),
+        ),
+        (
+            "GET /v1/machines/m-restored",
+            Box::new(|_| Reply::json(ready_machine("m-restored"))),
+        ),
+    ]));
+
+    let machine = Machine::restore_cloud_checkpoint("revived", "ckpt-1", &cloud.connect())
+        .expect("restore from a stored capture");
+    assert_eq!(machine.id(), "m-restored");
+
+    let sent = cloud.requests();
+    let restore = sent
+        .iter()
+        .find(|r| r.path == "/v1/checkpoints/ckpt-1/restore")
+        .expect("a restore request");
+    let body: serde_json::Value = serde_json::from_str(&restore.body).expect("valid JSON body");
+    assert_eq!(body["name"], "revived");
+    // Unlike the local restore, this leaves a machine that is ready to work.
+    assert!(sent
+        .iter()
+        .any(|r| r.path == "/v1/machines/m-restored/start"));
+}
+
+#[test]
+fn a_restore_that_never_becomes_ready_is_deleted_rather_than_left_billing() {
+    let cloud = MockCloud::start(routes(vec![
+        (
+            "POST /v1/checkpoints/ckpt-2/restore",
+            Box::new(|_| Reply::json(ready_machine("m-doomed"))),
+        ),
+        (
+            "POST /v1/machines/m-doomed/start",
+            Box::new(|_| Reply::status(204, "")),
+        ),
+        (
+            "GET /v1/machines/m-doomed",
+            Box::new(|_| Reply::json(r#"{"id":"m-doomed","state":"error","ready":false}"#)),
+        ),
+        (
+            "DELETE /v1/machines/m-doomed",
+            Box::new(|_| Reply::status(204, "")),
+        ),
+    ]));
+
+    Machine::restore_cloud_checkpoint("doomed", "ckpt-2", &cloud.connect())
+        .expect_err("a restore that cannot become ready must not be returned");
+
+    assert!(
+        cloud
+            .requests()
+            .iter()
+            .any(|r| r.method == "DELETE" && r.path == "/v1/machines/m-doomed"),
+        "the orphaned restore must be deleted"
+    );
+}
+
+#[test]
+fn restoring_by_id_says_it_is_a_cloud_operation_when_asked_locally() {
+    let error = Machine::restore_cloud_checkpoint("x", "ckpt-3", &ConnectOptions::local())
+        .expect_err("a local capture is a file, not an id");
+    assert_eq!(error.kind(), ErrorKind::NotSupported);
+    assert!(error.message().contains("restore_checkpoint"), "{error}");
+}
+
+#[test]
+fn deleting_with_usage_takes_the_final_settled_reading() {
+    let cloud = MockCloud::start(routes(vec![
+        (
+            "GET /v1/machines/m-12",
+            Box::new(|_| Reply::json(ready_machine("m-12"))),
+        ),
+        (
+            "DELETE /v1/machines/m-12?includeUsage=true",
+            Box::new(|_| {
+                Reply::json(
+                    r#"{"machineId":"m-12","from":"2026-09-18T00:00:00Z","to":"2026-09-18T01:00:00Z",
+                        "usage":{"totalUptimeSeconds":3600},
+                        "cost":{"totalMicros":4200,"amountDueMicros":4200}}"#,
+                )
+            }),
+        ),
+    ]));
+
+    let machine = Machine::connect_with("m-12", &cloud.connect()).expect("attach");
+    let report = machine.delete_with_usage().expect("delete and settle");
+    assert_eq!(report.cost.total_micros, 4200);
+    assert_eq!(report.usage.total_uptime_seconds, 3600.0);
+
+    // The usage has to ride along with the delete: afterwards there is nothing
+    // left to ask.
+    assert!(cloud
+        .requests()
+        .iter()
+        .any(|r| r.method == "DELETE" && r.path.contains("includeUsage=true")));
+}
+
+#[test]
+fn a_local_machine_has_no_final_bill_to_settle() {
+    let error = Machine::attach("local-only")
+        .delete_with_usage()
+        .expect_err("nothing meters your own hardware");
+    assert_eq!(error.kind(), ErrorKind::NotSupported);
+}

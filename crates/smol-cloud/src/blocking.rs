@@ -433,6 +433,33 @@ impl Client {
         )
     }
 
+    /// Create a machine from a stored capture.
+    ///
+    /// The new machine comes back stopped; start it and wait for readiness the
+    /// way [`Client::start`] and [`Client::wait_until_ready`] do. A capture
+    /// only restores on the architecture it was taken on.
+    pub fn restore_checkpoint(&self, checkpoint_id: &str, name: &str) -> Result<Machine> {
+        self.json(
+            reqwest::Method::POST,
+            &format!("/v1/checkpoints/{}/restore", encode_path(checkpoint_id)),
+            Body::Json(serde_json::json!({ "name": name })),
+            CHECKPOINT_TIMEOUT,
+        )
+    }
+
+    /// Delete a machine and take a final, settled usage reading.
+    ///
+    /// The control plane samples usage synchronously before the teardown, so
+    /// the report is complete — no waiting for the periodic metering rollup.
+    pub fn delete_with_usage(&self, id: &str) -> Result<Usage> {
+        self.json(
+            reqwest::Method::DELETE,
+            &format!("/v1/machines/{id}?includeUsage=true"),
+            Body::None,
+            REQUEST_TIMEOUT,
+        )
+    }
+
     /// Every stored capture of a machine.
     pub fn checkpoints(&self, id: &str) -> Result<Vec<Checkpoint>> {
         self.json(

@@ -122,6 +122,9 @@ pub(crate) trait Transport: Send + Sync + std::fmt::Debug {
     /// Metered usage and cost so far.
     fn usage(&self) -> Result<UsageReport>;
 
+    /// Delete the machine and take a final, settled usage reading.
+    fn delete_with_usage(&self) -> Result<UsageReport>;
+
     /// Publish a shareable link to the machine.
     fn share(&self) -> Result<ShareLink>;
 

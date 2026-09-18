@@ -9,6 +9,11 @@ use crate::error::{Error, ErrorKind, Result};
 use crate::exec::{ExecOptions, ExecResult, ExecStream};
 use crate::transport::{cloud, local::LocalTransport, ReadyOptions, Transport};
 
+/// How long a restore waits for its machine, matching [`ReadyOptions`].
+const READY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(120);
+/// How often a restore looks.
+const READY_INTERVAL: std::time::Duration = std::time::Duration::from_secs(1);
+
 /// Where a machine is in its lifecycle.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
@@ -426,6 +431,48 @@ impl Machine {
         Ok(Self::attach(name))
     }
 
+    /// Create a machine from a capture the control plane is holding.
+    ///
+    /// `checkpoint` is the id from [`Machine::checkpoint`] or
+    /// [`Machine::checkpoints`], not a path — the artifact never touches your
+    /// disk. Unlike the local restore, this also starts the machine and waits
+    /// for it, because a cloud machine that exists but never became ready is an
+    /// orphan that bills.
+    ///
+    /// A capture only restores on the architecture it was taken on.
+    pub fn restore_cloud_checkpoint(
+        name: impl Into<String>,
+        checkpoint: &str,
+        connect: &ConnectOptions,
+    ) -> Result<Self> {
+        if connect.target() != Target::Cloud {
+            return Err(Error::new(
+                ErrorKind::NotSupported,
+                "restoring by checkpoint id is a cloud operation; \
+                 a local capture is a file, so pass its path to restore_checkpoint",
+            ));
+        }
+        let name = name.into();
+        let client = connect.client()?;
+        let restored = client.restore_checkpoint(checkpoint, &name)?;
+        let transport = crate::transport::cloud::CloudTransport::new(
+            client.clone(),
+            restored.display_name(),
+            restored.id.clone(),
+        );
+
+        // Same bargain as create: if it cannot be made ready, do not hand back
+        // a machine that quietly bills.
+        if let Err(error) = client
+            .start(&restored.id, false)
+            .and_then(|()| client.wait_until_ready(&restored.id, READY_TIMEOUT, READY_INTERVAL))
+        {
+            let _ = client.delete(&restored.id);
+            return Err(error.into());
+        }
+        Ok(Self::from_transport(Box::new(transport)))
+    }
+
     /// The machine's name.
     pub fn name(&self) -> &str {
         self.transport.name()
@@ -682,6 +729,15 @@ impl Machine {
     /// Stop the machine and remove its storage. Not reversible.
     pub fn delete(&self) -> Result<()> {
         self.transport.delete()
+    }
+
+    /// Delete the machine and take a final, settled usage reading. Cloud only.
+    ///
+    /// The control plane samples usage synchronously before teardown, so this
+    /// is the last chance to learn what a machine cost — after the delete there
+    /// is nothing left to ask.
+    pub fn delete_with_usage(&self) -> Result<UsageReport> {
+        self.transport.delete_with_usage()
     }
 }
 
