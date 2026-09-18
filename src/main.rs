@@ -120,6 +120,11 @@ fn init_logging(verbose: u8) {
 }
 
 fn main() {
+    // Match the engine CLI's explicit data-root handling before resolving a
+    // machine or constructing a runtime. Otherwise a machine created by
+    // smolvm serve/CLI becomes invisible to smol under SMOLVM_DATA_DIR.
+    // This must happen before any threads start.
+    smolvm::process::apply_system_data_root(false);
     // tokio-tungstenite (interactive cloud exec/shell) builds its rustls config
     // from the process-default CryptoProvider; with both ring and aws-lc-rs in
     // the tree, rustls 0.23 can't auto-pick one, so install ring explicitly.
