@@ -6,6 +6,8 @@ name: SDK CI
 #             via a dynamic require, so `tsc --noEmit` needs no built binary).
 #   * Python: the pure-stdlib unit + cloud-mock test scripts (the native
 #             extension is imported lazily, only when a local Machine is created).
+#   * Rust:   fmt, clippy and the unit tests. These compile the engine but never
+#             boot a VM, so they need the monorepo layout but no hypervisor.
 #
 # The native build and the local/live-cloud end-to-end tests need a microVM
 # (libkrun + hypervisor) AND the monorepo layout (the crates depend on the
@@ -48,6 +50,46 @@ jobs:
       - run: npm ci
       - name: Type-check (no native addon required)
         run: npx tsc -p tsconfig.json --noEmit
+
+  rust-check:
+    name: Rust · fmt, clippy, tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: monorepo/smol/sdk/rust
+    env:
+      CARGO_TARGET_DIR: ${{ github.workspace }}/.cargo-target/smol-rust
+      # The engine links libkrun even for a test binary that never boots a VM.
+      LIBKRUN_BUNDLE: ${{ github.workspace }}/monorepo/lib/linux-x86_64
+      SMOLVM_LIB_DIR: ${{ github.workspace }}/monorepo/lib/linux-x86_64
+    steps:
+      # The crate path-depends on the engine three levels up, so the SDK has to
+      # sit inside an engine checkout the way it does in the monorepo.
+      - name: Checkout smolvm engine
+        uses: actions/checkout@v4
+        with:
+          repository: smol-machines/smolvm
+          path: monorepo
+          lfs: true
+      - name: Checkout smol SDK
+        uses: actions/checkout@v4
+        with:
+          path: monorepo/smol
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - name: Install build dependencies
+        working-directory: ${{ github.workspace }}
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential libssl-dev pkg-config
+      - name: Format
+        run: cargo fmt --check
+      - name: Clippy
+        run: cargo clippy --all-targets -- -D warnings
+      - name: Unit tests
+        run: cargo test
 
   bun-local-e2e:
     name: Bun · local microVM
