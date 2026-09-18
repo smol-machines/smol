@@ -45,7 +45,7 @@ cd "$WT"
 BASE="$(grep -m1 '^version = ' Cargo.toml | sed -E 's/version = "(.*)"/\1/')"
 echo ">>> bumping manifests $BASE -> $VERSION"
 
-for f in Cargo.toml sdk/python/Cargo.toml sdk/python/pyproject.toml sdk/node/Cargo.toml; do
+for f in Cargo.toml sdk/python/Cargo.toml sdk/python/pyproject.toml sdk/node/Cargo.toml sdk/rust/Cargo.toml; do
   perl -i -pe "s/^version = \"\Q$BASE\E\"/version = \"$VERSION\"/" "$f"
 done
 perl -i -pe "s/\"version\": \"\Q$BASE\E\"/\"version\": \"$VERSION\"/" sdk/node/package.json
