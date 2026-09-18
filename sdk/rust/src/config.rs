@@ -338,7 +338,6 @@ impl MachineConfig {
             auto_stop_seconds: self.auto_stop_seconds,
             ttl_seconds: self.ttl_seconds,
             branchable: self.branchable,
-            forkable: self.branchable,
         })
     }
 }

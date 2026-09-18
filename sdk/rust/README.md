@@ -61,6 +61,11 @@ let machine = Machine::builder("on-arm")
     .create_with(&ConnectOptions::cloud())?;
 ```
 
+Publishing a port changes when a cloud machine is considered ready: readiness
+then waits for something to accept a connection on it. Publish a port nothing
+serves and the machine never becomes ready, so prefer no ports on a machine you
+only exec into.
+
 A checkpoint is the usual reason to care: a capture only restores on the
 architecture it was taken on, and `captured.cloud().arch` reports which that
 was. Locally there is only the host's architecture, so asking for a different
@@ -281,4 +286,6 @@ cargo run --example fanout      # branch one warm machine into eight
 cargo run --example checkpoint  # cold capture, warm capture, restore
 cargo run --example cloud       # the same API against smol cloud
 cargo run --example cloud_checkpoint  # capture a cloud machine and bring it back
+cargo run --example e2e_local   # walk every local operation and report on each
+cargo run --example e2e_cloud   # the same walk against smol cloud (creates billable machines)
 ```

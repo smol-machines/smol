@@ -264,7 +264,7 @@ fn a_branchable_machine_asks_for_it_at_create_time_and_again_at_start() {
     let create: serde_json::Value = serde_json::from_str(&sent[0].body).expect("valid JSON body");
     // Branchability is stored at create time: sending it only at start leaves
     // the source non-branchable and every later branch 409s.
-    assert_eq!(create["forkable"], true);
+    assert_eq!(create["branchable"], true);
     assert!(sent
         .iter()
         .any(|r| r.path == "/v1/machines/m-2/start?forkable=true"));
@@ -802,10 +802,10 @@ fn an_architecture_and_a_command_reach_the_control_plane() {
     // machine would silently run the image's own entrypoint instead.
     assert_eq!(body["command"][0], "sleep");
     assert_eq!(body["command"][1], "infinity");
-    // Both vocabularies, so neither an old nor a new control plane stores it
-    // non-branchable.
+    // One spelling only: the server aliases `forkable` to this same field, so
+    // a body carrying both is rejected as a duplicate and every create fails.
     assert_eq!(body["branchable"], true);
-    assert_eq!(body["forkable"], true);
+    assert!(body.get("forkable").is_none());
 }
 
 #[test]
