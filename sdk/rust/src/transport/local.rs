@@ -272,6 +272,14 @@ impl Transport for LocalTransport {
         ))
     }
 
+    fn delete_with_usage(&self) -> Result<UsageReport> {
+        Err(unsupported(
+            "delete_with_usage()",
+            "nothing meters a machine running on your own hardware; this is a cloud target \
+             operation",
+        ))
+    }
+
     fn share(&self) -> Result<ShareLink> {
         Err(unsupported(
             "share()",
