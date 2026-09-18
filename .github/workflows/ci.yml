@@ -24,6 +24,8 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: smol-machines/smolvm
+          # Keep the native API and bundled runtime reproducible together.
+          ref: 10390002445ccb9a7e3df36017c2c57f223e7dc7
           path: monorepo
           lfs: false
 
