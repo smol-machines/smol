@@ -68,6 +68,9 @@ pub enum MachineSubcommand {
     /// Synchronize guest-local staged mounts back to their host directories
     Sync(crate::commands::sync::SyncCmd),
 
+    /// Grow running CPUs, RAM or disks without rebooting (absolute targets)
+    Resize(crate::commands::resize::ResizeCmd),
+
     /// Branch a running, branchable machine into an independent child (CoW RAM + disks)
     #[command(name = "branch", visible_alias = "fork")]
     Branch(crate::commands::fork::ForkCmd),
@@ -130,6 +133,7 @@ impl MachineCmd {
             MachineSubcommand::Logs(cmd) => cmd.run(),
             MachineSubcommand::Cp(cmd) => cmd.run(),
             MachineSubcommand::Sync(cmd) => cmd.run(),
+            MachineSubcommand::Resize(cmd) => cmd.run(),
             MachineSubcommand::Branch(cmd) => cmd.run(),
             MachineSubcommand::BranchBatch(cmd) => cmd.run(),
             MachineSubcommand::Checkpoint(cmd) => cmd.run(),
@@ -219,5 +223,28 @@ mod tests {
             panic!("expected sync command");
         };
         assert_eq!(sync.name.as_deref(), Some("workspace"));
+    }
+
+    #[test]
+    fn resize_accepts_absolute_targets_and_rejects_empty_or_zero() {
+        for flag in ["--cpus", "--mem", "--storage", "--overlay"] {
+            let parsed = TestCli::try_parse_from([
+                "smol",
+                "resize",
+                "--name",
+                "workspace",
+                "--local",
+                flag,
+                "4",
+            ])
+            .unwrap();
+            assert!(matches!(parsed.command, MachineSubcommand::Resize(_)));
+            assert!(TestCli::try_parse_from(["smol", "resize", flag, "0"]).is_err());
+        }
+        assert!(TestCli::try_parse_from(["smol", "resize"]).is_err());
+        assert!(TestCli::try_parse_from(["smol", "resize", "--cpus", "256"]).is_err());
+        assert!(
+            TestCli::try_parse_from(["smol", "resize", "--storage", "2", "--overlay", "2"]).is_ok()
+        );
     }
 }
