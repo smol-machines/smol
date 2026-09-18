@@ -12,6 +12,69 @@ use smolvm::data::resources::{DEFAULT_MICROVM_CPU_COUNT, DEFAULT_MICROVM_MEMORY_
 // Input types (JS → Rust)
 // ============================================================================
 
+/// Absolute live-resize targets. Floating-point inputs are validated before
+/// conversion so JavaScript numbers cannot silently wrap into smaller targets.
+#[napi(object)]
+pub struct ResizeOptions {
+    pub cpus: Option<f64>,
+    pub memory_mb: Option<f64>,
+    pub storage_gb: Option<f64>,
+    pub overlay_gb: Option<f64>,
+}
+
+fn resize_integer(value: Option<f64>, name: &str, maximum: f64) -> napi::Result<Option<u64>> {
+    value
+        .map(|value| {
+            if !value.is_finite() || value.fract() != 0.0 || value < 1.0 || value > maximum {
+                return Err(napi::Error::from_reason(format!(
+                    "{name} must be a positive integer no larger than {maximum}"
+                )));
+            }
+            Ok(value as u64)
+        })
+        .transpose()
+}
+
+impl ResizeOptions {
+    pub fn into_spec(self) -> napi::Result<smolvm::embedded::ResizeSpec> {
+        Ok(smolvm::embedded::ResizeSpec {
+            cpus: resize_integer(self.cpus, "cpus", u8::MAX as f64)?.map(|v| v as u8),
+            memory_mib: resize_integer(self.memory_mb, "memoryMb", u32::MAX as f64)?
+                .map(|v| v as u32),
+            storage_gib: resize_integer(self.storage_gb, "storageGb", (u64::MAX >> 30) as f64)?,
+            overlay_gib: resize_integer(self.overlay_gb, "overlayGb", (u64::MAX >> 30) as f64)?,
+        })
+    }
+}
+
+#[cfg(test)]
+mod resize_tests {
+    use super::*;
+
+    #[test]
+    fn resize_numbers_do_not_truncate_or_wrap() {
+        for invalid in [f64::NAN, f64::INFINITY, -1.0, 0.0, 1.5, 256.0, 4294967297.0] {
+            assert!(resize_integer(Some(invalid), "cpus", 255.0).is_err());
+        }
+        assert_eq!(resize_integer(None, "cpus", 255.0).unwrap(), None);
+        assert_eq!(
+            resize_integer(Some(255.0), "cpus", 255.0).unwrap(),
+            Some(255)
+        );
+        let spec = ResizeOptions {
+            cpus: Some(4.0),
+            memory_mb: None,
+            storage_gb: None,
+            overlay_gb: None,
+        }
+        .into_spec()
+        .unwrap();
+        assert_eq!(spec.cpus, Some(4));
+        assert_eq!(spec.memory_mib, None);
+        assert!(resize_integer(Some(17179869184.0), "storageGb", (u64::MAX >> 30) as f64).is_err());
+    }
+}
+
 /// Paths to the runtime assets bundled with the JavaScript package.
 #[napi(object)]
 #[derive(Debug, Clone)]

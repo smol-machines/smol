@@ -8,6 +8,8 @@
  *  Field names use napi-rs's default snake_case→camelCase conversion.
  */
 
+import type { ResizeOptions } from "./types";
+
 export interface NativeEnvVar {
   key: string;
   value: string;
@@ -125,6 +127,7 @@ export interface NapiMachine {
   readFile(path: string): Promise<Buffer>;
   execStream(command: string[], options?: NativeExecOptions): NativeExecStream;
   sync(): Promise<void>;
+  resize(options: ResizeOptions): Promise<void>;
   stop(): Promise<void>;
   delete(): Promise<void>;
 }

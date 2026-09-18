@@ -4,6 +4,33 @@
 engine) and on **smol cloud**. Run `smol <command> --help` for the
 exact flags of any command — this page is the map.
 
+## Grow a running machine
+
+Resize without restarting the workload. Values are the new totals, not amounts
+to add; submit CPUs, memory, and disks in separate requests.
+
+```bash
+smol machine resize --name mybox --cpus 4
+smol machine resize --name mybox --mem 4096
+smol machine resize --name mybox --storage 40 --overlay 8
+# Use --cloud or --local to select a target explicitly.
+```
+
+The SDK equivalents are `await machine.resize({ memoryMb: 4096 })` in Node
+and `machine.resize(ResizeOptions(memory_mb=4096))` in Python.
+
+Live resize currently grows resources only; shrinking is rejected. CPU and
+RAM growth require a compatible Linux x86_64 runtime and guest kernel, with
+up to 16 CPUs and 64 GiB RAM; RAM grows in 128 MiB steps. These are runtime
+limits, not a promise that the host has enough capacity. Unsupported platforms
+and insufficient host capacity return errors rather than rebooting the VM.
+Disk growth requires writable managed ext4 disks and is refused while dependent
+branches exist. Filesystem growth is included in the operation.
+
+A timeout does not mean growth was undone. Inspect the machine and retry the
+same target; do not attempt to shrink it as compensation. Cloud resizing also
+requires a deployed control plane and worker that support the resize endpoint.
+
 Global behavior:
 - Config lives at `~/.config/smolvm/config.toml` (override with `SMOLVM_CONFIG`);
   the file is created `0600`. Secrets (cloud API keys) are masked by `config show`.

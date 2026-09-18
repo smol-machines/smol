@@ -32,6 +32,7 @@ import type {
   ForkOptions,
   ImageInfo,
   MachineConfig,
+  ResizeOptions,
   MachineUsageReport,
   ShareLink,
   PortableCheckpointInfo,
@@ -76,6 +77,24 @@ export interface RawExec {
   stderrBytes?: Uint8Array;
 }
 
+/** Validate before crossing either transport so numbers cannot be coerced. */
+export function validateResizeOptions(options: ResizeOptions): void {
+  if (!options || typeof options !== "object" || Array.isArray(options)) {
+    throw new InvalidConfigError("resize requires absolute resource targets");
+  }
+  const maxima = { cpus: 255, memoryMb: 2 ** 32 - 1,
+    storageGb: 2 ** 34 - 1, overlayGb: 2 ** 34 - 1 };
+  for (const [key, value] of Object.entries(options)) {
+    if (!Object.prototype.hasOwnProperty.call(maxima, key)) throw new InvalidConfigError(`Unknown resize target: ${key}`);
+    if (value !== undefined && (!Number.isSafeInteger(value) || value < 1 || value > maxima[key as keyof typeof maxima])) {
+      throw new InvalidConfigError(`${key} must be a positive integer no larger than ${maxima[key as keyof typeof maxima]}`);
+    }
+  }
+  const kinds = Number(options.cpus !== undefined) + Number(options.memoryMb !== undefined)
+    + Number(options.storageGb !== undefined || options.overlayGb !== undefined);
+  if (kinds !== 1) throw new InvalidConfigError("specify exactly one resource kind: CPUs, RAM, or disks");
+}
+
 /** Byte-exact exec output from a cloud response: prefer the base64 field
  *  (binary-safe, untruncated), fall back to the UTF-8 bytes of the lossy text
  *  when a control predates it or the value is malformed. */
@@ -109,6 +128,7 @@ export interface Transport {
   listImages(): Promise<ImageInfo[]>;
   readonly machineId: string;
   sync(): Promise<void>;
+  resize(options: ResizeOptions): Promise<void>;
   stop(): Promise<void>;
   start(): Promise<void>;
   delete(): Promise<void>;
@@ -487,6 +507,15 @@ class LocalTransport implements Transport {
     liveLocal.delete(this);
     try {
       await this.inner.stop();
+    } catch (e) {
+      throw wrapNativeError(e);
+    }
+  }
+
+  async resize(options: ResizeOptions): Promise<void> {
+    validateResizeOptions(options);
+    try {
+      await this.inner.resize(options);
     } catch (e) {
       throw wrapNativeError(e);
     }
@@ -1125,6 +1154,16 @@ class CloudTransport implements Transport {
 
   async stop(): Promise<void> {
     await cloudFetch(this.conn, "POST", `/v1/machines/${this.id}/stop`);
+  }
+
+  async resize(options: ResizeOptions): Promise<void> {
+    validateResizeOptions(options);
+    // Do not retry an ambiguous response or restart the machine. The control
+    // plane retains the admitted target for an explicit same-target retry.
+    await cloudFetch(this.conn, "POST", `/v1/machines/${this.id}/resize`, {
+      json: options,
+      timeoutMs: 240_000,
+    });
   }
 
   async start(): Promise<void> {

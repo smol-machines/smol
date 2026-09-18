@@ -37,6 +37,7 @@ export type {
   MachineConfig,
   MachineState,
   ResourceSpec,
+  ResizeOptions,
   MountSpec,
   PortSpec,
   BranchOptions,

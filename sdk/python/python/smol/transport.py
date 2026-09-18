@@ -33,6 +33,7 @@ from .types import (
     ExecResult,
     ImageInfo,
     MachineConfig,
+    ResizeOptions,
     MachineUsageReport,
     ShareLink,
     PortableCheckpointInfo,
@@ -122,6 +123,8 @@ class Transport(Protocol):
     def pull_image(self, image: str) -> ImageInfo: ...
     def list_images(self) -> list[ImageInfo]: ...
     def stop(self) -> None: ...
+
+    def resize(self, options: ResizeOptions) -> None: ...
     def sync(self) -> None: ...
     def start(self) -> None: ...
     def delete(self) -> None: ...
@@ -465,6 +468,13 @@ class LocalTransport:
         _live_local.discard(self)
         try:
             self._inner.stop()
+        except Exception as e:  # noqa: BLE001
+            raise wrap_native_error(e) from e
+
+    def resize(self, options: ResizeOptions) -> None:
+        try:
+            self._inner.resize(cpus=options.cpus, memory_mb=options.memory_mb,
+                               storage_gb=options.storage_gb, overlay_gb=options.overlay_gb)
         except Exception as e:  # noqa: BLE001
             raise wrap_native_error(e) from e
 
@@ -859,6 +869,14 @@ class CloudTransport:
 
     def stop(self) -> None:
         _cloud_fetch(self._base, self._key, "POST", f"/v1/machines/{self._id}/stop")
+
+    def resize(self, options: ResizeOptions) -> None:
+        fields = {"cpus": options.cpus, "memoryMb": options.memory_mb,
+                  "storageGb": options.storage_gb, "overlayGb": options.overlay_gb}
+        # A timeout leaves an unknown outcome; never retry or restart implicitly.
+        _cloud_fetch(self._base, self._key, "POST", f"/v1/machines/{self._id}/resize",
+                     json_body={key: value for key, value in fields.items() if value is not None},
+                     timeout=240.0)
 
     def start(self) -> None:
         # Resume a stopped machine, then wait for its agent so the returned handle

@@ -36,6 +36,7 @@ from .types import (
     ExecResult,
     ImageInfo,
     MachineConfig,
+    ResizeOptions,
     MachineUsageReport,
     ShareLink,
     PortableCheckpointInfo,
@@ -201,6 +202,10 @@ class AsyncMachine:
     async def sync(self) -> None:
         """Copy guest-local staged mounts back to their host directories without stopping."""
         await asyncio.to_thread(self._m.sync)
+
+    async def resize(self, options: ResizeOptions) -> None:
+        """Grow running resources off the event loop without restarting."""
+        await asyncio.to_thread(self._m.resize, options)
 
     async def stop(self) -> None:
         """Stop the machine."""

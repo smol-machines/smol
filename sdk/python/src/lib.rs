@@ -503,6 +503,28 @@ impl Machine {
             .map_err(err)
     }
 
+    /// Grow running resources without restarting; arguments are absolute targets.
+    #[pyo3(signature = (*, cpus=None, memory_mb=None, storage_gb=None, overlay_gb=None))]
+    fn resize(
+        &self,
+        py: Python<'_>,
+        cpus: Option<u8>,
+        memory_mb: Option<u32>,
+        storage_gb: Option<u64>,
+        overlay_gb: Option<u64>,
+    ) -> PyResult<()> {
+        let runtime = runtime().map_err(err)?;
+        let spec = smolvm::embedded::ResizeSpec {
+            cpus,
+            memory_mib: memory_mb,
+            storage_gib: storage_gb,
+            overlay_gib: overlay_gb,
+        };
+        py.allow_threads(|| runtime.resize_machine(&self.name, spec))
+            .map(|_| ())
+            .map_err(err)
+    }
+
     /// Start this machine as a forkable fork base (memfd-backed guest RAM +
     /// control socket) so it can later be `fork()`-ed.
     fn start_forkable(&self, py: Python<'_>) -> PyResult<()> {
@@ -520,11 +542,7 @@ impl Machine {
                     rootfs_dir: Some(smolvm::agent::AgentManager::default_rootfs_path()?),
                     ..Default::default()
                 };
-                runtime.checkpoint_machine(
-                    &self.name,
-                    std::path::Path::new(&output),
-                    &options,
-                )
+                runtime.checkpoint_machine(&self.name, std::path::Path::new(&output), &options)
             })
             .map_err(err)?;
         Ok(LocalCheckpointResult {
