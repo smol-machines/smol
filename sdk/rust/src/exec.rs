@@ -110,7 +110,8 @@ pub struct ExecStream {
 }
 
 impl ExecStream {
-    pub(crate) fn spawn(
+    /// Drive the embedded engine's streaming exec on a worker thread.
+    pub(crate) fn spawn_local(
         name: String,
         command: Vec<String>,
         env: Vec<(String, String)>,
@@ -130,6 +131,11 @@ impl ExecStream {
             }
             // Both senders drop here, which ends the iterator.
         });
+        Self { rx }
+    }
+
+    /// Wrap a channel some other producer is feeding.
+    pub(crate) fn from_receiver(rx: Receiver<ExecEvent>) -> Self {
         Self { rx }
     }
 

@@ -24,6 +24,7 @@ versions["sdk/python/python/smol/__init__.py"]=$(extract "sdk/python/python/smol
 versions["sdk/node/package.json"]=$(extract "sdk/node/package.json" '"version"[[:space:]]*:')
 versions["sdk/node/Cargo.toml"]=$(extract "sdk/node/Cargo.toml" '^version[[:space:]]*=')
 versions["sdk/rust/Cargo.toml"]=$(extract "sdk/rust/Cargo.toml" '^version[[:space:]]*=')
+versions["crates/smol-cloud/Cargo.toml"]=$(extract "crates/smol-cloud/Cargo.toml" '^version[[:space:]]*=')
 
 ref="${versions["Cargo.toml"]}"
 mismatch=0

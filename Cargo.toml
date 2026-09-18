@@ -4,6 +4,8 @@
 # drops in (path deps repoint there); it's its OWN workspace, so it must be
 # excluded or cargo errors with "multiple workspace roots in the same workspace".
 exclude = ["sdk", "__engine__"]
+# Shared libraries the CLI and the Rust SDK both build on.
+members = ["crates/*"]
 
 [package]
 name = "smol-cli"
@@ -24,6 +26,9 @@ name = "smol"
 path = "src/main.rs"
 
 [dependencies]
+# The smolfleet /v1 wire contract, shared with the Rust SDK so the two clients
+# of one control plane cannot drift.
+smol-cloud = { path = "crates/smol-cloud" }
 # smolvm engine — VM lifecycle, agent protocol, config
 smolvm = { path = ".." }
 smolvm-pack = { path = "../crates/smolvm-pack" }
