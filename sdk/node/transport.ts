@@ -1156,9 +1156,14 @@ class CloudTransport implements Transport {
     await cloudFetch(this.conn, "POST", `/v1/machines/${this.id}/stop`);
   }
 
-  async resize(_options: ResizeOptions): Promise<void> {
-    validateResizeOptions(_options);
-    throw new NotSupportedError("Live resize requires cloud control-plane support; it is not available on this transport yet.");
+  async resize(options: ResizeOptions): Promise<void> {
+    validateResizeOptions(options);
+    // Do not retry an ambiguous response or restart the machine. The control
+    // plane retains the admitted target for an explicit same-target retry.
+    await cloudFetch(this.conn, "POST", `/v1/machines/${this.id}/resize`, {
+      json: options,
+      timeoutMs: 240_000,
+    });
   }
 
   async start(): Promise<void> {

@@ -1,11 +1,11 @@
 """Client contract tests; real-VM growth is a separate acceptance gate."""
 import asyncio
 import unittest
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 from smol import AsyncMachine, Machine, ResizeOptions
 from smol.errors import SmolError
-from smol.transport import LocalTransport
+from smol.transport import LocalTransport, CloudTransport
 
 
 class ResizeTests(unittest.TestCase):
@@ -46,6 +46,18 @@ class ResizeTests(unittest.TestCase):
         options = ResizeOptions(cpus=4)
         asyncio.run(AsyncMachine(machine).resize(options))
         machine.resize.assert_called_once_with(options)
+
+    def test_cloud_resize_uses_absolute_targets_without_restart(self):
+        transport = object.__new__(CloudTransport)
+        transport._base, transport._key, transport._id = "http://localhost", "test", "machine"
+        with patch("smol.transport._cloud_fetch") as fetch:
+            transport.resize(ResizeOptions(storage_gb=4, overlay_gb=8))
+            fetch.assert_called_once_with("http://localhost", "test", "POST",
+                "/v1/machines/machine/resize", json_body={"storageGb": 4, "overlayGb": 8}, timeout=240.0)
+        with patch("smol.transport._cloud_fetch", side_effect=TimeoutError("unknown outcome")) as fetch:
+            with self.assertRaises(TimeoutError):
+                transport.resize(ResizeOptions(cpus=4))
+            self.assertEqual(fetch.call_count, 1)
 
 
 if __name__ == "__main__":

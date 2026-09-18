@@ -36,7 +36,37 @@ impl ResizeCmd {
             Target::from_flags(self.local, self.cloud)?,
         )?;
         if location == Location::Cloud {
-            anyhow::bail!("live resize requires cloud control-plane support; it is not available on this transport yet");
+            let kinds = usize::from(self.cpus.is_some())
+                + usize::from(self.memory.is_some())
+                + usize::from(self.storage.is_some() || self.overlay.is_some());
+            anyhow::ensure!(
+                kinds == 1,
+                "specify one resource kind: CPUs, memory, or disks"
+            );
+            let mut body = serde_json::Map::new();
+            if let Some(value) = self.cpus {
+                body.insert("cpus".into(), value.into());
+            }
+            if let Some(value) = self.memory {
+                body.insert("memoryMb".into(), value.into());
+            }
+            if let Some(value) = self.storage {
+                body.insert("storageGb".into(), value.into());
+            }
+            if let Some(value) = self.overlay {
+                body.insert("overlayGb".into(), value.into());
+            }
+            return super::cloud::run_cloud_command(Some(name), |http, endpoint, id| async move {
+                let response = http
+                    .post(format!("{endpoint}/v1/machines/{id}/resize"))
+                    .json(&body)
+                    .timeout(std::time::Duration::from_secs(240))
+                    .send()
+                    .await?;
+                super::cloud::check_response(response, "resize machine").await?;
+                println!("Resized running machine '{id}' without rebooting");
+                Ok(())
+            });
         }
         let record = smolvm::embedded::runtime()?.resize_machine(
             &name,

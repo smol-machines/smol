@@ -63,6 +63,14 @@ const server = createServer(async (req, res) => {
     seen.createBody = JSON.parse((await readBody(req)).toString() || "{}");
     return json(200, { id: "m1", name: "cloud-test", state: "created" });
   }
+  if (method === "POST" && url === "/v1/machines/m1/resize") {
+    seen.resizeCalls = (seen.resizeCalls ?? 0) + 1;
+    seen.resizeBody = JSON.parse((await readBody(req)).toString());
+    if (seen.resizeBody.memoryMb === 1025) {
+      return json(422, { error: "memory must be aligned" });
+    }
+    return json(200, { id: "m1", state: "started", resources: seen.resizeBody });
+  }
   if (method === "POST" && url.startsWith("/v1/machines/m1/start")) {
     seen.startUrl = url;
     return json(200, { state: "started", ready: false });
@@ -331,6 +339,12 @@ async function main(): Promise<void> {
     String(seen.auth),
   );
   check("state() over REST", (await m.state()) === "started");
+  await m.resize({ storageGb: 4, overlayGb: 8 });
+  check("resize forwards absolute disk targets", JSON.stringify(seen.resizeBody) === JSON.stringify({storageGb: 4, overlayGb: 8}));
+  const resizeCalls = seen.resizeCalls;
+  let refused = false;
+  try { await m.resize({ memoryMb: 1025 }); } catch { refused = true; }
+  check("resize refusal surfaces without retry", refused && seen.resizeCalls === resizeCalls + 1);
   // Readiness: the machine can be `started` yet report `ready` separately — the
   // SDK surfaces the unambiguous signal (gate on this, not state).
   check("ready() reads the readiness flag", (await m.ready()) === true);

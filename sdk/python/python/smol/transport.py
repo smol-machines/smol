@@ -871,9 +871,12 @@ class CloudTransport:
         _cloud_fetch(self._base, self._key, "POST", f"/v1/machines/{self._id}/stop")
 
     def resize(self, options: ResizeOptions) -> None:
-        raise NotSupportedError(
-            "Live resize requires cloud control-plane support; it is not available on this transport yet."
-        )
+        fields = {"cpus": options.cpus, "memoryMb": options.memory_mb,
+                  "storageGb": options.storage_gb, "overlayGb": options.overlay_gb}
+        # A timeout leaves an unknown outcome; never retry or restart implicitly.
+        _cloud_fetch(self._base, self._key, "POST", f"/v1/machines/{self._id}/resize",
+                     json_body={key: value for key, value in fields.items() if value is not None},
+                     timeout=240.0)
 
     def start(self) -> None:
         # Resume a stopped machine, then wait for its agent so the returned handle
