@@ -469,6 +469,31 @@ jobs:
           path: sdk/python/dist/*.whl
           if-no-files-found: error
 
+  crates-publish:
+    name: rust · publish to crates.io
+    # The Rust SDK is source-only and self-contained, so it needs no build
+    # matrix — but it must go out at the SAME version as npm and PyPI, or the
+    # three SDKs drift. Publishing it by hand from main is how it ended up at
+    # main's stale baseline instead of the release version.
+    needs: [python-publish]
+    if: github.event_name == 'push' || inputs.publish
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Publish smol-cloud then the SDK that depends on it
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: |
+          set -euo pipefail
+          # Order matters: the SDK resolves smol-cloud from the registry.
+          cargo publish --manifest-path crates/smol-cloud/Cargo.toml
+          # crates.io needs a moment to index before the dependant resolves.
+          for _ in $(seq 1 30); do
+            cargo publish --manifest-path sdk/rust/Cargo.toml && break
+            sleep 10
+          done
+
   python-publish:
     name: py · publish to PyPI
     # Also gate on node-publish: if node's pre-publish verify fails, PyPI must NOT
