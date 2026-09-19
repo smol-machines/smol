@@ -12,60 +12,10 @@ use smolvm::settings::{CloudSection, SmolSettings};
 // Typed cloud API response structs
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, serde::Deserialize, serde::Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct CloudMachine {
-    pub id: String,
-    // Optional: a machine row can have a null name (half-created / pool-vended).
-    // A single null name must not break parsing the whole list.
-    #[serde(default)]
-    pub name: Option<String>,
-    /// Lifecycle state. In particular, `started` means the VM process launched;
-    /// it does not imply that the guest agent or workload is ready.
-    pub state: String,
-    /// True once the guest agent is reachable and any published port accepts
-    /// connections. This, rather than `state == "started"`, means ready for work.
-    #[serde(default)]
-    pub ready: Option<bool>,
-    #[serde(default)]
-    pub ready_at: Option<String>,
-    pub source: Option<CloudMachineSource>,
-    pub resources: Option<CloudMachineResources>,
-    pub network: Option<CloudMachineNetwork>,
-    #[serde(default)]
-    pub env: Option<serde_json::Value>,
-    pub workdir: Option<String>,
-    pub ephemeral: Option<bool>,
-    pub ttl_seconds: Option<u64>,
-    pub auto_stop_seconds: Option<u64>,
-    pub last_activity_at: Option<String>,
-    pub created_at: Option<String>,
-    pub updated_at: Option<String>,
-    /// Public ingress URL for the machine's first published port, when started
-    /// and the control plane advertises a public base URL. `None` otherwise.
-    #[serde(default)]
-    pub url: Option<String>,
-}
-
-#[derive(Debug, serde::Deserialize, serde::Serialize)]
-pub struct CloudMachineSource {
-    #[serde(rename = "type")]
-    pub source_type: String,
-    pub reference: Option<String>,
-}
-
-#[derive(Debug, serde::Deserialize, serde::Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct CloudMachineResources {
-    pub cpus: Option<u32>,
-    pub memory_mb: Option<u32>,
-    pub disk_gb: Option<u32>,
-}
-
-#[derive(Debug, serde::Deserialize, serde::Serialize)]
-pub struct CloudMachineNetwork {
-    pub mode: Option<String>,
-}
+// The wire shapes live in `smol-cloud`, shared with the Rust SDK. They keep
+// their CLI-facing names here so the thirteen call sites read unchanged, but
+// there is now one definition of what the control plane sends.
+pub use smol_cloud::types::Machine as CloudMachine;
 
 // ---------------------------------------------------------------------------
 // Common cloud command runner
@@ -581,16 +531,7 @@ pub enum CloudCheckpointSubcommand {
     },
 }
 
-#[derive(Debug, serde::Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct PortableCheckpoint {
-    id: String,
-    machine_id: String,
-    status: String,
-    size_bytes: u64,
-    arch: String,
-    created_at: String,
-}
+use smol_cloud::types::Checkpoint as PortableCheckpoint;
 
 impl CloudExportArgs {
     /// The machine name, from `-n/--name` or the positional.
@@ -954,6 +895,9 @@ fn checkpoint(args: CloudCheckpointArgs) -> Result<()> {
                     .await?;
                 let response = http
                     .post(format!("{endpoint}/v1/machines/{}/start", machine.id))
+                    .timeout(std::time::Duration::from_secs(
+                        super::common::HTTP_LONG_OPERATION_TIMEOUT_SECS,
+                    ))
                     .send()
                     .await?;
                 check_response(response, "start restored machine").await?;

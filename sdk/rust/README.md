@@ -1,0 +1,291 @@
+# smolmachines — Rust SDK
+
+Run isolated **microVMs** from Rust, either embedded in your own process or on
+**smol cloud** — one `Machine` API, the target chosen by `ConnectOptions`.
+Locally there is no daemon and no socket: the engine is a library in your
+process and the VM is its child. Mirrors the [Node SDK](../node) and
+[Python SDK](../python), which wrap the same engine through NAPI and pyo3.
+
+> **Supported platforms** (local target): macOS on Apple Silicon, and Linux
+> x64/arm64 with glibc ≥ 2.34, with a hypervisor — KVM on Linux, the Hypervisor
+> framework on macOS. The **cloud** target works anywhere the crate builds.
+
+```rust
+use smolmachines::{Machine, Port};
+
+let machine = Machine::builder("hello")
+    .image("alpine:latest")
+    .cpus(2)
+    .memory_mib(1024)
+    .network(true)
+    .port(Port::new(8080, 80))
+    .create()?;
+
+machine.start()?;
+let result = machine.exec(["uname", "-a"])?;
+println!("{}", result.stdout_utf8());
+machine.delete()?;
+```
+
+## Local or cloud
+
+The default is local. Only an **explicit** credential moves that — an `api_key`
+or `SMOL_CLOUD_TOKEN` — so a `smol auth login` session on disk never silently
+redirects a program that meant to run locally.
+
+```rust
+use smolmachines::{ConnectOptions, Machine};
+
+// Local: the engine runs in this process.
+let local = Machine::builder("here").image("alpine:latest").create()?;
+
+// Cloud: the control plane runs it. create_with also starts the machine and
+// waits for its agent, so it is ready to work when this returns.
+let remote = Machine::builder("there")
+    .image("alpine:latest")
+    .auto_stop_seconds(300)
+    .create_with(&ConnectOptions::cloud())?;
+
+println!("{}", remote.exec(["uname", "-a"])?.stdout_utf8());
+println!("{} µ$ so far", remote.usage()?.cost.total_micros);
+```
+
+smol cloud runs both **arm64 and amd64**, and `.arch()` picks one. Leaving it
+unset lets the control plane place the machine wherever it has room, which is
+usually what you want — set it when something downstream cares:
+
+```rust
+let machine = Machine::builder("on-arm")
+    .image("alpine:latest")
+    .arch("arm64")
+    .create_with(&ConnectOptions::cloud())?;
+```
+
+Publishing a port changes when a cloud machine is considered ready: readiness
+then waits for something to accept a connection on it. Publish a port nothing
+serves and the machine never becomes ready, so prefer no ports on a machine you
+only exec into.
+
+A checkpoint is the usual reason to care: a capture only restores on the
+architecture it was taken on, and `captured.cloud().arch` reports which that
+was. Locally there is only the host's architecture, so asking for a different
+one is an error rather than a silent no-op.
+
+The two targets are not one machine at a different address, and the SDK does not
+pretend otherwise:
+
+| | local | cloud |
+|---|---|---|
+| `exec`, `exec_stream`, files, `branch`, `checkpoint` | ✅ | ✅ |
+| host mounts, `run(image, …)`, `pull_image`, `list_images`, `sync` | ✅ | ❌ |
+| `usage`, `delete_with_usage`, `share`, `unshare`, `checkpoints`, `list_cloud_machines` | ❌ | ✅ |
+| `pid` | the VM's child process | `None` — it runs on someone else's node |
+
+Asking for the wrong one returns `ErrorKind::NotSupported` naming the target it
+needs, rather than failing obscurely later. Two config mistakes are caught up
+front for the same reason: a cloud machine needs an image (there is no local
+rootfs to fall back on), and cannot take host bind-mounts (there is no host
+filesystem to bind), so a config carrying either is rejected instead of quietly
+producing a machine missing its data.
+
+`checkpoint` returns a `Checkpoint` enum, because a capture is a different
+object on each target: locally a file you chose the path for, whose interesting
+part is what it cost; on the cloud a durable object the control plane holds,
+whose interesting part is how to get it back.
+
+## The boot helper
+
+*Local target only — a cloud machine boots on someone else's node.*
+
+To boot a VM the engine re-executes a binary that knows how to be a VM. In a
+CLI that binary is the CLI itself; in an embedded process it is your program,
+which does not, so the boot fails with a bare non-zero exit. Point the engine
+at a real helper once, before the first machine:
+
+```rust
+use smolmachines::{configure_runtime_assets, RuntimeAssets};
+
+// Borrow an installed smolvm, if there is one on PATH.
+if let Some(assets) = RuntimeAssets::from_path_lookup() {
+    configure_runtime_assets(assets)?;
+}
+```
+
+A program that ships its own engine names the paths itself. See
+[Runtime assets](#runtime-assets).
+
+## Install
+
+The crate path-depends on the `smolvm` engine checked out beside `smol/`, the
+same layout the Node and Python SDKs use:
+
+```toml
+[dependencies]
+smolmachines = { path = "../smol/sdk/rust" }
+```
+
+The control-plane wire types and client live in [`smol-cloud`](../../crates/smol-cloud),
+shared with the `smol` CLI so the two clients of one API cannot drift. It is
+re-exported as `smolmachines::smol_cloud` if you need the raw API.
+
+## Branching
+
+A machine created `branchable` and started with `start_branchable` can be
+branched. A branch shares the source's live guest RAM and disks
+copy-on-write, so it costs a fraction of a boot and starts from the exact state
+the source was in, warm caches included.
+
+```rust
+use smolmachines::{BranchOptions, Machine};
+
+let source = Machine::builder("source")
+    .image("alpine:latest")
+    .branchable(true)
+    .create()?;
+source.start_branchable()?;
+source.exec(["sh", "-c", "echo warm > /tmp/state"])?;
+
+// One branch.
+let child = source.branch("child")?;
+
+// Or many, booted in bounded waves. Transactional: if one fails, none survive.
+let names: Vec<String> = (0..16).map(|i| format!("worker-{i}")).collect();
+let workers = source.branch_batch(names, BranchOptions::new().parallel(8))?;
+```
+
+## Checkpoints
+
+A checkpoint is a portable capture of a running machine. Point every capture of
+a machine at the same store and all but the first are incremental: unchanged
+chunks are reused rather than written again, which is what makes a warm capture
+cheap enough to take often.
+
+```rust
+use smolmachines::{CheckpointOptions, Machine};
+use std::path::Path;
+
+let captured = machine.checkpoint_with(
+    Some(Path::new("state.smolcheckpoint")),
+    CheckpointOptions::new().store_dir("/var/lib/checkpoints"),
+)?;
+let result = captured.local().expect("a local machine captures locally");
+println!("{} MiB written, {} MiB reused", result.size_bytes >> 20, result.reused_bytes >> 20);
+
+let restored = Machine::restore_checkpoint("restored", "state.smolcheckpoint")?;
+restored.start()?;
+```
+
+`result.source_pause` is the only part the workload notices; `result.elapsed`
+covers the whole capture.
+
+On the cloud, pass `None` instead: the control plane stores the capture and
+`captured.cloud()` carries its id, size and download URL. Restoring goes by that
+id, not a path — the artifact never touches your disk:
+
+```rust
+let captured = machine.checkpoint(None)?;
+let stored = captured.cloud().expect("a cloud machine captures to the cloud");
+
+let restored = Machine::restore_cloud_checkpoint("revived", &stored.id, &ConnectOptions::cloud())?;
+println!("{}", restored.exec(["cat", "/tmp/note"])?.stdout_utf8());
+```
+
+Unlike the local restore, this starts the machine and waits for it, and deletes
+it if it cannot become ready — a cloud machine that exists but never came up is
+an orphan that bills.
+
+## Streaming output
+
+`exec` waits for the command and hands back everything it wrote. When output
+matters as it arrives, `exec_stream` yields each chunk instead, as a plain
+iterator:
+
+```rust
+use smolmachines::{ExecEvent, ExecOptions};
+
+for event in machine.exec_stream(["sh", "-c", "make 2>&1"], ExecOptions::new()) {
+    match event {
+        ExecEvent::Stdout(chunk) => print!("{}", String::from_utf8_lossy(&chunk)),
+        ExecEvent::Stderr(chunk) => eprint!("{}", String::from_utf8_lossy(&chunk)),
+        ExecEvent::Exit(code) => println!("exited {code}"),
+        ExecEvent::Error(message) => eprintln!("stream failed: {message}"),
+    }
+}
+```
+
+Dropping the stream early leaves the command running in the guest. It does not
+kill it.
+
+## Mounts
+
+A local source is bind-mounted from the host. An `s3://` source is fetched by
+the in-guest agent instead, and is routed to the engine's remote volumes
+automatically, so both are declared the same way:
+
+```rust
+use smolmachines::Mount;
+
+Machine::builder("build")
+    .mount(Mount::new("/home/me/project", "/workspace"))
+    .mount(Mount::new("/usr/share/data", "/data").read_only())
+    .mount(Mount::new("s3://bucket/models", "/models").read_only())
+    // Copied into guest-local storage at start; `sync()` copies changes back.
+    .mount(Mount::new("/home/me/cache", "/cache").staged())
+    .create()?;
+```
+
+## Blocking
+
+Every call blocks. The engine is synchronous, so an async caller should run
+these on a blocking pool with `tokio::task::spawn_blocking` or equivalent. That
+is exactly what the Node and Python SDKs do internally; here the choice is left
+to the caller rather than made for them.
+
+## Errors
+
+Every failure is a `smolmachines::Error` carrying an `ErrorKind` and the
+underlying message. The kinds and their string codes match the Node and Python
+SDKs, so the three agree on what a failure is called. A cloud error also keeps
+the server's `x-request-id` in its message — the caller never sees response
+headers, and support needs that id to find the call:
+
+```rust
+use smolmachines::ErrorKind;
+
+match machine.start() {
+    Err(error) if error.kind() == ErrorKind::KvmUnavailable => {
+        eprintln!("this host has no hypervisor: {}", error.message());
+    }
+    other => other?,
+}
+```
+
+## Runtime assets
+
+`RuntimeAssets::from_path_lookup` covers the common case of an installed
+smolvm. A program that ships its own boot binary, hypervisor libraries or guest
+rootfs names the paths itself. Anything already set in the environment wins, so
+an operator can override a build-time path without a recompile:
+
+```rust
+use smolmachines::{configure_runtime_assets, RuntimeAssets};
+
+configure_runtime_assets(
+    RuntimeAssets::new()
+        .boot_binary("/opt/app/smolvm-boot")
+        .lib_dir("/opt/app/lib")
+        .agent_rootfs("/opt/app/rootfs"),
+)?;
+```
+
+## Examples
+
+```sh
+cargo run --example hello       # boot, exec, tear down
+cargo run --example fanout      # branch one warm machine into eight
+cargo run --example checkpoint  # cold capture, warm capture, restore
+cargo run --example cloud       # the same API against smol cloud
+cargo run --example cloud_checkpoint  # capture a cloud machine and bring it back
+cargo run --example e2e_local   # walk every local operation and report on each
+cargo run --example e2e_cloud   # the same walk against smol cloud (creates billable machines)
+```

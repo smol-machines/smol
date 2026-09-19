@@ -45,7 +45,7 @@ cd "$WT"
 BASE="$(grep -m1 '^version = ' Cargo.toml | sed -E 's/version = "(.*)"/\1/')"
 echo ">>> bumping manifests $BASE -> $VERSION"
 
-for f in Cargo.toml sdk/python/Cargo.toml sdk/python/pyproject.toml sdk/node/Cargo.toml; do
+for f in Cargo.toml sdk/python/Cargo.toml sdk/python/pyproject.toml sdk/node/Cargo.toml sdk/rust/Cargo.toml crates/smol-cloud/Cargo.toml; do
   perl -i -pe "s/^version = \"\Q$BASE\E\"/version = \"$VERSION\"/" "$f"
 done
 perl -i -pe "s/\"version\": \"\Q$BASE\E\"/\"version\": \"$VERSION\"/" sdk/node/package.json
@@ -55,7 +55,7 @@ perl -i -pe "s/__version__ = \"\Q$BASE\E\"/__version__ = \"$VERSION\"/" sdk/pyth
 # layout change) missed.
 bash scripts/check-versions.sh
 
-git add Cargo.toml sdk/
+git add Cargo.toml sdk/ crates/
 git commit -m "Bump smol CLI and SDKs to $VERSION"
 git tag -a "v$VERSION" -m "smol v$VERSION"
 git push -u origin "$BRANCH"

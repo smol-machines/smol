@@ -55,6 +55,9 @@ impl RestoreCmd {
             let response = http
                 .post(format!("{endpoint}/v1/machines/{}/start", machine.id))
                 .query(&[("wait_ready", "true")])
+                .timeout(std::time::Duration::from_secs(
+                    super::common::HTTP_LONG_OPERATION_TIMEOUT_SECS,
+                ))
                 .send()
                 .await?;
             super::cloud::check_response(response, "start restored machine").await?;

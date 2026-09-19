@@ -1,0 +1,29 @@
+# Embedded Rust SDK for smol machines — boots microVMs in-process, no daemon.
+# This is its own workspace; it path-depends on the sibling `smolvm` engine
+# (checked out beside `smol/`), mirroring `sdk/node` and `sdk/python`.
+[workspace]
+
+[package]
+name = "smolmachines"
+version = "1.9.0"
+edition = "2021"
+rust-version = "1.82"
+description = "Embed smol machines microVMs directly in a Rust process"
+license = "Apache-2.0"
+repository = "https://github.com/smol-machines/smol"
+readme = "README.md"
+keywords = ["microvm", "sandbox", "virtualization", "vm"]
+categories = ["virtualization", "api-bindings"]
+
+[dependencies]
+# The smolvm engine lives in the parent repo, three levels up.
+smolvm = { path = "../../../" }
+smolvm-protocol = { path = "../../../crates/smolvm-protocol" }
+# The cloud transport. Shared with the `smol` CLI so the two clients of the
+# control plane cannot drift. Blocking, because the whole SDK is: the caller
+# owns the choice of runtime.
+smol-cloud = { path = "../../crates/smol-cloud", features = ["blocking"] }
+
+[dev-dependencies]
+# The mock control plane in tests/ asserts on the exact JSON the SDK sends.
+serde_json = "1"

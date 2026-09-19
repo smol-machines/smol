@@ -6,6 +6,10 @@ name: SDK CI
 #             via a dynamic require, so `tsc --noEmit` needs no built binary).
 #   * Python: the pure-stdlib unit + cloud-mock test scripts (the native
 #             extension is imported lazily, only when a local Machine is created).
+#   * Rust:   fmt, clippy and the unit tests, for the SDK and the shared
+#             `smol-cloud` crate. These compile the engine but never boot a VM,
+#             and the cloud tests run against a loopback mock, so they need the
+#             monorepo layout but no hypervisor and no credentials.
 #
 # The native build and the local/live-cloud end-to-end tests need a microVM
 # (libkrun + hypervisor) AND the monorepo layout (the crates depend on the
@@ -48,6 +52,54 @@ jobs:
       - run: npm ci
       - name: Type-check (no native addon required)
         run: npx tsc -p tsconfig.json --noEmit
+
+  rust-check:
+    name: Rust · fmt, clippy, tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: monorepo/smol/sdk/rust
+    env:
+      CARGO_TARGET_DIR: ${{ github.workspace }}/.cargo-target/smol-rust
+      # The engine links libkrun even for a test binary that never boots a VM.
+      LIBKRUN_BUNDLE: ${{ github.workspace }}/monorepo/lib/linux-x86_64
+      SMOLVM_LIB_DIR: ${{ github.workspace }}/monorepo/lib/linux-x86_64
+    steps:
+      # The crate path-depends on the engine three levels up, so the SDK has to
+      # sit inside an engine checkout the way it does in the monorepo.
+      - name: Checkout smolvm engine
+        uses: actions/checkout@v4
+        with:
+          repository: smol-machines/smolvm
+          path: monorepo
+          lfs: true
+      - name: Checkout smol SDK
+        uses: actions/checkout@v4
+        with:
+          path: monorepo/smol
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - name: Install build dependencies
+        working-directory: ${{ github.workspace }}
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential libssl-dev pkg-config
+      - name: Format
+        run: cargo fmt --check
+      - name: Clippy
+        run: cargo clippy --all-targets -- -D warnings
+      - name: Unit tests
+        run: cargo test
+      # The shared control-plane crate is in the CLI workspace, not the SDK's,
+      # so it needs its own pass. --all-features reaches the blocking client.
+      - name: Shared cloud crate
+        working-directory: monorepo/smol/crates/smol-cloud
+        run: |
+          cargo fmt --check
+          cargo clippy --all-targets --all-features -- -D warnings
+          cargo test --all-features
 
   bun-local-e2e:
     name: Bun · local microVM
@@ -150,6 +202,8 @@ jobs:
         run: python tests/test_cloud_mock.py
       - name: Cloud start-failure surfacing (mock /v1 server; pure Python)
         run: python tests/test_cloud_start_error.py
+      - name: Cloud start timeout (pure Python)
+        run: python tests/test_cloud_start_timeout.py
       - name: Cloud no-port readiness probe (mock /v1 server; pure Python)
         run: python tests/test_cloud_ready_no_ports.py
       - name: Async-transport tests (AsyncMachine vs mock /v1; pure Python)

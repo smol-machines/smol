@@ -12,6 +12,10 @@ pub const HTTP_CONNECT_TIMEOUT_SECS: u64 = 10;
 /// surfaces as an error instead of an indefinite hang.
 pub const HTTP_REQUEST_TIMEOUT_SECS: u64 = 30;
 
+/// Overall deadline for operations that may legitimately pull and unpack a
+/// large image before responding.
+pub const HTTP_LONG_OPERATION_TIMEOUT_SECS: u64 = 30 * 60;
+
 /// Build a reqwest client preconfigured with connect + request timeouts.
 /// All cloud- and auth-facing HTTP should go through this so no call can
 /// hang indefinitely. The returned builder lets callers add headers before
