@@ -16,13 +16,14 @@ keywords = ["microvm", "sandbox", "virtualization", "vm"]
 categories = ["virtualization", "api-bindings"]
 
 [dependencies]
-# The smolvm engine lives in the parent repo, three levels up.
-smolvm = { path = "../../../" }
-smolvm-protocol = { path = "../../../crates/smolvm-protocol" }
+# No engine dependency on purpose: crates.io resolves every dependency, so
+# linking the unpublished engine crate would make this SDK unpublishable. Local
+# machines are driven through an installed `smolvm` binary instead.
 # The cloud transport. Shared with the `smol` CLI so the two clients of the
 # control plane cannot drift. Blocking, because the whole SDK is: the caller
 # owns the choice of runtime.
-smol-cloud = { path = "../../crates/smol-cloud", features = ["blocking"] }
+smol-cloud = { path = "../../crates/smol-cloud", version = "1.9.0", features = ["blocking"] }
+serde_json = "1"
 
 [dev-dependencies]
 # The mock control plane in tests/ asserts on the exact JSON the SDK sends.

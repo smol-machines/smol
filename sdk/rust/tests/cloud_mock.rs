@@ -763,7 +763,10 @@ fn deleting_with_usage_takes_the_final_settled_reading() {
 
 #[test]
 fn a_local_machine_has_no_final_bill_to_settle() {
-    let error = Machine::attach("local-only")
+    let Ok(local) = Machine::attach("local-only") else {
+        return;
+    };
+    let error = local
         .delete_with_usage()
         .expect_err("nothing meters your own hardware");
     assert_eq!(error.kind(), ErrorKind::NotSupported);

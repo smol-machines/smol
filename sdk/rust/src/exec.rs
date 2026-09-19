@@ -1,10 +1,7 @@
 //! Running commands in a machine.
 
-use std::sync::mpsc::{self, Receiver};
-use std::thread;
+use std::sync::mpsc::Receiver;
 use std::time::Duration;
-
-use smolvm::agent::ExecEvent as AgentExecEvent;
 
 /// Environment, working directory and timeout for one command.
 #[derive(Debug, Clone, Default)]
@@ -39,10 +36,6 @@ impl ExecOptions {
     pub fn timeout(mut self, timeout: Duration) -> Self {
         self.timeout = Some(timeout);
         self
-    }
-
-    pub(crate) fn split(self) -> (Vec<(String, String)>, Option<String>, Option<Duration>) {
-        (self.env, self.workdir, self.timeout)
     }
 }
 
@@ -87,17 +80,6 @@ pub enum ExecEvent {
     Error(String),
 }
 
-impl From<AgentExecEvent> for ExecEvent {
-    fn from(event: AgentExecEvent) -> Self {
-        match event {
-            AgentExecEvent::Stdout(data) => Self::Stdout(data),
-            AgentExecEvent::Stderr(data) => Self::Stderr(data),
-            AgentExecEvent::Exit(code) => Self::Exit(code),
-            AgentExecEvent::Error(message) => Self::Error(message),
-        }
-    }
-}
-
 /// A command's output as it arrives.
 ///
 /// The engine drives the command on a worker thread and feeds a channel, so
@@ -110,30 +92,6 @@ pub struct ExecStream {
 }
 
 impl ExecStream {
-    /// Drive the embedded engine's streaming exec on a worker thread.
-    pub(crate) fn spawn_local(
-        name: String,
-        command: Vec<String>,
-        env: Vec<(String, String)>,
-        workdir: Option<String>,
-        timeout: Option<Duration>,
-    ) -> Self {
-        let (tx, rx) = mpsc::channel();
-        let error_tx = tx.clone();
-        thread::spawn(move || {
-            let result = smolvm::embedded::runtime().and_then(|runtime| {
-                runtime.exec_streaming_with(&name, command, env, workdir, timeout, |event| {
-                    let _ = tx.send(event.into());
-                })
-            });
-            if let Err(error) = result {
-                let _ = error_tx.send(ExecEvent::Error(error.to_string()));
-            }
-            // Both senders drop here, which ends the iterator.
-        });
-        Self { rx }
-    }
-
     /// Wrap a channel some other producer is feeding.
     pub(crate) fn from_receiver(rx: Receiver<ExecEvent>) -> Self {
         Self { rx }

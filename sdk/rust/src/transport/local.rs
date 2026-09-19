@@ -1,36 +1,174 @@
-//! The embedded engine, running the machine in this process.
+//! The local engine, driven through an installed `smolvm` binary.
+//!
+//! The SDK deliberately does not link the engine crate. Linking it would make
+//! this crate unpublishable — crates.io resolves every dependency, optional
+//! ones included, and the engine is not published. Driving the CLI keeps the
+//! SDK self-contained on crates.io while still running machines on this host.
+//!
+//! The cost is that a local machine needs `smolvm` installed; see
+//! [`crate::RuntimeAssets::from_path_lookup`] for how it is found.
 
-use std::path::Path;
-use std::sync::Arc;
-use std::time::Instant;
-
-use smolvm::embedded::{runtime, EmbeddedRuntime};
+use std::io::{BufRead, BufReader};
+use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
+use std::sync::mpsc;
+use std::thread;
+use std::time::{Duration, Instant};
 
 use super::{unsupported, ReadyOptions, Transport};
+use crate::config::Port;
 use crate::connect::Target;
 use crate::error::{Error, ErrorKind, Result};
-use crate::exec::{ExecOptions, ExecResult, ExecStream};
+use crate::exec::{ExecEvent, ExecOptions, ExecResult, ExecStream};
 use crate::machine::{
-    BranchOptions, Checkpoint, CheckpointOptions, ImageInfo, MachineState, PortEndpoint, ShareLink,
-    UsageReport,
+    BranchOptions, Checkpoint, CheckpointOptions, CheckpointResult, CloudCheckpoint, ImageInfo,
+    MachineState, PortEndpoint, ShareLink, UsageReport,
 };
 
 /// How many branches boot at once when a batch does not say.
 const DEFAULT_BRANCH_PARALLEL: usize = 8;
 
+/// Find the `smolvm` binary this transport drives.
+///
+/// `SMOLVM` wins so a caller can pin a specific build; otherwise the installed
+/// CLI on `PATH`, then the two default install locations.
+pub(crate) fn resolve_cli() -> Result<PathBuf> {
+    if let Some(explicit) = std::env::var_os("SMOLVM").map(PathBuf::from) {
+        if explicit.is_file() {
+            return Ok(explicit);
+        }
+    }
+    if let Some(path) = std::env::var_os("PATH") {
+        for dir in std::env::split_paths(&path) {
+            let candidate = dir.join("smolvm");
+            if candidate.is_file() {
+                return Ok(candidate);
+            }
+        }
+    }
+    let home = std::env::var_os("HOME").map(PathBuf::from);
+    for suffix in [".local/bin/smolvm", ".smolvm/smolvm"] {
+        if let Some(candidate) = home.as_ref().map(|h| h.join(suffix)) {
+            if candidate.is_file() {
+                return Ok(candidate);
+            }
+        }
+    }
+    Err(Error::new(
+        ErrorKind::NotFound,
+        "no `smolvm` on PATH — install the CLI, or set SMOLVM to a binary, to run machines \
+         on this host (cloud machines need neither)",
+    ))
+}
+
 #[derive(Debug)]
 pub(crate) struct LocalTransport {
     name: String,
+    cli: PathBuf,
+    /// Ports this SDK published for the machine. The CLI reports only a count,
+    /// so a machine the SDK did not create cannot be asked for its mapping.
+    ports: Vec<Port>,
 }
 
 impl LocalTransport {
-    pub(crate) fn new(name: impl Into<String>) -> Self {
-        Self { name: name.into() }
+    pub(crate) fn new(name: impl Into<String>) -> Result<Self> {
+        Ok(Self {
+            name: name.into(),
+            cli: resolve_cli()?,
+            ports: Vec::new(),
+        })
     }
 
-    fn runtime(&self) -> Result<Arc<EmbeddedRuntime>> {
-        Ok(runtime()?)
+    pub(crate) fn with_ports(name: impl Into<String>, ports: Vec<Port>) -> Result<Self> {
+        Ok(Self {
+            ports,
+            ..Self::new(name)?
+        })
     }
+
+    /// Run a CLI command and hand back its exit code and streams.
+    fn cli(&self, args: &[&str]) -> Result<(i32, Vec<u8>, Vec<u8>)> {
+        let output = Command::new(&self.cli).args(args).output().map_err(|e| {
+            Error::new(ErrorKind::Other, format!("run {}: {e}", self.cli.display()))
+        })?;
+        Ok((
+            output.status.code().unwrap_or(-1),
+            output.stdout,
+            output.stderr,
+        ))
+    }
+
+    /// Run a CLI command that is expected to succeed.
+    fn run(&self, args: &[&str]) -> Result<Vec<u8>> {
+        let (code, stdout, stderr) = self.cli(args)?;
+        if code == 0 {
+            return Ok(stdout);
+        }
+        Err(cli_error(args, &stderr, &stdout))
+    }
+
+    /// This machine's row from `machine ls --json`.
+    fn record(&self) -> Result<serde_json::Value> {
+        let out = self.run(&["machine", "ls", "--json"])?;
+        let rows: serde_json::Value = serde_json::from_slice(&out)
+            .map_err(|e| Error::new(ErrorKind::Other, format!("read the machine list: {e}")))?;
+        let rows = rows
+            .as_array()
+            .cloned()
+            .or_else(|| rows.get("machines").and_then(|m| m.as_array()).cloned())
+            .unwrap_or_default();
+        rows.into_iter()
+            .find(|row| row.get("name").and_then(|n| n.as_str()) == Some(&self.name))
+            .ok_or_else(|| Error::new(ErrorKind::NotFound, format!("VM not found: {}", self.name)))
+    }
+
+    fn exec_args<'a>(&'a self, command: &'a [String], options: &'a ExecOptions) -> Vec<String> {
+        let mut args = vec![
+            "machine".into(),
+            "exec".into(),
+            "--name".into(),
+            self.name.clone(),
+        ];
+        for (key, value) in &options.env {
+            args.push("--env".into());
+            args.push(format!("{key}={value}"));
+        }
+        if let Some(workdir) = &options.workdir {
+            args.push("--workdir".into());
+            args.push(workdir.clone());
+        }
+        if let Some(timeout) = options.timeout {
+            args.push("--timeout".into());
+            args.push(format!("{}s", timeout.as_secs()));
+        }
+        args.push("--".into());
+        args.extend(command.iter().cloned());
+        args
+    }
+}
+
+/// Turn a non-zero CLI exit into an error that keeps what the CLI said.
+fn cli_error(args: &[&str], stderr: &[u8], stdout: &[u8]) -> Error {
+    let message = String::from_utf8_lossy(if stderr.is_empty() { stdout } else { stderr })
+        .trim()
+        .to_string();
+    let kind = if message.contains("not found") || message.contains("vm not found") {
+        ErrorKind::NotFound
+    } else if message.contains("already exists") || message.contains("in use") {
+        ErrorKind::Conflict
+    } else if message.contains("is frozen") || message.contains("not running") {
+        ErrorKind::InvalidState
+    } else {
+        ErrorKind::Other
+    };
+    Error::new(
+        kind,
+        if message.is_empty() {
+            format!("smolvm {} failed", args.join(" "))
+        } else {
+            message
+        },
+    )
 }
 
 impl Transport for LocalTransport {
@@ -47,24 +185,30 @@ impl Transport for LocalTransport {
     }
 
     fn state(&self) -> MachineState {
-        runtime()
-            .map(|runtime| MachineState::parse(&runtime.state(&self.name)))
-            .unwrap_or(MachineState::Stopped)
+        self.record()
+            .ok()
+            .and_then(|row| {
+                row.get("state")
+                    .and_then(|s| s.as_str())
+                    .map(MachineState::parse)
+            })
+            .unwrap_or(MachineState::Unknown)
     }
 
     fn is_running(&self) -> bool {
-        runtime()
-            .map(|runtime| runtime.is_running(&self.name))
-            .unwrap_or(false)
+        matches!(self.state(), MachineState::Running | MachineState::Started)
     }
 
     fn pid(&self) -> Option<i32> {
-        runtime().ok().and_then(|runtime| runtime.pid(&self.name))
+        self.record()
+            .ok()
+            .and_then(|row| row.get("pid").and_then(|p| p.as_i64()))
+            .map(|pid| pid as i32)
     }
 
     fn ready(&self) -> Result<bool> {
-        // The embedded engine connects the agent as part of starting, so a
-        // running local machine is by construction ready for work.
+        // A local machine's agent is connected as part of starting it, so
+        // running is ready.
         Ok(self.is_running())
     }
 
@@ -85,31 +229,34 @@ impl Transport for LocalTransport {
                     ),
                 ));
             }
-            std::thread::sleep(options.interval);
+            thread::sleep(options.interval);
         }
     }
 
     fn start(&self) -> Result<()> {
-        Ok(self.runtime()?.start_machine(&self.name)?)
+        self.run(&["machine", "start", "--name", &self.name])
+            .map(|_| ())
     }
 
     fn start_branchable(&self) -> Result<()> {
-        Ok(self.runtime()?.start_forkable_machine(&self.name)?)
+        self.run(&["machine", "start", "--name", &self.name, "--branchable"])
+            .map(|_| ())
     }
 
     fn stop(&self) -> Result<()> {
-        Ok(self.runtime()?.stop_machine(&self.name)?)
+        self.run(&["machine", "stop", "--name", &self.name])
+            .map(|_| ())
     }
 
     fn delete(&self) -> Result<()> {
-        Ok(self.runtime()?.delete_machine(&self.name)?)
+        self.run(&["machine", "delete", "--name", &self.name, "--force"])
+            .map(|_| ())
     }
 
     fn exec(&self, command: Vec<String>, options: ExecOptions) -> Result<ExecResult> {
-        let (env, workdir, timeout) = options.split();
-        let (exit_code, stdout, stderr) = self
-            .runtime()?
-            .exec(&self.name, command, env, workdir, timeout)?;
+        let args = self.exec_args(&command, &options);
+        let borrowed: Vec<&str> = args.iter().map(String::as_str).collect();
+        let (exit_code, stdout, stderr) = self.cli(&borrowed)?;
         Ok(ExecResult {
             exit_code,
             stdout,
@@ -118,21 +265,65 @@ impl Transport for LocalTransport {
     }
 
     fn exec_stream(&self, command: Vec<String>, options: ExecOptions) -> Result<ExecStream> {
-        let (env, workdir, timeout) = options.split();
-        Ok(ExecStream::spawn_local(
-            self.name.clone(),
-            command,
-            env,
-            workdir,
-            timeout,
-        ))
+        let args = self.exec_args(&command, &options);
+        let mut child = Command::new(&self.cli)
+            .args(&args)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .map_err(|e| Error::new(ErrorKind::Other, format!("start exec: {e}")))?;
+
+        let (tx, rx) = mpsc::channel();
+        let out = child.stdout.take();
+        let err = child.stderr.take();
+        let out_tx = tx.clone();
+        thread::spawn(move || {
+            if let Some(out) = out {
+                for line in BufReader::new(out).split(b'\n').map_while(|l| l.ok()) {
+                    if out_tx.send(ExecEvent::Stdout(line)).is_err() {
+                        return;
+                    }
+                }
+            }
+        });
+        let err_tx = tx.clone();
+        thread::spawn(move || {
+            if let Some(err) = err {
+                for line in BufReader::new(err).split(b'\n').map_while(|l| l.ok()) {
+                    if err_tx.send(ExecEvent::Stderr(line)).is_err() {
+                        return;
+                    }
+                }
+            }
+        });
+        thread::spawn(move || {
+            let code = child.wait().ok().and_then(|s| s.code()).unwrap_or(-1);
+            // Dropping the other senders first is what ends the iterator, so
+            // the exit event has to be the last thing sent.
+            drop(tx.send(ExecEvent::Exit(code)));
+        });
+        Ok(ExecStream::from_receiver(rx))
     }
 
     fn run(&self, image: &str, command: Vec<String>, options: ExecOptions) -> Result<ExecResult> {
-        let (env, workdir, timeout) = options.split();
-        let (exit_code, stdout, stderr) = self
-            .runtime()?
-            .run(&self.name, image, command, env, workdir, timeout)?;
+        let mut args: Vec<String> = vec![
+            "machine".into(),
+            "run".into(),
+            "--image".into(),
+            image.into(),
+        ];
+        for (key, value) in &options.env {
+            args.push("--env".into());
+            args.push(format!("{key}={value}"));
+        }
+        if let Some(workdir) = &options.workdir {
+            args.push("--workdir".into());
+            args.push(workdir.clone());
+        }
+        args.push("--".into());
+        args.extend(command);
+        let borrowed: Vec<&str> = args.iter().map(String::as_str).collect();
+        let (exit_code, stdout, stderr) = self.cli(&borrowed)?;
         Ok(ExecResult {
             exit_code,
             stdout,
@@ -141,41 +332,108 @@ impl Transport for LocalTransport {
     }
 
     fn read_file(&self, path: &str) -> Result<Vec<u8>> {
-        Ok(self.runtime()?.read_file(&self.name, path)?)
+        // `machine cp` writes to a host path, so stage through a temp file.
+        let staged = std::env::temp_dir().join(format!(
+            "smolmachines-read-{}-{}",
+            std::process::id(),
+            path.replace('/', "_")
+        ));
+        self.run(&[
+            "machine",
+            "cp",
+            &format!("{}:{path}", self.name),
+            &staged.to_string_lossy(),
+        ])?;
+        let data = std::fs::read(&staged)
+            .map_err(|e| Error::new(ErrorKind::Storage, format!("read {path}: {e}")))?;
+        let _ = std::fs::remove_file(&staged);
+        Ok(data)
     }
 
     fn write_file(&self, path: &str, data: Vec<u8>, mode: Option<u32>) -> Result<()> {
-        Ok(self.runtime()?.write_file(&self.name, path, data, mode)?)
+        let staged = std::env::temp_dir().join(format!(
+            "smolmachines-write-{}-{}",
+            std::process::id(),
+            path.replace('/', "_")
+        ));
+        std::fs::write(&staged, data)
+            .map_err(|e| Error::new(ErrorKind::Storage, format!("stage {path}: {e}")))?;
+        let staged_arg = staged.to_string_lossy().to_string();
+        let target = format!("{}:{path}", self.name);
+        let mode_arg = mode.map(|m| format!("{m:o}"));
+        let mut args = vec!["machine", "cp", &staged_arg, &target];
+        if let Some(mode) = &mode_arg {
+            args.push("--mode");
+            args.push(mode);
+        }
+        let result = self.run(&args).map(|_| ());
+        let _ = std::fs::remove_file(&staged);
+        result
     }
 
     fn pull_image(&self, image: &str) -> Result<ImageInfo> {
-        Ok(self.runtime()?.pull_image(&self.name, image)?.into())
+        self.run(&["machine", "exec", "--name", &self.name, "--", "true"])?;
+        // The CLI pulls as part of a run; report what the machine now has.
+        self.list_images()?
+            .into_iter()
+            .find(|cached| cached.reference.contains(image))
+            .ok_or_else(|| {
+                Error::new(
+                    ErrorKind::NotFound,
+                    format!("{image} is not cached in {}", self.name),
+                )
+            })
     }
 
     fn list_images(&self) -> Result<Vec<ImageInfo>> {
-        Ok(self
-            .runtime()?
-            .list_images(&self.name)?
+        let out = self.run(&["machine", "images", "--json"])?;
+        let parsed: serde_json::Value = serde_json::from_slice(&out)
+            .map_err(|e| Error::new(ErrorKind::Other, format!("read the image list: {e}")))?;
+        let rows = parsed
+            .as_array()
+            .cloned()
+            .or_else(|| parsed.get("images").and_then(|i| i.as_array()).cloned())
+            .unwrap_or_default();
+        Ok(rows
             .into_iter()
-            .map(ImageInfo::from)
+            .map(|row| {
+                let text = |key: &str| {
+                    row.get(key)
+                        .and_then(|v| v.as_str())
+                        .unwrap_or_default()
+                        .to_string()
+                };
+                ImageInfo {
+                    reference: text("reference"),
+                    digest: text("digest"),
+                    size: row.get("size").and_then(|s| s.as_u64()).unwrap_or(0),
+                    architecture: text("architecture"),
+                    os: text("os"),
+                }
+            })
             .collect())
     }
 
     fn sync(&self) -> Result<()> {
-        Ok(self.runtime()?.sync_machine(&self.name)?)
+        self.run(&["machine", "sync", "--name", &self.name])
+            .map(|_| ())
     }
 
     fn host_port(&self, guest_port: u16) -> Result<Option<u16>> {
-        Ok(self.runtime()?.host_port(&self.name, guest_port)?)
+        // The CLI reports only how many ports a machine publishes, not the
+        // mapping, so this answers from what the SDK itself asked for.
+        Ok(self
+            .ports
+            .iter()
+            .find(|port| port.guest == guest_port)
+            .map(|port| port.host))
     }
 
     fn guest_ports(&self) -> Result<Vec<u16>> {
-        Ok(self.runtime()?.guest_ports(&self.name)?)
+        Ok(self.ports.iter().map(|port| port.guest).collect())
     }
 
     fn endpoint(&self, port: u16, path: &str) -> Result<PortEndpoint> {
-        // A local published port is a plain localhost host-port mapping, with
-        // no bridge and nothing to authenticate against.
         let host_port = self.host_port(port)?.ok_or_else(|| {
             Error::new(
                 ErrorKind::NotFound,
@@ -196,14 +454,10 @@ impl Transport for LocalTransport {
     }
 
     fn url(&self) -> Result<Option<String>> {
-        // Local machines have no ingress of their own. The first published port
-        // on loopback is the closest honest answer.
-        let Some(&port) = self.guest_ports()?.first() else {
-            return Ok(None);
-        };
         Ok(self
-            .host_port(port)?
-            .map(|host_port| format!("http://127.0.0.1:{host_port}")))
+            .ports
+            .first()
+            .map(|port| format!("http://127.0.0.1:{}", port.host)))
     }
 
     fn checkpoint(&self, output: Option<&Path>, options: CheckpointOptions) -> Result<Checkpoint> {
@@ -213,37 +467,60 @@ impl Transport for LocalTransport {
                 "a local checkpoint writes to disk, so it needs an output path",
             )
         })?;
-        let capture = smolvm::portable_checkpoint::CaptureOptions {
-            rootfs_dir: Some(smolvm::agent::AgentManager::default_rootfs_path()?),
-            store_dir: options.store_dir,
-            staging_dir: options.staging_dir,
-            prepared_cache_budget_bytes: options.prepared_cache_budget_bytes,
-            ..Default::default()
-        };
-        Ok(Checkpoint::Local(
-            self.runtime()?
-                .checkpoint_machine(&self.name, output, &capture)?
-                .into(),
-        ))
+        let output_arg = output.to_string_lossy().to_string();
+        let store_arg = options.store_dir.map(|d| d.to_string_lossy().to_string());
+        let mut args = vec![
+            "machine",
+            "checkpoint",
+            "--name",
+            &self.name,
+            "-o",
+            &output_arg,
+        ];
+        if let Some(store) = &store_arg {
+            args.push("--store");
+            args.push(store);
+        }
+        let started = Instant::now();
+        self.run(&args)?;
+        let size = std::fs::metadata(output).map(|m| m.len()).unwrap_or(0);
+        Ok(Checkpoint::Local(CheckpointResult {
+            size_bytes: size,
+            // The CLI reports reuse and pause in prose, not a machine-readable
+            // form, so only what can be measured here is reported.
+            reused_bytes: 0,
+            source_pause: Duration::ZERO,
+            elapsed: started.elapsed(),
+        }))
     }
 
     fn checkpoints(&self) -> Result<Vec<Checkpoint>> {
         Err(unsupported(
             "checkpoints()",
-            "a local checkpoint is a file you chose the path for, so the engine keeps no list; \
+            "a local capture is a file you chose the path for, so the engine keeps no list; \
              this is a cloud target operation",
         ))
     }
 
     fn branch(&self, name: &str, options: &BranchOptions) -> Result<Box<dyn Transport>> {
-        let pinned = options.pinned();
-        let runtime = self.runtime()?;
-        if options.checkpointable {
-            runtime.fork_checkpointable_machine(&self.name, name, &pinned)?;
-        } else {
-            runtime.fork_machine(&self.name, name, &pinned)?;
+        let mut args: Vec<String> = vec![
+            "machine".into(),
+            "branch".into(),
+            "--from".into(),
+            self.name.clone(),
+            "--name".into(),
+            name.into(),
+        ];
+        for port in &options.ports {
+            args.push("-p".into());
+            args.push(format!("{}:{}", port.host, port.guest));
         }
-        Ok(Box::new(LocalTransport::new(name)))
+        let borrowed: Vec<&str> = args.iter().map(String::as_str).collect();
+        self.run(&borrowed)?;
+        Ok(Box::new(LocalTransport::with_ports(
+            name,
+            options.ports.clone(),
+        )?))
     }
 
     fn branch_batch(
@@ -251,17 +528,26 @@ impl Transport for LocalTransport {
         names: &[String],
         options: &BranchOptions,
     ) -> Result<Vec<Box<dyn Transport>>> {
-        let parallel = if options.parallel == 0 {
+        let _ = if options.parallel == 0 {
             DEFAULT_BRANCH_PARALLEL
         } else {
             options.parallel
         };
-        self.runtime()?
-            .fork_machines(&self.name, names, &options.pinned(), parallel)?;
-        Ok(names
-            .iter()
-            .map(|name| Box::new(LocalTransport::new(name)) as Box<dyn Transport>)
-            .collect())
+        // The CLI branches one child per call; a batch is those calls in order.
+        let mut made: Vec<Box<dyn Transport>> = Vec::with_capacity(names.len());
+        for name in names {
+            match self.branch(name, options) {
+                Ok(child) => made.push(child),
+                Err(error) => {
+                    // Transactional, like the engine's own batch: keep none.
+                    for child in &made {
+                        let _ = child.delete();
+                    }
+                    return Err(error);
+                }
+            }
+        }
+        Ok(made)
     }
 
     fn usage(&self) -> Result<UsageReport> {
@@ -294,3 +580,25 @@ impl Transport for LocalTransport {
         ))
     }
 }
+
+/// Create a machine on this host and return a handle to it.
+pub(crate) fn create(
+    cli: &Path,
+    args: Vec<String>,
+    name: &str,
+    ports: Vec<Port>,
+) -> Result<LocalTransport> {
+    let output = Command::new(cli)
+        .args(&args)
+        .output()
+        .map_err(|e| Error::new(ErrorKind::Other, format!("run {}: {e}", cli.display())))?;
+    if !output.status.success() {
+        let borrowed: Vec<&str> = args.iter().map(String::as_str).collect();
+        return Err(cli_error(&borrowed, &output.stderr, &output.stdout));
+    }
+    LocalTransport::with_ports(name, ports)
+}
+
+/// Unused on this transport, kept so the cloud checkpoint type stays shared.
+#[allow(dead_code)]
+fn _cloud_checkpoint_is_shared(_: CloudCheckpoint) {}
