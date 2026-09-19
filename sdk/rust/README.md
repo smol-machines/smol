@@ -93,14 +93,18 @@ object on each target: locally a file you chose the path for, whose interesting
 part is what it cost; on the cloud a durable object the control plane holds,
 whose interesting part is how to get it back.
 
-## The boot helper
+## The local engine
 
-*Local target only — a cloud machine boots on someone else's node.*
+*Local target only — a cloud machine runs on someone else's node.*
 
-To boot a VM the engine re-executes a binary that knows how to be a VM. In a
-CLI that binary is the CLI itself; in an embedded process it is your program,
-which does not, so the boot fails with a bare non-zero exit. Point the engine
-at a real helper once, before the first machine:
+Local machines are run by an installed `smolvm`, not by linking the engine into
+your process. That is deliberate: crates.io resolves every dependency, and the
+engine crate is not published, so linking it would make this SDK impossible to
+publish. Driving the CLI keeps `cargo add smolmachines` working for everyone
+and still runs real microVMs on your host.
+
+If you ship your own engine assets, point them out once before the first
+machine:
 
 ```rust
 use smolmachines::{configure_runtime_assets, RuntimeAssets};
@@ -116,17 +120,20 @@ A program that ships its own engine names the paths itself. See
 
 ## Install
 
-The crate path-depends on the `smolvm` engine checked out beside `smol/`, the
-same layout the Node and Python SDKs use:
-
-```toml
-[dependencies]
-smolmachines = { path = "../smol/sdk/rust" }
+```sh
+cargo add smolmachines
 ```
 
-The control-plane wire types and client live in [`smol-cloud`](../../crates/smol-cloud),
-shared with the `smol` CLI so the two clients of one API cannot drift. It is
-re-exported as `smolmachines::smol_cloud` if you need the raw API.
+The crate is self-contained: it links no engine and carries no binaries, so it
+builds anywhere Rust does. **Cloud machines need nothing else.** Local machines
+are driven through an installed `smolvm` binary, found via `SMOLVM`, then
+`PATH`, then the usual install locations — so install the CLI if you want to
+run machines on your own host.
+
+The control-plane wire types and client live in
+[`smol-cloud`](https://crates.io/crates/smol-cloud), shared with the `smol` CLI
+so the two clients of one API cannot drift. It is re-exported as
+`smolmachines::smol_cloud` if you need the raw API.
 
 ## Branching
 

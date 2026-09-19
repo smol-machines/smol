@@ -87,18 +87,6 @@ pub struct ImageInfo {
     pub os: String,
 }
 
-impl From<smolvm_protocol::ImageInfo> for ImageInfo {
-    fn from(info: smolvm_protocol::ImageInfo) -> Self {
-        Self {
-            reference: info.reference,
-            digest: info.digest,
-            size: info.size,
-            architecture: info.architecture,
-            os: info.os,
-        }
-    }
-}
-
 /// How to reach a published guest port.
 #[derive(Debug, Clone)]
 pub struct PortEndpoint {
@@ -224,17 +212,6 @@ pub struct CheckpointResult {
     pub elapsed: std::time::Duration,
 }
 
-impl From<smolvm::portable_checkpoint::CaptureResult> for CheckpointResult {
-    fn from(result: smolvm::portable_checkpoint::CaptureResult) -> Self {
-        Self {
-            size_bytes: result.size_bytes,
-            reused_bytes: result.reused_bytes,
-            source_pause: result.source_pause,
-            elapsed: result.elapsed,
-        }
-    }
-}
-
 /// A capture the control plane is holding.
 #[derive(Debug, Clone)]
 pub struct CloudCheckpoint {
@@ -329,10 +306,6 @@ impl BranchOptions {
         self.parallel = parallel;
         self
     }
-
-    pub(crate) fn pinned(&self) -> Vec<(u16, u16)> {
-        self.ports.iter().map(|p| (p.host, p.guest)).collect()
-    }
 }
 
 /// A handle to one machine, wherever it runs.
@@ -371,14 +344,11 @@ impl Machine {
         match connect.target() {
             Target::Local => {
                 let name = config.name.clone();
-                let request = config.into_request()?;
-                smolvm::embedded::runtime()?.create_machine_with_workload(
-                    request.spec,
-                    request.env,
-                    request.workdir,
-                    request.user,
-                )?;
-                Ok(Self::from_transport(Box::new(LocalTransport::new(name))))
+                let cli = crate::transport::local::resolve_cli()?;
+                let (args, ports) = config.into_local_args()?;
+                Ok(Self::from_transport(Box::new(
+                    crate::transport::local::create(&cli, args, &name, ports)?,
+                )))
             }
             Target::Cloud => {
                 let branchable = config.branchable;
@@ -404,8 +374,12 @@ impl Machine {
         let name = name.into();
         match connect.target() {
             Target::Local => {
-                smolvm::embedded::runtime()?.connect_or_start_machine(&name)?;
-                Ok(Self::from_transport(Box::new(LocalTransport::new(name))))
+                let transport = LocalTransport::new(&name)?;
+                // Connecting borrows a machine: start it if it is not already up.
+                if !transport.is_running() {
+                    transport.start()?;
+                }
+                Ok(Self::from_transport(Box::new(transport)))
             }
             Target::Cloud => {
                 let client = connect.client()?;
@@ -420,15 +394,25 @@ impl Machine {
     ///
     /// Use this to inspect or delete a stopped machine, or to get a handle for
     /// one you know is already running.
-    pub fn attach(name: impl Into<String>) -> Self {
-        Self::from_transport(Box::new(LocalTransport::new(name)))
+    pub fn attach(name: impl Into<String>) -> Result<Self> {
+        Ok(Self::from_transport(Box::new(LocalTransport::new(name)?)))
     }
 
     /// Create a stopped local machine from a portable checkpoint on disk.
     pub fn restore_checkpoint(name: impl Into<String>, artifact: impl AsRef<Path>) -> Result<Self> {
         let name = name.into();
-        smolvm::embedded::runtime()?.restore_checkpoint_machine(&name, artifact.as_ref())?;
-        Ok(Self::attach(name))
+        let cli = crate::transport::local::resolve_cli()?;
+        let args = vec![
+            "machine".to_string(),
+            "create".to_string(),
+            "--name".to_string(),
+            name.clone(),
+            "--from".to_string(),
+            artifact.as_ref().to_string_lossy().to_string(),
+        ];
+        Ok(Self::from_transport(Box::new(
+            crate::transport::local::create(&cli, args, &name, Vec::new())?,
+        )))
     }
 
     /// Create a machine from a capture the control plane is holding.
@@ -801,15 +785,16 @@ mod tests {
     fn a_batch_branch_without_a_width_still_boots_in_waves() {
         assert_eq!(BranchOptions::new().parallel, 0);
         assert_eq!(BranchOptions::new().parallel(4).parallel, 4);
-        assert_eq!(
-            BranchOptions::new().port(Port::new(9000, 80)).pinned(),
-            vec![(9000, 80)]
-        );
+        let ports = BranchOptions::new().port(Port::new(9000, 80)).ports;
+        assert_eq!((ports[0].host, ports[0].guest), (9000, 80));
     }
 
     #[test]
     fn a_handle_never_owns_the_machine_it_names() {
-        let machine = Machine::attach("detached");
+        // Attaching only needs the CLI to exist; skip where it does not.
+        let Ok(machine) = Machine::attach("detached") else {
+            return;
+        };
         assert_eq!(machine.name(), "detached");
         assert_eq!(machine.target(), Target::Local);
         assert_eq!(machine.clone().name(), "detached");

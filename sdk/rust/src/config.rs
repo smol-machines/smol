@@ -4,11 +4,6 @@
 //! cases stay one chained expression and complex ones can still be assembled
 //! field by field and reused.
 
-use smolvm::agent::{HostMount, VmResources};
-use smolvm::data::network::PortMapping;
-use smolvm::data::resources::{DEFAULT_MICROVM_CPU_COUNT, DEFAULT_MICROVM_MEMORY_MIB};
-use smolvm::embedded::MachineSpec;
-
 use crate::error::{Error, ErrorKind, Result};
 
 /// A directory exposed inside the guest.
@@ -54,7 +49,12 @@ impl Mount {
     }
 
     fn is_remote(&self) -> bool {
-        smolvm::remote_volume::is_remote_source(&self.source)
+        // The engine treats these schemes as agent-fetched volumes.
+        let source = self.source.as_str();
+        source.starts_with("s3://")
+            || source.starts_with("gs://")
+            || source.starts_with("r2://")
+            || source.starts_with("rclone://")
     }
 }
 
@@ -98,22 +98,6 @@ pub struct Resources {
     pub gpu_vram_mib: Option<u32>,
     /// Expose CUDA via API remoting.
     pub cuda: Option<bool>,
-}
-
-impl Resources {
-    fn to_vm_resources(&self) -> VmResources {
-        VmResources {
-            cpus: self.cpus.unwrap_or(DEFAULT_MICROVM_CPU_COUNT),
-            memory_mib: self.memory_mib.unwrap_or(DEFAULT_MICROVM_MEMORY_MIB),
-            network: self.network.unwrap_or(false),
-            storage_gib: self.storage_gib,
-            overlay_gib: self.overlay_gib,
-            gpu: self.gpu.unwrap_or(false),
-            gpu_vram_mib: self.gpu_vram_mib,
-            cuda: self.cuda.unwrap_or(false),
-            ..Default::default()
-        }
-    }
 }
 
 /// Everything needed to create a machine.
@@ -180,10 +164,12 @@ impl MachineConfig {
         }
     }
 
-    /// Translate into the engine's spec, splitting host mounts from remote
-    /// volumes. The workload environment travels beside the spec because the
-    /// engine takes it as separate arguments.
-    pub(crate) fn into_request(self) -> Result<CreateRequest> {
+    /// Translate into `smolvm machine create` arguments.
+    ///
+    /// The SDK drives the installed CLI rather than linking the engine, so a
+    /// local machine is described in the same flags a person would type. That
+    /// is what keeps this crate publishable.
+    pub(crate) fn into_local_args(self) -> Result<(Vec<String>, Vec<Port>)> {
         if let Some(arch) = &self.arch {
             let host = canonical_arch(std::env::consts::ARCH);
             if canonical_arch(arch) != host {
@@ -196,72 +182,97 @@ impl MachineConfig {
                 ));
             }
         }
-        let (remote, local): (Vec<Mount>, Vec<Mount>) =
-            self.mounts.into_iter().partition(Mount::is_remote);
 
-        let mut mounts = Vec::with_capacity(local.len());
-        for mount in local {
+        let mut args: Vec<String> = vec![
+            "machine".into(),
+            "create".into(),
+            "--name".into(),
+            self.name.clone(),
+        ];
+        if let Some(image) = &self.image {
+            args.push("--image".into());
+            args.push(image.clone());
+        }
+        if let Some(cpus) = self.resources.cpus {
+            args.push("--cpus".into());
+            args.push(cpus.to_string());
+        }
+        if let Some(memory) = self.resources.memory_mib {
+            args.push("--mem".into());
+            args.push(memory.to_string());
+        }
+        if self.resources.network.unwrap_or(false) {
+            args.push("--net".into());
+        }
+        if let Some(storage) = self.resources.storage_gib {
+            args.push("--storage".into());
+            args.push(storage.to_string());
+        }
+        if self.resources.gpu.unwrap_or(false) {
+            args.push("--gpu".into());
+        }
+        for host in &self.allowed_hosts {
+            args.push("--allow-host".into());
+            args.push(host.clone());
+        }
+        for cidr in &self.allowed_cidrs {
+            args.push("--allow-cidr".into());
+            args.push(cidr.clone());
+        }
+        for port in &self.ports {
+            args.push("-p".into());
+            args.push(format!("{}:{}", port.host, port.guest));
+        }
+        for mount in &self.mounts {
+            if mount.is_remote() {
+                return Err(Error::new(
+                    ErrorKind::NotSupported,
+                    "an s3:// volume is a cloud feature; a local machine takes host directories",
+                ));
+            }
             if mount.read_only && mount.staged {
                 return Err(Error::new(
                     ErrorKind::Mount,
                     "a staged mount is writable and cannot also be read-only",
                 ));
             }
-            let mut host_mount = HostMount::new(&mount.source, &mount.target, mount.read_only)?;
-            host_mount.staged = mount.staged;
-            mounts.push(host_mount);
+            args.push(
+                if mount.staged {
+                    "--mount-staged"
+                } else {
+                    "--mount"
+                }
+                .into(),
+            );
+            args.push(format!(
+                "{}:{}{}",
+                mount.source,
+                mount.target,
+                if mount.read_only { ":ro" } else { "" }
+            ));
         }
-
-        let mut remote_volumes = Vec::with_capacity(remote.len());
-        for mount in remote {
-            if mount.staged {
-                return Err(Error::new(
-                    ErrorKind::Mount,
-                    "staged mode is only supported for local host directories",
-                ));
-            }
-            remote_volumes.push(smolvm::remote_volume::from_parts(
-                &mount.source,
-                &mount.target,
-                mount.read_only,
-            )?);
+        for (key, value) in &self.env {
+            args.push("--env".into());
+            args.push(format!("{key}={value}"));
         }
-
-        let spec = MachineSpec {
-            name: self.name,
-            mounts,
-            ports: self
-                .ports
-                .into_iter()
-                .map(|p| PortMapping::new(p.host, p.guest))
-                .collect(),
-            resources: self.resources.to_vm_resources(),
-            image: self.image,
-            command: self.command,
-            allowed_hosts: self.allowed_hosts,
-            persistent: self.persistent,
-            forkable: self.branchable,
-            labels: self.labels.into_iter().collect(),
-            runtime_managed: false,
-            remote_volumes,
-        };
-
-        Ok(CreateRequest {
-            spec,
-            env: self.env,
-            workdir: self.workdir,
-            user: self.user,
-        })
+        if let Some(workdir) = &self.workdir {
+            args.push("--workdir".into());
+            args.push(workdir.clone());
+        }
+        if let Some(user) = &self.user {
+            args.push("--user".into());
+            args.push(user.clone());
+        }
+        for (key, value) in &self.labels {
+            args.push("--label".into());
+            args.push(format!("{key}={value}"));
+        }
+        if !self.command.is_empty() {
+            args.push("--".into());
+            args.extend(self.command.iter().cloned());
+        }
+        Ok((args, self.ports))
     }
-}
-
-/// A config translated into what the engine's create call wants.
-#[derive(Debug)]
-pub(crate) struct CreateRequest {
-    pub(crate) spec: MachineSpec,
-    pub(crate) env: Vec<(String, String)>,
-    pub(crate) workdir: Option<String>,
-    pub(crate) user: Option<String>,
 }
 
 impl MachineConfig {
@@ -282,7 +293,7 @@ impl MachineConfig {
                 "a cloud machine needs an image; pass .image(\"…\") to the builder",
             )
         })?;
-        if !self.mounts.is_empty() {
+        if self.mounts.iter().any(|mount| !mount.is_remote()) {
             return Err(Error::new(
                 ErrorKind::NotSupported,
                 "host mounts are local-only and are not applied on the cloud target; \
@@ -331,9 +342,6 @@ impl MachineConfig {
                 .collect(),
             env: (!self.env.is_empty()).then(|| self.env.into_iter().collect()),
             workdir: self.workdir,
-            // The config already carries a command for the local target; not
-            // sending it here would silently boot the image's own entrypoint
-            // instead of the one that was asked for.
             command: self.command,
             auto_stop_seconds: self.auto_stop_seconds,
             ttl_seconds: self.ttl_seconds,
@@ -533,17 +541,15 @@ mod tests {
     use super::*;
 
     #[test]
-    fn an_s3_source_becomes_a_remote_volume_not_a_host_mount() {
-        let request = MachineConfig {
+    fn an_s3_source_is_refused_for_a_local_machine() {
+        let error = MachineConfig {
             name: "remote".into(),
             mounts: vec![Mount::new("s3://bucket/prefix", "/data")],
             ..Default::default()
         }
-        .into_request()
-        .expect("s3 sources bypass the host-directory check");
-
-        assert!(request.spec.mounts.is_empty());
-        assert_eq!(request.spec.remote_volumes.len(), 1);
+        .into_local_args()
+        .expect_err("an s3 volume is fetched by the guest agent, which is a cloud feature");
+        assert_eq!(error.kind(), ErrorKind::NotSupported);
     }
 
     #[test]
@@ -553,58 +559,42 @@ mod tests {
             mounts: vec![Mount::new("/tmp", "/data").staged().read_only()],
             ..Default::default()
         }
-        .into_request()
+        .into_local_args()
         .expect_err("staged writes back, so read-only is a contradiction");
 
         assert_eq!(error.kind(), ErrorKind::Mount);
     }
 
     #[test]
-    fn a_remote_source_cannot_be_staged() {
+    fn a_remote_source_is_a_cloud_feature_however_it_is_mounted() {
         let error = MachineConfig {
             name: "staged-remote".into(),
             mounts: vec![Mount::new("s3://bucket/prefix", "/data").staged()],
             ..Default::default()
         }
-        .into_request()
-        .expect_err("staging copies from a host directory, which s3 is not");
-
-        assert_eq!(error.kind(), ErrorKind::Mount);
-    }
-
-    #[test]
-    fn unset_resources_fall_back_to_the_engine_defaults() {
-        let resources = Resources::default().to_vm_resources();
-        assert_eq!(resources.cpus, DEFAULT_MICROVM_CPU_COUNT);
-        assert_eq!(resources.memory_mib, DEFAULT_MICROVM_MEMORY_MIB);
-        assert!(!resources.network);
+        .into_local_args()
+        .expect_err("the guest agent fetches s3 volumes only on the cloud target");
+        assert_eq!(error.kind(), ErrorKind::NotSupported);
     }
 
     #[test]
     fn the_builder_carries_every_field_into_the_spec() {
-        let request = built_config()
-            .into_request()
+        let (args, ports) = built_config()
+            .into_local_args()
             .expect("a config with no mounts always translates");
+        let joined = args.join(" ");
 
-        assert_eq!(request.spec.name, "built");
-        assert_eq!(request.spec.image.as_deref(), Some("alpine:latest"));
-        assert_eq!(request.spec.resources.cpus, 4);
-        assert_eq!(request.spec.resources.memory_mib, 2048);
-        assert_eq!(request.spec.ports.len(), 1);
-        assert!(request.spec.forkable);
-        assert!(request.spec.persistent);
-        assert_eq!(
-            request.spec.labels.get("team").map(String::as_str),
-            Some("qa")
-        );
-        assert_eq!(request.spec.allowed_hosts, vec!["example.com".to_string()]);
-        assert_eq!(
-            request.spec.command,
-            vec!["sleep".to_string(), "infinity".to_string()]
-        );
-        assert_eq!(request.env, vec![("KEY".to_string(), "value".to_string())]);
-        assert_eq!(request.workdir.as_deref(), Some("/work"));
-        assert_eq!(request.user.as_deref(), Some("nobody"));
+        assert!(joined.contains("--name built"), "{joined}");
+        assert!(joined.contains("--image alpine:latest"), "{joined}");
+        assert!(joined.contains("--cpus 4"), "{joined}");
+        assert!(joined.contains("--mem 2048"), "{joined}");
+        assert!(joined.contains("--env KEY=value"), "{joined}");
+        assert!(joined.contains("--workdir /work"), "{joined}");
+        assert!(joined.contains("--user nobody"), "{joined}");
+        assert!(joined.contains("--label team=qa"), "{joined}");
+        assert!(joined.contains("--allow-host example.com"), "{joined}");
+        assert!(joined.contains("-- sleep infinity"), "{joined}");
+        assert_eq!(ports.len(), 1);
     }
 
     fn built_config() -> MachineConfig {
