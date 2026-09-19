@@ -7,6 +7,31 @@ use smolmachines::{
     Mount, Port, Result, RuntimeAssets,
 };
 
+/// A command that ran but failed is a failure: `exec` reports the guest's exit
+/// code rather than erroring, so checking only Ok/Err hides a dead machine
+/// behind an empty string.
+fn ran(result: Result<smolmachines::ExecResult>) -> Result<String> {
+    let result = result?;
+    if result.success() {
+        Ok(result.stdout_utf8().trim().to_string())
+    } else {
+        Err(smolmachines::Error::new(
+            smolmachines::ErrorKind::CommandFailed,
+            format!("exit {}: {}", result.exit_code, result.stderr_utf8().trim()),
+        ))
+    }
+}
+
+/// An operation this target is expected to refuse.
+fn refused(outcome: Result<String>) -> Result<String> {
+    match outcome {
+        Err(e) if e.kind() == smolmachines::ErrorKind::NotSupported => {
+            Ok("correctly refused".into())
+        }
+        other => other.map(|_| "unexpectedly succeeded".into()),
+    }
+}
+
 fn step(name: &str, outcome: Result<String>) -> bool {
     match outcome {
         Ok(detail) => {
@@ -112,8 +137,7 @@ fn main() -> Result<()> {
         "write_file_with_mode",
         machine
             .write_file_with_mode("/tmp/run.sh", "#!/bin/sh\necho scripted\n", 0o755)
-            .and_then(|()| machine.exec(["/tmp/run.sh"]))
-            .map(|r| r.stdout_utf8().trim().to_string()),
+            .and_then(|()| ran(machine.exec(["/tmp/run.sh"]))),
     );
 
     check(
@@ -146,10 +170,8 @@ fn main() -> Result<()> {
     check("url", machine.url().map(|u| format!("{u:?}")));
 
     check(
-        "pull_image",
-        machine
-            .pull_image("alpine:3.20")
-            .map(|i| format!("{} {}", i.reference, i.architecture)),
+        "pull_image (no local verb)",
+        refused(machine.pull_image("alpine:3.20").map(|i| i.reference)),
     );
     check(
         "list_images",
