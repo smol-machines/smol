@@ -258,6 +258,7 @@ class PortableCheckpointInfo:
     arch: str
     created_at: str
     download_url: str
+    reused_bytes: Optional[int] = None
     path: Optional[str] = None
     source_pause_ms: Optional[float] = None
     elapsed_ms: Optional[float] = None

@@ -24,6 +24,8 @@ export interface MachineConfig {
   env?: Array<EnvVar>
   /** Working directory for the image workload. */
   workdir?: string
+  /** Run the workload as this user (image user name or `uid[:gid]`). */
+  user?: string
   /** Host directories to mount into the VM. */
   mounts?: Array<HostMountConfig>
   /** Port mappings from host to guest. */
@@ -119,8 +121,10 @@ export interface ImageInfo {
 }
 /** Result of writing a portable live checkpoint to local disk. */
 export interface LocalCheckpointResult {
-  /** Compressed artifact size in bytes. */
+  /** Compressed artifact bytes written by this capture. */
   sizeBytes: number
+  /** Logical bytes reused from earlier checkpoints in the store. */
+  reusedBytes: number
   /** Source pause at the RAM/disk consistency boundary, in milliseconds. */
   sourcePauseMs: number
   /** Complete capture and compression time, in milliseconds. */
@@ -156,6 +160,10 @@ export declare class NapiMachine {
   static connect(name: string): NapiMachine
   /** Create a stopped machine from a portable live checkpoint on disk. */
   static restoreCheckpoint(name: string, artifact: string): NapiMachine
+  /** Export a stored checkpoint directory as one portable checkpoint file. */
+  static exportCheckpoint(source: string, output: string): number
+  /** Remove objects that no retained checkpoint in a local store references. */
+  static pruneCheckpointStore(store: string): number
   /** Get the machine name. */
   get name(): string
   /**
@@ -185,7 +193,7 @@ export declare class NapiMachine {
    */
   startForkable(): Promise<void>
   /** Capture this running checkpointable machine to local disk. */
-  checkpoint(output: string): Promise<LocalCheckpointResult>
+  checkpoint(output: string, store?: string | undefined | null): Promise<LocalCheckpointResult>
   /**
    * Fork this running, forkable machine into a new clone via copy-on-write
    * live RAM + disks (same host). `ports` are `{ host, guest }` inbound

@@ -164,8 +164,10 @@ pub struct ImageInfo {
 #[napi(object)]
 #[derive(Debug, Clone)]
 pub struct LocalCheckpointResult {
-    /// Compressed artifact size in bytes.
+    /// Compressed artifact bytes written by this capture.
     pub size_bytes: f64,
+    /// Logical bytes reused from earlier checkpoints in the store.
+    pub reused_bytes: f64,
     /// Source pause at the RAM/disk consistency boundary, in milliseconds.
     pub source_pause_ms: f64,
     /// Complete capture and compression time, in milliseconds.

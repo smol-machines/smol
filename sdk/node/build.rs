@@ -25,8 +25,6 @@ fn is_lfs_pointer(path: &Path) -> bool {
 fn link_krun() {
     #[cfg(target_os = "macos")]
     println!("cargo:rustc-link-arg=-Wl,-weak-lkrun");
-    #[cfg(not(target_os = "macos"))]
-    println!("cargo:rustc-link-lib=krun");
 }
 
 fn main() {

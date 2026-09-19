@@ -12,15 +12,18 @@ Mirrors the Node SDK's ``machine.ts`` (sync, since the embedded engine blocks)::
 
 from __future__ import annotations
 
+import os
 import uuid
 from typing import Any, Optional
 
 from .transport import (
     Transport,
+    _load_native,
     connect_transport,
     make_transport,
     restore_checkpoint_transport,
 )
+from .errors import wrap_native_error
 from .types import (
     ConnectOptions,
     ExecOptions,
@@ -102,6 +105,31 @@ class Machine:
                 conn,
             )
         )
+
+    @staticmethod
+    def export_checkpoint(source: str, output: str) -> int:
+        """Export a local stored checkpoint directory as one portable file."""
+        try:
+            return int(
+                _load_native().Machine.export_checkpoint(
+                    os.path.abspath(source),
+                    os.path.abspath(output),
+                )
+            )
+        except Exception as error:  # noqa: BLE001
+            raise wrap_native_error(error) from error
+
+    @staticmethod
+    def prune_checkpoint_store(store: str) -> int:
+        """Remove objects unreferenced by retained checkpoints in a local store."""
+        try:
+            return int(
+                _load_native().Machine.prune_checkpoint_store(
+                    os.path.abspath(store)
+                )
+            )
+        except Exception as error:  # noqa: BLE001
+            raise wrap_native_error(error) from error
 
     @classmethod
     def restore(
@@ -259,9 +287,11 @@ class Machine:
         existing URL immediately stops granting access."""
         self._t.unshare()
 
-    def checkpoint(self, output: Optional[str] = None) -> PortableCheckpointInfo:
-        """Capture this machine; local capture requires a `.smolcheckpoint` path."""
-        return self._t.checkpoint(output)
+    def checkpoint(
+        self, output: Optional[str] = None, *, store: Optional[str] = None
+    ) -> PortableCheckpointInfo:
+        """Capture this machine, optionally reusing a local checkpoint store."""
+        return self._t.checkpoint(output, store=store)
 
     def checkpoints(self) -> "list[PortableCheckpointInfo]":
         """List durable portable checkpoints captured from this machine."""

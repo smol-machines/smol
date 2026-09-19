@@ -39,6 +39,10 @@ Global behavior:
 | `smol machine cp <src> <dst>` | Copy files host↔guest (`name:/path` denotes a guest path). |
 | `smol machine logs <name>` | Fetch machine logs (`--tail N`). |
 | `smol machine branch --from <source> --name <child>` | Create an independent child from a running branchable machine (copy-on-write RAM + disks). Use `--branchable` on the child to branch again. `fork`, `--golden`, and `--forkable` remain compatibility aliases. |
+| `smol machine checkpoint --name <source> --store <store> --output <point.smolcheckpoint>` | Capture a periodic local rollback point as a self-contained directory while reusing unchanged RAM and disk chunks from the store. Omit `--store` to write one portable file. |
+| `smol machine checkpoint --export-from <point> --output <file.smolcheckpoint>` | Export a stored checkpoint directory as one portable file. |
+| `smol machine checkpoint-prune --store <store>` | Reclaim objects that no retained checkpoint in the store references. |
+| `smol machine restore --checkpoint <point-or-file> --name <machine>` | Restore a stored directory or portable checkpoint as a running branch source. |
 | `smol machine images --name <name>` | List a machine's cached images and storage usage (`--json`). |
 | `smol machine prune --name <name>` | Reclaim a machine's disk: free unreferenced layers, or `--all` to purge the cache (`--dry-run` to preview; `--all` requires the machine stopped). |
 | `smol machine update --name <name> …` | Modify a **stopped** machine: add/remove volumes/ports/env, set `--cpus`/`--mem`/`--workdir`, toggle `--net`/`--gpu`, expand `--storage`/`--overlay` (expand-only). |

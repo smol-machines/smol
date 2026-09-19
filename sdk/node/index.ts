@@ -41,6 +41,7 @@ export type {
   PortSpec,
   BranchOptions,
   BranchBatchOptions,
+  CheckpointOptions,
   ForkOptions,
   ForkBatchOptions,
   AssignOptions,

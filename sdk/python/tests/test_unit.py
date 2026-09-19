@@ -4,14 +4,21 @@ import json
 import os
 import sys
 import tempfile
+from types import SimpleNamespace
 from pathlib import Path
 from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "python"))
 
-from smol.errors import ExecutionError, SmolError, wrap_native_error  # noqa: E402
+from smol.errors import (  # noqa: E402
+    ExecutionError,
+    InvalidConfigError,
+    SmolError,
+    wrap_native_error,
+)
 from smol.rollout import RolloutClient, RolloutError, adapter_sha256  # noqa: E402
 from smol import transport as transport_module  # noqa: E402
+from smol import machine as machine_module  # noqa: E402
 from smol.transport import (  # noqa: E402
     _cli_config_api_key,
     _encode_path,
@@ -226,6 +233,70 @@ def test_connect_preserves_frozen_checkpoint_without_readiness_wait():
             "checkpoint", ConnectOptions(target="local")
         )
     assert connected.state() == "frozen"
+
+
+def test_local_checkpoint_forwards_store_and_reports_reuse():
+    calls = []
+
+    class Inner:
+        name = "source"
+
+        @staticmethod
+        def checkpoint(output, store):
+            calls.append((output, store))
+            return SimpleNamespace(
+                size_bytes=123,
+                reused_bytes=456,
+                source_pause_ms=7.0,
+                elapsed_ms=8.0,
+            )
+
+    with tempfile.TemporaryDirectory() as root:
+        transport = transport_module.LocalTransport(Inner(), cleanup_on_exit=False)
+        output = str(Path(root) / "point")
+        store = str(Path(root) / "store")
+        checkpoint = transport.checkpoint(output, store=store)
+        assert calls == [(os.path.abspath(output), os.path.abspath(store))]
+        assert checkpoint.size_bytes == 123
+        assert checkpoint.reused_bytes == 456
+
+
+def test_cloud_checkpoint_rejects_local_store_without_network_call():
+    transport = transport_module.CloudTransport("https://x", "smk_k", "mID", "name")
+    try:
+        transport.checkpoint(store="./store")
+        raise AssertionError("cloud capture accepted a local checkpoint store")
+    except InvalidConfigError:
+        pass
+
+
+def test_checkpoint_store_management_uses_native_engine():
+    calls = []
+
+    class NativeMachine:
+        @staticmethod
+        def export_checkpoint(source, output):
+            calls.append(("export", source, output))
+            return 100
+
+        @staticmethod
+        def prune_checkpoint_store(store):
+            calls.append(("prune", store))
+            return 25
+
+    with tempfile.TemporaryDirectory() as root:
+        source = str(Path(root) / "source")
+        output = str(Path(root) / "point.smolcheckpoint")
+        store = str(Path(root) / "store")
+        with mock.patch.object(
+            machine_module, "_load_native", return_value=SimpleNamespace(Machine=NativeMachine)
+        ):
+            assert machine_module.Machine.export_checkpoint(source, output) == 100
+            assert machine_module.Machine.prune_checkpoint_store(store) == 25
+    assert calls == [
+        ("export", os.path.abspath(source), os.path.abspath(output)),
+        ("prune", os.path.abspath(store)),
+    ]
 
 
 def test_native_config_forwards_image_workload_env_and_workdir():
