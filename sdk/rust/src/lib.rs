@@ -120,6 +120,7 @@
 #![warn(missing_docs)]
 
 mod assets;
+pub mod bootstrap;
 mod config;
 mod connect;
 mod error;
