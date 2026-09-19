@@ -8,21 +8,30 @@
 import { createServer } from "node:net";
 import { Machine } from "../index";
 
-async function availablePort(): Promise<number> {
-  return await new Promise((resolve, reject) => {
+/** Is this exact port free right now? */
+async function isFree(port: number): Promise<boolean> {
+  return await new Promise((resolve) => {
     const server = createServer();
-    server.once("error", reject);
-    server.listen(0, "127.0.0.1", () => {
-      const address = server.address();
-      if (!address || typeof address === "string") {
-        server.close();
-        reject(new Error("failed to allocate a local port"));
-        return;
-      }
-      const port = address.port;
-      server.close((error) => (error ? reject(error) : resolve(port)));
-    });
+    server.once("error", () => resolve(false));
+    server.listen(port, "127.0.0.1", () => server.close(() => resolve(true)));
   });
+}
+
+/** A host port the VM can still bind by the time it starts.
+ *
+ *  Asking the OS for port 0 hands back an *ephemeral* port, and closing it
+ *  returns that number straight to the kernel's pool — so any outbound
+ *  connection made between here and the VM's bind can take it, and the start
+ *  fails with EADDRINUSE. This test pulls an image in that window, so it does
+ *  exactly that, intermittently. Picking below the ephemeral range instead
+ *  (Linux allocates from 32768 up) means the kernel never hands this number
+ *  out on its own. */
+async function availablePort(): Promise<number> {
+  for (let attempt = 0; attempt < 50; attempt += 1) {
+    const port = 20000 + Math.floor(Math.random() * 12000);
+    if (await isFree(port)) return port;
+  }
+  throw new Error("failed to allocate a local port");
 }
 
 async function page(machine: Machine): Promise<string> {
