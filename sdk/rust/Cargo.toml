@@ -24,6 +24,14 @@ categories = ["virtualization", "api-bindings"]
 # owns the choice of runtime.
 smol-cloud = { path = "../../crates/smol-cloud", version = "1.9.0", features = ["blocking"] }
 serde_json = "1"
+# Fetching an engine on first local use, so `cargo add` is all a caller needs.
+reqwest = { version = "0.12", default-features = false, features = [
+    "blocking",
+    "rustls-tls",
+] }
+sha2 = "0.10"
+flate2 = "1"
+tar = "0.4"
 
 [dev-dependencies]
 # The mock control plane in tests/ asserts on the exact JSON the SDK sends.

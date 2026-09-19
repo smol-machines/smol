@@ -97,11 +97,12 @@ whose interesting part is how to get it back.
 
 *Local target only — a cloud machine runs on someone else's node.*
 
-Local machines are run by an installed `smolvm`, not by linking the engine into
-your process. That is deliberate: crates.io resolves every dependency, and the
+Local machines are run by a `smolvm` engine process, not by linking the engine
+into your own. That is deliberate: crates.io resolves every dependency, and the
 engine crate is not published, so linking it would make this SDK impossible to
-publish. Driving the CLI keeps `cargo add smolmachines` working for everyone
-and still runs real microVMs on your host.
+publish. Fetching the released engine instead is what npm and PyPI do for their
+SDKs — they ship per-platform binaries — and it keeps `cargo add smolmachines`
+sufficient on its own.
 
 If you ship your own engine assets, point them out once before the first
 machine:
@@ -124,11 +125,23 @@ A program that ships its own engine names the paths itself. See
 cargo add smolmachines
 ```
 
-The crate is self-contained: it links no engine and carries no binaries, so it
-builds anywhere Rust does. **Cloud machines need nothing else.** Local machines
-are driven through an installed `smolvm` binary, found via `SMOLVM`, then
-`PATH`, then the usual install locations — so install the CLI if you want to
-run machines on your own host.
+That is the whole install. The crate links no engine and carries no binaries,
+so it builds anywhere Rust does.
+
+**Cloud machines need nothing else.** For **local** machines the SDK needs an
+engine, and finds one in this order: `SMOLVM`, then `PATH` and the usual
+install locations, and failing those it fetches the matching engine release
+once and caches it (~37 MiB, checksum-verified against the release's published
+`checksums.sha256`). Nothing is downloaded unless you actually ask for a local
+machine, and the engine is pinned to this crate's own version so the two cannot
+drift.
+
+| variable | effect |
+|---|---|
+| `SMOLVM` | use this binary and look no further |
+| `SMOLMACHINES_CACHE_DIR` | where fetched engines live (default: your cache dir) |
+| `SMOLMACHINES_ENGINE_VERSION` | fetch a different engine version |
+| `SMOLMACHINES_NO_DOWNLOAD=1` | never fetch; fail instead |
 
 The control-plane wire types and client live in
 [`smol-cloud`](https://crates.io/crates/smol-cloud), shared with the `smol` CLI

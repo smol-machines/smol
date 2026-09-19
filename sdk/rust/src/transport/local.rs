@@ -54,11 +54,9 @@ pub(crate) fn resolve_cli() -> Result<PathBuf> {
             }
         }
     }
-    Err(Error::new(
-        ErrorKind::NotFound,
-        "no `smolvm` on PATH — install the CLI, or set SMOLVM to a binary, to run machines \
-         on this host (cloud machines need neither)",
-    ))
+    // Nothing installed: fetch the engine this SDK was built against. Only a
+    // local machine ever gets here, and only once — it is cached afterwards.
+    crate::bootstrap::ensure_engine()
 }
 
 #[derive(Debug)]
