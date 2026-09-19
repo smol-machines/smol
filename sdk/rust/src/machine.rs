@@ -344,8 +344,12 @@ impl Machine {
         match connect.target() {
             Target::Local => {
                 let name = config.name.clone();
-                let cli = crate::transport::local::resolve_cli()?;
+                // Validate the config before looking for the CLI: a bad config
+                // is a bad config whether or not an engine is installed, and
+                // reporting "no smolvm on PATH" for it sends the caller to fix
+                // the wrong thing.
                 let (args, ports) = config.into_local_args()?;
+                let cli = crate::transport::local::resolve_cli()?;
                 Ok(Self::from_transport(Box::new(
                     crate::transport::local::create(&cli, args, &name, ports)?,
                 )))
