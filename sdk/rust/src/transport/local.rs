@@ -86,9 +86,13 @@ impl LocalTransport {
 
     /// Run a CLI command and hand back its exit code and streams.
     fn cli(&self, args: &[&str]) -> Result<(i32, Vec<u8>, Vec<u8>)> {
-        let output = Command::new(&self.cli).args(args).output().map_err(|e| {
-            Error::new(ErrorKind::Other, format!("run {}: {e}", self.cli.display()))
-        })?;
+        let output = Command::new(&self.cli)
+            .args(args)
+            .stdin(Stdio::null())
+            .output()
+            .map_err(|e| {
+                Error::new(ErrorKind::Other, format!("run {}: {e}", self.cli.display()))
+            })?;
         Ok((
             output.status.code().unwrap_or(-1),
             output.stdout,
@@ -266,6 +270,10 @@ impl Transport for LocalTransport {
         let args = self.exec_args(&command, &options);
         let mut child = Command::new(&self.cli)
             .args(&args)
+            // Give the child no stdin. Inheriting the caller's makes the CLI
+            // treat the exec as interactive and attach a terminal to the
+            // guest, which is not what a streaming API asked for.
+            .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
