@@ -303,6 +303,11 @@ impl Transport for LocalTransport {
         Ok(ExecStream::from_receiver(rx))
     }
 
+    /// Run a command in a *fresh ephemeral* machine from `image`.
+    ///
+    /// The CLI's `run` always makes its own throwaway machine, so unlike the
+    /// cloud target this does not execute inside this machine — it is the
+    /// equivalent of `docker run`, not `docker exec`.
     fn run(&self, image: &str, command: Vec<String>, options: ExecOptions) -> Result<ExecResult> {
         let mut args: Vec<String> = vec![
             "machine".into(),
@@ -369,22 +374,17 @@ impl Transport for LocalTransport {
         result
     }
 
-    fn pull_image(&self, image: &str) -> Result<ImageInfo> {
-        self.run(&["machine", "exec", "--name", &self.name, "--", "true"])?;
-        // The CLI pulls as part of a run; report what the machine now has.
-        self.list_images()?
-            .into_iter()
-            .find(|cached| cached.reference.contains(image))
-            .ok_or_else(|| {
-                Error::new(
-                    ErrorKind::NotFound,
-                    format!("{image} is not cached in {}", self.name),
-                )
-            })
+    fn pull_image(&self, _image: &str) -> Result<ImageInfo> {
+        Err(unsupported(
+            "pull_image()",
+            "the engine fetches an image as part of creating a machine from it, and exposes no \
+             way to pull into an existing machine's store — create the machine with that image, \
+             or use run(), which pulls into an ephemeral one",
+        ))
     }
 
     fn list_images(&self) -> Result<Vec<ImageInfo>> {
-        let out = self.run(&["machine", "images", "--json"])?;
+        let out = self.run(&["machine", "images", "--name", &self.name, "--json"])?;
         let parsed: serde_json::Value = serde_json::from_slice(&out)
             .map_err(|e| Error::new(ErrorKind::Other, format!("read the image list: {e}")))?;
         let rows = parsed
