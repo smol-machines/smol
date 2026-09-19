@@ -224,32 +224,24 @@ impl MachineConfig {
             args.push(format!("{}:{}", port.host, port.guest));
         }
         for mount in &self.mounts {
-            if mount.is_remote() {
-                return Err(Error::new(
-                    ErrorKind::NotSupported,
-                    "an s3:// volume is a cloud feature; a local machine takes host directories",
-                ));
-            }
             if mount.read_only && mount.staged {
                 return Err(Error::new(
                     ErrorKind::Mount,
                     "a staged mount is writable and cannot also be read-only",
                 ));
             }
-            args.push(
-                if mount.staged {
-                    "--mount-staged"
-                } else {
-                    "--mount"
-                }
-                .into(),
-            );
-            args.push(format!(
-                "{}:{}{}",
-                mount.source,
-                mount.target,
-                if mount.read_only { ":ro" } else { "" }
-            ));
+            // One flag for every kind of volume, with the mode as a suffix:
+            // `-v HOST|REMOTE:GUEST[:ro|rw|staged]`. The CLI takes s3 sources
+            // here too, so a remote volume needs no special case.
+            let mode = if mount.staged {
+                ":staged"
+            } else if mount.read_only {
+                ":ro"
+            } else {
+                ""
+            };
+            args.push("-v".into());
+            args.push(format!("{}:{}{mode}", mount.source, mount.target));
         }
         for (key, value) in &self.env {
             args.push("--env".into());
@@ -541,15 +533,26 @@ mod tests {
     use super::*;
 
     #[test]
-    fn an_s3_source_is_refused_for_a_local_machine() {
-        let error = MachineConfig {
-            name: "remote".into(),
-            mounts: vec![Mount::new("s3://bucket/prefix", "/data")],
+    fn every_volume_goes_through_one_flag_with_its_mode_as_a_suffix() {
+        let (args, _) = MachineConfig {
+            name: "m".into(),
+            mounts: vec![
+                Mount::new("/src", "/work"),
+                Mount::new("/data", "/ro").read_only(),
+                Mount::new("/cache", "/staged").staged(),
+                Mount::new("s3://bucket/prefix", "/models"),
+            ],
             ..Default::default()
         }
         .into_local_args()
-        .expect_err("an s3 volume is fetched by the guest agent, which is a cloud feature");
-        assert_eq!(error.kind(), ErrorKind::NotSupported);
+        .expect("the CLI takes host and remote volumes through the same flag");
+        let joined = args.join(" ");
+        assert!(joined.contains("-v /src:/work"), "{joined}");
+        assert!(joined.contains("-v /data:/ro:ro"), "{joined}");
+        assert!(joined.contains("-v /cache:/staged:staged"), "{joined}");
+        assert!(joined.contains("-v s3://bucket/prefix:/models"), "{joined}");
+        // `--mount` does not exist; emitting it made every mounted machine fail.
+        assert!(!joined.contains("--mount"), "{joined}");
     }
 
     #[test]
@@ -563,18 +566,6 @@ mod tests {
         .expect_err("staged writes back, so read-only is a contradiction");
 
         assert_eq!(error.kind(), ErrorKind::Mount);
-    }
-
-    #[test]
-    fn a_remote_source_is_a_cloud_feature_however_it_is_mounted() {
-        let error = MachineConfig {
-            name: "staged-remote".into(),
-            mounts: vec![Mount::new("s3://bucket/prefix", "/data").staged()],
-            ..Default::default()
-        }
-        .into_local_args()
-        .expect_err("the guest agent fetches s3 volumes only on the cloud target");
-        assert_eq!(error.kind(), ErrorKind::NotSupported);
     }
 
     #[test]
