@@ -27,8 +27,11 @@ async function isFree(port: number): Promise<boolean> {
  *  (Linux allocates from 32768 up) means the kernel never hands this number
  *  out on its own. */
 async function availablePort(): Promise<number> {
+  // Stay below 20000: the engine allocates a clone's remapped host port from
+  // 20000-32000, so drawing from that same band trades a collision with the
+  // kernel for a collision with the machine under test.
   for (let attempt = 0; attempt < 50; attempt += 1) {
-    const port = 20000 + Math.floor(Math.random() * 12000);
+    const port = 15000 + Math.floor(Math.random() * 5000);
     if (await isFree(port)) return port;
   }
   throw new Error("failed to allocate a local port");
