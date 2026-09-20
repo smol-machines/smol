@@ -54,14 +54,27 @@ fn main() -> Result<()> {
     std::fs::create_dir_all(&staged).expect("scratch");
     std::fs::write(staged.join("from-host.txt"), "host wrote this").expect("seed");
 
+    let run_id = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() % 100_000)
+        .unwrap_or(0);
+    let main_name = format!("e2e-{run_id}");
+    let clean_name = format!("e2e-{run_id}-clean");
     let mut failures = 0;
     let mut check = |name: &str, outcome: Result<String>| {
-        if !step(name, outcome) {
+        let ok = step(name, outcome);
+        // Report the machine's state after every step, so the exact call that
+        // loses it is visible rather than inferred.
+        let live = Machine::attach(&main_name)
+            .map(|m| m.state().to_string())
+            .unwrap_or_else(|_| "?".into());
+        println!("        e2e-local now: {live}");
+        if !ok {
             failures += 1;
         }
     };
 
-    let machine = Machine::builder("e2e-local")
+    let machine = Machine::builder(&main_name)
         .image("alpine:latest")
         .network(true)
         .memory_mib(1024)
@@ -180,7 +193,7 @@ fn main() -> Result<()> {
 
     // The engine refuses to branch or capture a machine carrying host mounts,
     // so those phases get a machine of their own rather than a false failure.
-    let clean = Machine::builder("e2e-clean")
+    let clean = Machine::builder(&clean_name)
         .image("alpine:latest")
         .network(true)
         .memory_mib(1024)
@@ -230,7 +243,7 @@ fn main() -> Result<()> {
     );
 
     let branch_started = Instant::now();
-    let branch = clean.branch("e2e-local-branch");
+    let branch = clean.branch(format!("e2e-{run_id}-branch"));
     check(
         "branch",
         branch.as_ref().map_err(Clone::clone).and_then(|b| {
@@ -245,7 +258,7 @@ fn main() -> Result<()> {
     );
 
     let batch_started = Instant::now();
-    let names: Vec<String> = (0..4).map(|i| format!("e2e-local-batch-{i}")).collect();
+    let names: Vec<String> = (0..4).map(|i| format!("e2e-{run_id}-batch-{i}")).collect();
     let batch = clean.branch_batch(names, BranchOptions::new().parallel(4));
     check(
         "branch_batch",
@@ -293,18 +306,20 @@ fn main() -> Result<()> {
 
     check(
         "connect",
-        Machine::connect("e2e-local").map(|m| m.name().to_string()),
+        Machine::connect(&main_name).map(|m| m.name().to_string()),
     );
 
     check(
         "restore_checkpoint",
-        Machine::restore_checkpoint("e2e-local-restored", &artifact).and_then(|restored| {
-            restored.start()?;
-            let seen = restored.exec(["cat", "/workspace/note"])?;
-            let detail = seen.stdout_utf8().trim().to_string();
-            restored.delete()?;
-            Ok(detail)
-        }),
+        Machine::restore_checkpoint(format!("e2e-{run_id}-restored"), &artifact).and_then(
+            |restored| {
+                restored.start()?;
+                let seen = restored.exec(["cat", "/workspace/note"])?;
+                let detail = seen.stdout_utf8().trim().to_string();
+                restored.delete()?;
+                Ok(detail)
+            },
+        ),
     );
 
     check("delete", machine.delete().map(|()| "ok".into()));

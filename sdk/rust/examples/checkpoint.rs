@@ -22,6 +22,9 @@ fn main() -> Result<()> {
     use_installed_engine()?;
 
     let workdir = std::env::temp_dir().join("smolmachines-checkpoint-example");
+    // The engine refuses to overwrite an artifact, so start from a clean slate
+    // rather than failing on a second run.
+    std::fs::remove_dir_all(&workdir).ok();
     std::fs::create_dir_all(&workdir).expect("create the example working directory");
     let store = workdir.join("store");
 
