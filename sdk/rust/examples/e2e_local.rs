@@ -7,6 +7,31 @@ use smolmachines::{
     Mount, Port, Result, RuntimeAssets,
 };
 
+/// A command that ran but failed is a failure: `exec` reports the guest's exit
+/// code rather than erroring, so checking only Ok/Err hides a dead machine
+/// behind an empty string.
+fn ran(result: Result<smolmachines::ExecResult>) -> Result<String> {
+    let result = result?;
+    if result.success() {
+        Ok(result.stdout_utf8().trim().to_string())
+    } else {
+        Err(smolmachines::Error::new(
+            smolmachines::ErrorKind::CommandFailed,
+            format!("exit {}: {}", result.exit_code, result.stderr_utf8().trim()),
+        ))
+    }
+}
+
+/// An operation this target is expected to refuse.
+fn refused(outcome: Result<String>) -> Result<String> {
+    match outcome {
+        Err(e) if e.kind() == smolmachines::ErrorKind::NotSupported => {
+            Ok("correctly refused".into())
+        }
+        other => other.map(|_| "unexpectedly succeeded".into()),
+    }
+}
+
 fn step(name: &str, outcome: Result<String>) -> bool {
     match outcome {
         Ok(detail) => {
@@ -29,14 +54,27 @@ fn main() -> Result<()> {
     std::fs::create_dir_all(&staged).expect("scratch");
     std::fs::write(staged.join("from-host.txt"), "host wrote this").expect("seed");
 
+    let run_id = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() % 100_000)
+        .unwrap_or(0);
+    let main_name = format!("e2e-{run_id}");
+    let clean_name = format!("e2e-{run_id}-clean");
     let mut failures = 0;
     let mut check = |name: &str, outcome: Result<String>| {
-        if !step(name, outcome) {
+        let ok = step(name, outcome);
+        // Report the machine's state after every step, so the exact call that
+        // loses it is visible rather than inferred.
+        let live = Machine::attach(&main_name)
+            .map(|m| m.state().to_string())
+            .unwrap_or_else(|_| "?".into());
+        println!("        e2e-local now: {live}");
+        if !ok {
             failures += 1;
         }
     };
 
-    let machine = Machine::builder("e2e-local")
+    let machine = Machine::builder(&main_name)
         .image("alpine:latest")
         .network(true)
         .memory_mib(1024)
@@ -112,8 +150,7 @@ fn main() -> Result<()> {
         "write_file_with_mode",
         machine
             .write_file_with_mode("/tmp/run.sh", "#!/bin/sh\necho scripted\n", 0o755)
-            .and_then(|()| machine.exec(["/tmp/run.sh"]))
-            .map(|r| r.stdout_utf8().trim().to_string()),
+            .and_then(|()| ran(machine.exec(["/tmp/run.sh"]))),
     );
 
     check(
@@ -146,10 +183,8 @@ fn main() -> Result<()> {
     check("url", machine.url().map(|u| format!("{u:?}")));
 
     check(
-        "pull_image",
-        machine
-            .pull_image("alpine:3.20")
-            .map(|i| format!("{} {}", i.reference, i.architecture)),
+        "pull_image (no local verb)",
+        refused(machine.pull_image("alpine:3.20").map(|i| i.reference)),
     );
     check(
         "list_images",
@@ -158,7 +193,7 @@ fn main() -> Result<()> {
 
     // The engine refuses to branch or capture a machine carrying host mounts,
     // so those phases get a machine of their own rather than a false failure.
-    let clean = Machine::builder("e2e-clean")
+    let clean = Machine::builder(&clean_name)
         .image("alpine:latest")
         .network(true)
         .memory_mib(1024)
@@ -208,7 +243,7 @@ fn main() -> Result<()> {
     );
 
     let branch_started = Instant::now();
-    let branch = clean.branch("e2e-local-branch");
+    let branch = clean.branch(format!("e2e-{run_id}-branch"));
     check(
         "branch",
         branch.as_ref().map_err(Clone::clone).and_then(|b| {
@@ -223,7 +258,7 @@ fn main() -> Result<()> {
     );
 
     let batch_started = Instant::now();
-    let names: Vec<String> = (0..4).map(|i| format!("e2e-local-batch-{i}")).collect();
+    let names: Vec<String> = (0..4).map(|i| format!("e2e-{run_id}-batch-{i}")).collect();
     let batch = clean.branch_batch(names, BranchOptions::new().parallel(4));
     check(
         "branch_batch",
@@ -271,18 +306,20 @@ fn main() -> Result<()> {
 
     check(
         "connect",
-        Machine::connect("e2e-local").map(|m| m.name().to_string()),
+        Machine::connect(&main_name).map(|m| m.name().to_string()),
     );
 
     check(
         "restore_checkpoint",
-        Machine::restore_checkpoint("e2e-local-restored", &artifact).and_then(|restored| {
-            restored.start()?;
-            let seen = restored.exec(["cat", "/workspace/note"])?;
-            let detail = seen.stdout_utf8().trim().to_string();
-            restored.delete()?;
-            Ok(detail)
-        }),
+        Machine::restore_checkpoint(format!("e2e-{run_id}-restored"), &artifact).and_then(
+            |restored| {
+                restored.start()?;
+                let seen = restored.exec(["cat", "/workspace/note"])?;
+                let detail = seen.stdout_utf8().trim().to_string();
+                restored.delete()?;
+                Ok(detail)
+            },
+        ),
     );
 
     check("delete", machine.delete().map(|()| "ok".into()));

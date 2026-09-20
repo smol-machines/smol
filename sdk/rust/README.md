@@ -139,6 +139,7 @@ drift.
 | variable | effect |
 |---|---|
 | `SMOLVM` | use this binary and look no further |
+| `SMOLVM_BOOT_BINARY` | ignored on purpose — it ties a VM's life to its parent, and every CLI call here is short-lived |
 | `SMOLMACHINES_CACHE_DIR` | where fetched engines live (default: your cache dir) |
 | `SMOLMACHINES_ENGINE_VERSION` | fetch a different engine version |
 | `SMOLMACHINES_NO_DOWNLOAD=1` | never fetch; fail instead |

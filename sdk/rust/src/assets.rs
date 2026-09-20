@@ -163,7 +163,13 @@ pub fn configure_runtime_assets(assets: RuntimeAssets) -> Result<()> {
         return Ok(());
     }
 
-    apply("SMOLVM_BOOT_BINARY", resolved.boot_binary.as_deref());
+    // Deliberately NOT exported. `SMOLVM_BOOT_BINARY` tells the engine that an
+    // in-process embedder owns the VM's lifetime, so the boot process arms a
+    // parent-death watchdog and the VM dies with whatever started it. This SDK
+    // drives the detached CLI, where every `machine start` is a short-lived
+    // process — exporting it killed every machine seconds after it booted.
+    // Use `SMOLVM` to choose which binary the SDK drives instead.
+    let _ = &resolved.boot_binary;
     apply("SMOLVM_LIB_DIR", resolved.lib_dir.as_deref());
     apply("SMOLVM_AGENT_ROOTFS", resolved.agent_rootfs.as_deref());
     apply(

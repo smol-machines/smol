@@ -86,9 +86,16 @@ impl LocalTransport {
 
     /// Run a CLI command and hand back its exit code and streams.
     fn cli(&self, args: &[&str]) -> Result<(i32, Vec<u8>, Vec<u8>)> {
-        let output = Command::new(&self.cli).args(args).output().map_err(|e| {
-            Error::new(ErrorKind::Other, format!("run {}: {e}", self.cli.display()))
-        })?;
+        let output = Command::new(&self.cli)
+            .args(args)
+            .stdin(Stdio::null())
+            // See assets.rs: this variable makes the engine tie the VM's life
+            // to its parent, and every CLI call here is short-lived.
+            .env_remove("SMOLVM_BOOT_BINARY")
+            .output()
+            .map_err(|e| {
+                Error::new(ErrorKind::Other, format!("run {}: {e}", self.cli.display()))
+            })?;
         Ok((
             output.status.code().unwrap_or(-1),
             output.stdout,
@@ -266,6 +273,11 @@ impl Transport for LocalTransport {
         let args = self.exec_args(&command, &options);
         let mut child = Command::new(&self.cli)
             .args(&args)
+            // Give the child no stdin. Inheriting the caller's makes the CLI
+            // treat the exec as interactive and attach a terminal to the
+            // guest, which is not what a streaming API asked for.
+            .stdin(Stdio::null())
+            .env_remove("SMOLVM_BOOT_BINARY")
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
@@ -303,6 +315,11 @@ impl Transport for LocalTransport {
         Ok(ExecStream::from_receiver(rx))
     }
 
+    /// Run a command in a *fresh ephemeral* machine from `image`.
+    ///
+    /// The CLI's `run` always makes its own throwaway machine, so unlike the
+    /// cloud target this does not execute inside this machine — it is the
+    /// equivalent of `docker run`, not `docker exec`.
     fn run(&self, image: &str, command: Vec<String>, options: ExecOptions) -> Result<ExecResult> {
         let mut args: Vec<String> = vec![
             "machine".into(),
@@ -369,22 +386,17 @@ impl Transport for LocalTransport {
         result
     }
 
-    fn pull_image(&self, image: &str) -> Result<ImageInfo> {
-        self.run(&["machine", "exec", "--name", &self.name, "--", "true"])?;
-        // The CLI pulls as part of a run; report what the machine now has.
-        self.list_images()?
-            .into_iter()
-            .find(|cached| cached.reference.contains(image))
-            .ok_or_else(|| {
-                Error::new(
-                    ErrorKind::NotFound,
-                    format!("{image} is not cached in {}", self.name),
-                )
-            })
+    fn pull_image(&self, _image: &str) -> Result<ImageInfo> {
+        Err(unsupported(
+            "pull_image()",
+            "the engine fetches an image as part of creating a machine from it, and exposes no \
+             way to pull into an existing machine's store — create the machine with that image, \
+             or use run(), which pulls into an ephemeral one",
+        ))
     }
 
     fn list_images(&self) -> Result<Vec<ImageInfo>> {
-        let out = self.run(&["machine", "images", "--json"])?;
+        let out = self.run(&["machine", "images", "--name", &self.name, "--json"])?;
         let parsed: serde_json::Value = serde_json::from_slice(&out)
             .map_err(|e| Error::new(ErrorKind::Other, format!("read the image list: {e}")))?;
         let rows = parsed
@@ -480,14 +492,16 @@ impl Transport for LocalTransport {
             args.push(store);
         }
         let started = Instant::now();
-        self.run(&args)?;
-        let size = std::fs::metadata(output).map(|m| m.len()).unwrap_or(0);
+        let out = self.run(&args)?;
+        let summary = String::from_utf8_lossy(&out);
+        // The CLI reports what the capture cost in prose. Reporting zeros
+        // instead would look like a measurement rather than a missing one.
+        let (size_bytes, source_pause) = parse_capture_summary(&summary);
         Ok(Checkpoint::Local(CheckpointResult {
-            size_bytes: size,
-            // The CLI reports reuse and pause in prose, not a machine-readable
-            // form, so only what can be measured here is reported.
-            reused_bytes: 0,
-            source_pause: Duration::ZERO,
+            size_bytes: size_bytes
+                .unwrap_or_else(|| std::fs::metadata(output).map(|m| m.len()).unwrap_or(0)),
+            reused_bytes: parse_reused(&summary).unwrap_or(0),
+            source_pause: source_pause.unwrap_or(Duration::ZERO),
             elapsed: started.elapsed(),
         }))
     }
@@ -588,6 +602,8 @@ pub(crate) fn create(
 ) -> Result<LocalTransport> {
     let output = Command::new(cli)
         .args(&args)
+        .stdin(Stdio::null())
+        .env_remove("SMOLVM_BOOT_BINARY")
         .output()
         .map_err(|e| Error::new(ErrorKind::Other, format!("run {}: {e}", cli.display())))?;
     if !output.status.success() {
@@ -600,3 +616,48 @@ pub(crate) fn create(
 /// Unused on this transport, kept so the cloud checkpoint type stays shared.
 #[allow(dead_code)]
 fn _cloud_checkpoint_is_shared(_: CloudCheckpoint) {}
+
+/// Read `(583 MiB written, 5.931s total, 0.521s source pause)` off the CLI's
+/// own summary line.
+fn parse_capture_summary(text: &str) -> (Option<u64>, Option<Duration>) {
+    let size = text
+        .split_once(" MiB written")
+        .and_then(|(head, _)| head.rsplit(['(', ' ']).next().map(str::to_string))
+        .and_then(|n| n.parse::<f64>().ok())
+        .map(|mib| (mib * 1024.0 * 1024.0) as u64);
+    let pause = text
+        .split_once("s source pause")
+        .and_then(|(head, _)| head.rsplit([',', ' ']).next().map(str::to_string))
+        .and_then(|n| n.parse::<f64>().ok())
+        .map(Duration::from_secs_f64);
+    (size, pause)
+}
+
+/// Read `Reused 1702 MiB from existing checkpoint objects`.
+fn parse_reused(text: &str) -> Option<u64> {
+    let after = text.split_once("Reused ")?.1;
+    let mib: f64 = after.split_whitespace().next()?.parse().ok()?;
+    Some((mib * 1024.0 * 1024.0) as u64)
+}
+
+#[cfg(test)]
+mod capture_summary_tests {
+    use super::*;
+
+    #[test]
+    fn the_cli_summary_is_read_back_as_numbers() {
+        let text = "Checkpointed 'x' to /p (583 MiB written, 5.931s total, 0.521s source pause)\n\
+                    Reused 1702 MiB from existing checkpoint objects\n";
+        let (size, pause) = parse_capture_summary(text);
+        assert_eq!(size, Some(583 * 1024 * 1024));
+        assert_eq!(pause, Some(Duration::from_secs_f64(0.521)));
+        assert_eq!(parse_reused(text), Some(1702 * 1024 * 1024));
+    }
+
+    #[test]
+    fn a_summary_without_figures_reports_nothing_rather_than_zero() {
+        let (size, pause) = parse_capture_summary("Checkpointed 'x' to /p\n");
+        assert!(size.is_none() && pause.is_none());
+        assert!(parse_reused("nothing here").is_none());
+    }
+}
