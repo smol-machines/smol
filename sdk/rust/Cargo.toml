@@ -5,7 +5,7 @@
 
 [package]
 name = "smolmachines"
-version = "1.9.0"
+version = "1.17.0"
 edition = "2021"
 rust-version = "1.82"
 description = "Embed smol machines microVMs directly in a Rust process"

@@ -6,7 +6,7 @@
 # which is how the two drift.
 [package]
 name = "smol-cloud"
-version = "1.9.0"
+version = "1.17.0"
 edition = "2021"
 description = "Wire types and client for the smol cloud control plane"
 license = "Apache-2.0"
