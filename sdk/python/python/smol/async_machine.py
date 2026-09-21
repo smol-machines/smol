@@ -57,6 +57,11 @@ class AsyncMachine:
     def __init__(self, machine: Machine) -> None:
         self._m = machine
 
+    def tunnel(self, port: int):
+        """Return an async context manager for a private local TCP endpoint."""
+        from .tunnel import open_tunnel
+        return open_tunnel(self._m, port)
+
     @classmethod
     async def create(
         cls,
