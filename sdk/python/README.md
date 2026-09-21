@@ -1,5 +1,22 @@
 # smol — Python SDK
 
+### Raw TCP tunnels
+
+Use a published guest port with any TCP client, locally or in smol cloud:
+
+```python
+async with machine.tunnel(22222) as endpoint:
+    reader, writer = await asyncio.open_connection(endpoint.host, endpoint.port)
+    # Exchange bytes with the guest service.
+    writer.close()
+    await writer.wait_closed()
+```
+
+Install `smolmachines[tunnel]` for cloud tunnels. Cloud authentication stays in
+the transport, not in the endpoint URL. Leaving the context closes the listener
+and its connections. Set `MachineConfig(wait_for_ports=False)` if you need to
+start the service after creation; guest command readiness is still checked.
+
 Embed isolated **microVM sandboxes** directly in your Python code. Same API
 locally (embedded engine, no server) or against **smol cloud** — the
 backend is chosen via `ConnectOptions` / `SMOL_CLOUD_TOKEN`. Mirrors the
@@ -242,30 +259,6 @@ Branches preserve initialized process and filesystem state rather than
 merely reusing image layers. The initial implementation supports Linux
 single-container tasks with a published `docker_image`; Docker Compose and
 Dockerfile-only tasks fail clearly instead of silently changing semantics.
-
-#### Live trajectories and files
-
-Add `--stream` to the Harbor command, then open the job in `harbor view`.
-For cloud trials, also pass `--environment-kwarg target=cloud`; run the viewer
-with the same `SMOL_CLOUD_URL` and your own `SMOL_CLOUD_TOKEN`.
-
-Streaming uses Harbor's ATIF converter and code-server over SSH. Stream handles
-contain no credentials. Local access uses private credentials on the runner's
-host; cloud viewers obtain a short-lived SSH key through their authenticated
-SDK session. SSH host keys are pinned, and closing a cloud session removes its
-authorized key and tunnel.
-
-The task image must run as root and provide OpenSSH, bash, and setsid. On Debian
-or Ubuntu the adapter can install OpenSSH, curl, and CA certificates when network
-access permits. Offline tasks must include these tools and code-server in their
-image; streaming never relaxes the task's network policy. The editor uses disk
-space under `/var/tmp`, not guest RAM under `/tmp`.
-
-Streaming works with cold trials and automatically prepared branch sources;
-externally supplied `checkpoints` are not supported in streaming mode yet.
-Local viewers must run on the runner's host while its SDK process remains alive.
-Cloud streaming requires the control-plane TCP tunnel endpoint and Harbor's
-installed-plugin streaming support; upgrading only the SDK is not sufficient.
 
 ## Architecture
 - **Pure-Python layer** (`python/smol`): `Machine`, transports, types, errors —

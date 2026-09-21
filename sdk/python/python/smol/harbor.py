@@ -16,7 +16,6 @@ import ipaddress
 import math
 import re
 import shlex
-import socket
 import tarfile
 import tempfile
 import uuid
@@ -41,7 +40,7 @@ from harbor.models.trial.paths import TrialPaths
 
 from .async_machine import AsyncMachine
 from .errors import SmolError
-from .types import ConnectOptions, ExecOptions, MachineConfig, ResourceSpec, PortSpec
+from .types import ConnectOptions, ExecOptions, MachineConfig, ResourceSpec
 
 _SHELL_EXEC = (
     "if [ -x /bin/bash ]; then shell=/bin/bash; else shell=/bin/sh; fi; "
@@ -288,7 +287,6 @@ class SmolEnvironment(BaseEnvironment):
         fork_batch_size: int = 32,
         gpu_mode: Literal["cuda", "vulkan"] = "cuda",
         ready_timeout_sec: float = 120.0,
-        stream: bool = False,
         **kwargs: Any,
     ) -> None:
         if target not in {"local", "cloud"}:
@@ -316,12 +314,6 @@ class SmolEnvironment(BaseEnvironment):
         self._gpu_mode = gpu_mode
         self._ready_timeout_sec = ready_timeout_sec
         self._machine: AsyncMachine | None = None
-        self._smol_stream = stream
-        self._stream_handle = None
-        if stream and checkpoints:
-            raise ValueError(
-                "Streaming with external checkpoints is not yet supported; use auto_checkpoint"
-            )
         super().__init__(
             environment_dir,
             environment_name,
@@ -329,7 +321,6 @@ class SmolEnvironment(BaseEnvironment):
             trial_paths,
             task_env_config,
             *args,
-            **({"stream": True} if stream else {}),
             **kwargs,
         )
 
@@ -342,7 +333,6 @@ class SmolEnvironment(BaseEnvironment):
     @override
     def capabilities(self) -> EnvironmentCapabilities:
         return EnvironmentCapabilities(
-            **({"stream": True} if self._smol_stream else {}),
             gpus=self._target == "local",
             disable_internet=True,
             network_allowlist=True,
@@ -480,7 +470,6 @@ class SmolEnvironment(BaseEnvironment):
             resources.gpu,
             tuple(sorted(self._startup_env().items())),
             self.task_env_config.workdir,
-            self._smol_stream,
         )
 
     async def _create_golden(self) -> AsyncMachine:
@@ -493,22 +482,12 @@ class SmolEnvironment(BaseEnvironment):
                 image=image,
                 resources=self._resource_spec(),
                 checkpoint=True,
-                ports=self._stream_ports(),
-                wait_for_ports=not self._smol_stream,
                 ready_timeout_seconds=self._ready_timeout_sec,
                 env=self._startup_env() or None,
                 workdir=self.task_env_config.workdir,
             ),
             self._connect,
         )
-        if self._smol_stream:
-            from .harbor_stream import prepare
-
-            try:
-                await prepare(machine)
-            except BaseException:
-                await machine.delete()
-                raise
         _OWNED_GOLDENS.append(machine)
         return machine
 
@@ -525,19 +504,6 @@ class SmolEnvironment(BaseEnvironment):
             if state.golden_tasks.get(key) is task:
                 state.golden_tasks.pop(key, None)
             raise
-
-    def _stream_ports(self):
-        if not self._smol_stream:
-            return None
-        host = 0  # Cloud allocates a node port itself.
-        if self._target == "local":
-            # Older bundled engines retain host=0 rather than publishing the
-            # kernel-selected port. A bind collision at creation fails normally;
-            # never connect to an unverified listener (SSH pins its host key).
-            with socket.socket() as reservation:
-                reservation.bind(("127.0.0.1", 0))
-                host = reservation.getsockname()[1]
-        return [PortSpec(host=host, guest=22222)]
 
     async def _external_golden(self, checkpoint: _Checkpoint) -> AsyncMachine:
         return await AsyncMachine.connect(checkpoint.machine, self._connect)
@@ -599,8 +565,6 @@ class SmolEnvironment(BaseEnvironment):
                     MachineConfig(
                         name=name,
                         image=image,
-                        ports=self._stream_ports(),
-                        wait_for_ports=not self._smol_stream,
                         resources=self._resource_spec(),
                         ready_timeout_seconds=self._ready_timeout_sec,
                         env=self._startup_env() or None,
@@ -610,10 +574,6 @@ class SmolEnvironment(BaseEnvironment):
                 )
             await self.ensure_dirs(self._mount_targets(writable_only=True))
             await self._upload_environment_dir_after_start()
-            if self._smol_stream:
-                from .harbor_stream import start
-
-                self._stream_handle = await start(self)
         except BaseException:
             machine, self._machine = self._machine, None
             if machine is not None:
@@ -626,35 +586,16 @@ class SmolEnvironment(BaseEnvironment):
             raise RuntimeError("SmolEnvironment has not been started")
         return self._machine
 
-    @property
-    def stream_handle(self):
-        if self._stream_handle is None:
-            raise RuntimeError("Start this environment with stream enabled first")
-        return self._stream_handle
-
-    @classmethod
-    def connect_ssh(cls, handle):
-        from .harbor_stream import connect
-
-        return connect(handle)
-
     @override
     async def stop(self, delete: bool) -> None:
-        if not delete:
-            # Harbor's --no-delete keeps the sandbox live for its viewer.
-            # Local SDK machines still have their documented parent lifetime.
-            return
         machine, self._machine = self._machine, None
         if machine is None:
             return
         try:
-            if self._stream_handle is not None:
-                from .harbor_stream import cleanup
-
-                with contextlib.suppress(Exception):
-                    await cleanup(self._stream_handle, machine)
-                self._stream_handle = None
-            await machine.delete()
+            if delete:
+                await machine.delete()
+            else:
+                await machine.stop()
         except SmolError as error:
             if error.code not in {"NOT_FOUND", "VM_NOT_FOUND"}:
                 self._machine = machine

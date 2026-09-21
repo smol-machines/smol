@@ -7,6 +7,15 @@ from smol.tunnel import open_tunnel
 from smol.transport import CloudTransport
 
 
+async def roundtrip(endpoint):
+    reader, writer = await asyncio.open_connection(endpoint.host, endpoint.port)
+    payload = bytes(range(256)) * 128
+    writer.write(payload)
+    await writer.drain()
+    assert await reader.readexactly(len(payload)) == payload
+    return reader, writer
+
+
 def test_local_tunnel_roundtrip_and_cleanup():
     async def run():
         async def echo(reader, writer):
@@ -27,13 +36,7 @@ def test_local_tunnel_roundtrip_and_cleanup():
         )
         try:
             async with open_tunnel(machine, 22222) as endpoint:
-                reader, writer = await asyncio.open_connection(
-                    endpoint.host, endpoint.port
-                )
-                payload = bytes(range(256)) * 128
-                writer.write(payload)
-                await writer.drain()
-                assert await reader.readexactly(len(payload)) == payload
+                reader, writer = await roundtrip(endpoint)
             assert await asyncio.wait_for(reader.read(), 2) == b""
             writer.close()
             await writer.wait_closed()
@@ -80,13 +83,7 @@ def test_cloud_tunnel_binary_auth_and_disconnect():
                 )
             )
             async with open_tunnel(machine, 22222) as endpoint:
-                reader, writer = await asyncio.open_connection(
-                    endpoint.host, endpoint.port
-                )
-                payload = bytes(range(256)) * 128
-                writer.write(payload)
-                await writer.drain()
-                assert await reader.readexactly(len(payload)) == payload
+                reader, writer = await roundtrip(endpoint)
             assert await reader.read() == b""
             writer.close()
             await writer.wait_closed()
