@@ -121,6 +121,9 @@ class MachineConfig:
     """Maximum time creation waits for the guest and published services to
     become ready. Increase this for large images or heavily prepared sandbox
     workloads; the default preserves the SDK's existing two-minute behavior."""
+    wait_for_ports: bool = True
+    """Wait for published services at creation. Set false when installing a
+    service through exec after boot; creation still verifies guest execution."""
     branchable: Optional[bool] = None
     """Start as a live-RAM branch source so the machine can produce independent
     copy-on-write children with :meth:`Machine.branch`."""

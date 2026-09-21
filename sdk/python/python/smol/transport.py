@@ -1499,12 +1499,16 @@ def make_transport(config: MachineConfig, conn: Optional[ConnectOptions] = None)
                 # machine record carries no error detail of its own.
                 start_error = str(e)
             try:
-                _wait_for_ready(
-                    base_url,
-                    api_key,
-                    machine_id,
-                    timeout_s=config.ready_timeout_seconds,
-                )
+                if config.wait_for_ports:
+                    _wait_for_ready(
+                        base_url, api_key, machine_id,
+                        timeout_s=config.ready_timeout_seconds,
+                    )
+                else:
+                    _wait_for_execution(
+                        CloudTransport(base_url, api_key, machine_id, name),
+                        config.ready_timeout_seconds,
+                    )
             except SmolError as e:
                 if start_error is not None:
                     raise SmolError(e.code, f"{e} (start failed: {start_error})") from e
@@ -1531,7 +1535,10 @@ def make_transport(config: MachineConfig, conn: Optional[ConnectOptions] = None)
             inner.start_forkable()
         else:
             inner.start()
-        transport.wait_until_ready(config.ready_timeout_seconds)
+        if config.wait_for_ports:
+            transport.wait_until_ready(config.ready_timeout_seconds)
+        else:
+            _wait_for_execution(transport, config.ready_timeout_seconds)
         return transport
     except BaseException as e:
         if transport is not None:
@@ -1542,6 +1549,20 @@ def make_transport(config: MachineConfig, conn: Optional[ConnectOptions] = None)
         if isinstance(e, Exception):
             raise wrap_native_error(e) from e
         raise
+
+
+def _wait_for_execution(transport: Transport, timeout_s: float) -> None:
+    deadline = time.monotonic() + timeout_s
+    while time.monotonic() < deadline:
+        try:
+            result = transport.exec(["/bin/sh", "-c", "true"], ExecOptions(timeout=2))
+            if result.exit_code == 0:
+                return
+        except SmolError as error:
+            if error.code in {"AUTH", "UNAUTHORIZED", "FORBIDDEN", "NOT_FOUND"}:
+                raise
+        time.sleep(min(0.2, max(0, deadline - time.monotonic())))
+    raise SmolError("TIMEOUT", "guest execution did not become ready before the deadline")
 
 
 def connect_transport(machine_id: str, conn: Optional[ConnectOptions] = None) -> Transport:

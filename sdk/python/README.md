@@ -1,5 +1,22 @@
 # smol — Python SDK
 
+### Raw TCP tunnels
+
+Use a published guest port with any TCP client, locally or in smol cloud:
+
+```python
+async with machine.tunnel(22222) as endpoint:
+    reader, writer = await asyncio.open_connection(endpoint.host, endpoint.port)
+    # Exchange bytes with the guest service.
+    writer.close()
+    await writer.wait_closed()
+```
+
+Install `smolmachines[tunnel]` for cloud tunnels. Cloud authentication stays in
+the transport, not in the endpoint URL. Leaving the context closes the listener
+and its connections. Set `MachineConfig(wait_for_ports=False)` if you need to
+start the service after creation; guest command readiness is still checked.
+
 Embed isolated **microVM sandboxes** directly in your Python code. Same API
 locally (embedded engine, no server) or against **smol cloud** — the
 backend is chosen via `ConnectOptions` / `SMOL_CLOUD_TOKEN`. Mirrors the
