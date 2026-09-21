@@ -32,14 +32,19 @@ class ResourceSpec:
     memory_mb: Optional[int] = None
     """Memory in MB."""
     network: Optional[bool] = None
-    """Enable outbound network access (TSI). Default: False."""
+    """Enable unrestricted outbound network access (TSI). Default: False. To
+    allow only specific destinations, set ``allow_hosts`` or ``allow_cidrs``
+    instead of this flag; either one enables networking scoped to its list."""
     allow_cidrs: Optional[list[str]] = None
     """Scope egress to these CIDR ranges. Setting this (or allow_hosts) enables
-    networking and restricts it to the listed CIDRs."""
+    networking and restricts it to the listed CIDRs. Enforced on both the local
+    and cloud targets."""
     allow_hosts: Optional[list[str]] = None
     """Scope egress to these hostnames and their subdomains (e.g.
     api.anthropic.com). Setting this (or allow_cidrs) enables networking and
-    restricts it to the listed hosts."""
+    restricts it to the listed hosts; names are enforced at DNS inside the
+    machine, so a host served from another domain (a CDN) needs its own entry.
+    Enforced on both the local and cloud targets."""
     storage_gb: Optional[int] = None
     """Storage disk size in GB."""
     overlay_gb: Optional[int] = None
@@ -104,7 +109,8 @@ class MachineConfig:
     so a config that plainly asked for network produced a machine without it —
     and an image pull then failed with an unreachable-network error that reads
     like a broken VM. ``resources.network`` still wins when both are given, so
-    no existing config changes meaning."""
+    no existing config changes meaning. For an allowlist rather than open
+    access, set ``resources.allow_hosts`` or ``resources.allow_cidrs``."""
     persistent: bool = False
     """Keep the machine record after the process exits (local)."""
     auto_stop_seconds: Optional[int] = None

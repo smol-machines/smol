@@ -130,8 +130,7 @@ pub struct MachineConfig {
     /// Back guest RAM with a memfd on every start, so the machine can be
     /// branched.
     pub branchable: bool,
-    /// CIDRs the machine may reach. Cloud only; locally, egress is governed by
-    /// the network flag and the host.
+    /// CIDRs the machine may reach, on the local and cloud targets alike.
     pub allowed_cidrs: Vec<String>,
     /// Idle seconds before the machine stops on its own. Cloud only.
     pub auto_stop_seconds: Option<u64>,
@@ -481,7 +480,7 @@ impl MachineBuilder {
         self
     }
 
-    /// Permit a CIDR through the egress filter. Cloud only.
+    /// Permit a CIDR through the egress filter.
     pub fn allow_cidr(mut self, cidr: impl Into<String>) -> Self {
         self.config.allowed_cidrs.push(cidr.into());
         self
