@@ -486,8 +486,14 @@ jobs:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
         run: |
           set -euo pipefail
+          # smol-cloud is a member of the CLI workspace, whose root package
+          # path-depends on the engine checkout that sits beside this repo on a
+          # developer machine but not on a runner. Publishing a member resolves
+          # the whole workspace, so publish from a copy that lives outside it.
+          # The crate inherits nothing from the workspace, so the copy is complete.
+          cp -r crates/smol-cloud "$RUNNER_TEMP/smol-cloud"
           # Order matters: the SDK resolves smol-cloud from the registry.
-          cargo publish --manifest-path crates/smol-cloud/Cargo.toml
+          cargo publish --manifest-path "$RUNNER_TEMP/smol-cloud/Cargo.toml"
           # crates.io needs a moment to index before the dependant resolves.
           for _ in $(seq 1 30); do
             cargo publish --manifest-path sdk/rust/Cargo.toml && break
