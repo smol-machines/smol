@@ -319,7 +319,9 @@ class SmolEnvironment(BaseEnvironment):
         self._smol_stream = stream
         self._stream_handle = None
         if stream and checkpoints:
-            raise ValueError("Streaming with external checkpoints is not yet supported; use auto_checkpoint")
+            raise ValueError(
+                "Streaming with external checkpoints is not yet supported; use auto_checkpoint"
+            )
         super().__init__(
             environment_dir,
             environment_name,
@@ -501,6 +503,7 @@ class SmolEnvironment(BaseEnvironment):
         )
         if self._smol_stream:
             from .harbor_stream import prepare
+
             try:
                 await prepare(machine)
             except BaseException:
@@ -609,6 +612,7 @@ class SmolEnvironment(BaseEnvironment):
             await self._upload_environment_dir_after_start()
             if self._smol_stream:
                 from .harbor_stream import start
+
                 self._stream_handle = await start(self)
         except BaseException:
             machine, self._machine = self._machine, None
@@ -631,22 +635,26 @@ class SmolEnvironment(BaseEnvironment):
     @classmethod
     def connect_ssh(cls, handle):
         from .harbor_stream import connect
+
         return connect(handle)
 
     @override
     async def stop(self, delete: bool) -> None:
+        if not delete:
+            # Harbor's --no-delete keeps the sandbox live for its viewer.
+            # Local SDK machines still have their documented parent lifetime.
+            return
         machine, self._machine = self._machine, None
         if machine is None:
             return
         try:
             if self._stream_handle is not None:
                 from .harbor_stream import cleanup
-                await cleanup(self._stream_handle, machine)
+
+                with contextlib.suppress(Exception):
+                    await cleanup(self._stream_handle, machine)
                 self._stream_handle = None
-            if delete:
-                await machine.delete()
-            else:
-                await machine.stop()
+            await machine.delete()
         except SmolError as error:
             if error.code not in {"NOT_FOUND", "VM_NOT_FOUND"}:
                 self._machine = machine

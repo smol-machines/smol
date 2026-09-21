@@ -243,6 +243,30 @@ merely reusing image layers. The initial implementation supports Linux
 single-container tasks with a published `docker_image`; Docker Compose and
 Dockerfile-only tasks fail clearly instead of silently changing semantics.
 
+#### Live trajectories and files
+
+Add `--stream` to the Harbor command, then open the job in `harbor view`.
+For cloud trials, also pass `--environment-kwarg target=cloud`; run the viewer
+with the same `SMOL_CLOUD_URL` and your own `SMOL_CLOUD_TOKEN`.
+
+Streaming uses Harbor's ATIF converter and code-server over SSH. Stream handles
+contain no credentials. Local access uses private credentials on the runner's
+host; cloud viewers obtain a short-lived SSH key through their authenticated
+SDK session. SSH host keys are pinned, and closing a cloud session removes its
+authorized key and tunnel.
+
+The task image must run as root and provide OpenSSH, bash, and setsid. On Debian
+or Ubuntu the adapter can install OpenSSH, curl, and CA certificates when network
+access permits. Offline tasks must include these tools and code-server in their
+image; streaming never relaxes the task's network policy. The editor uses disk
+space under `/var/tmp`, not guest RAM under `/tmp`.
+
+Streaming works with cold trials and automatically prepared branch sources;
+externally supplied `checkpoints` are not supported in streaming mode yet.
+Local viewers must run on the runner's host while its SDK process remains alive.
+Cloud streaming requires the control-plane TCP tunnel endpoint and Harbor's
+installed-plugin streaming support; upgrading only the SDK is not sufficient.
+
 ## Architecture
 - **Pure-Python layer** (`python/smol`): `Machine`, transports, types, errors —
   zero third-party deps (the cloud transport uses only `urllib`).

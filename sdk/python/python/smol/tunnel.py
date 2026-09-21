@@ -30,14 +30,26 @@ async def open_tunnel(machine, port: int):
     if cloud:
         from websockets.asyncio.client import connect
 
+        class DirectConnect(connect):
+            def process_redirect(self, exc):
+                # Never forward the bearer token to a redirect destination.
+                return exc
+
         base = urlsplit(transport._base)
         if base.scheme not in {"http", "https"} or base.username or base.password:
             raise ValueError("cloud tunnel requires an HTTP(S) API endpoint")
-        url = urlunsplit((
-            "wss" if base.scheme == "https" else "ws", base.netloc,
-            base.path.rstrip("/") + "/v1/machines/" + quote(transport._id, safe="")
-            + f"/tunnel/{port}", "", "",
-        ))
+        url = urlunsplit(
+            (
+                "wss" if base.scheme == "https" else "ws",
+                base.netloc,
+                base.path.rstrip("/")
+                + "/v1/machines/"
+                + quote(transport._id, safe="")
+                + f"/tunnel/{port}",
+                "",
+                "",
+            )
+        )
     else:
         endpoint = transport.endpoint(port)
         address = urlsplit(endpoint.http_url)
@@ -49,11 +61,16 @@ async def open_tunnel(machine, port: int):
     async def relay(reader, writer):
         try:
             if cloud:
-                async with connect(
-                    url, additional_headers={"Authorization": f"Bearer {transport._key}"},
-                    open_timeout=10, close_timeout=2, max_size=65536, max_queue=4,
+                async with DirectConnect(
+                    url,
+                    additional_headers={"Authorization": f"Bearer {transport._key}"},
+                    open_timeout=10,
+                    close_timeout=2,
+                    max_size=65536,
+                    max_queue=4,
                     proxy=None,
                 ) as websocket:
+
                     async def upload():
                         while chunk := await reader.read(32768):
                             await websocket.send(chunk)
@@ -61,7 +78,9 @@ async def open_tunnel(machine, port: int):
                     async def download():
                         async for chunk in websocket:
                             if not isinstance(chunk, bytes):
-                                raise ValueError("TCP tunnel received a non-binary frame")
+                                raise ValueError(
+                                    "TCP tunnel received a non-binary frame"
+                                )
                             writer.write(chunk)
                             await writer.drain()
 
@@ -86,12 +105,17 @@ async def open_tunnel(machine, port: int):
             await writer.wait_closed()
 
     def accepted(reader, writer):
+        if len(clients) >= 64:
+            writer.close()
+            return
         task = asyncio.create_task(relay(reader, writer))
         clients.add(task)
+
         def finished(done):
             clients.discard(done)
             if not done.cancelled():
                 done.exception()  # Connection errors must not leak auth headers.
+
         task.add_done_callback(finished)
 
     server = await asyncio.start_server(accepted, "127.0.0.1", 0, limit=65536)
