@@ -12,17 +12,24 @@ export interface ResourceSpec {
   cpus?: number;
   /** Memory in MB. */
   memoryMb?: number;
-  /** Enable outbound network access (TSI). Default: false. */
+  /**
+   * Enable unrestricted outbound network access (TSI). Default: false. To allow
+   * only specific destinations, set `allowHosts` or `allowCidrs` instead of
+   * this flag; either one enables networking scoped to its list.
+   */
   network?: boolean;
   /**
    * Scope egress to these CIDR ranges. Setting this (or `allowHosts`) enables
-   * networking and restricts it to the listed CIDRs. Cloud target only.
+   * networking and restricts it to the listed CIDRs. Enforced on both the local
+   * and cloud targets.
    */
   allowCidrs?: string[];
   /**
    * Scope egress to these hostnames and their subdomains (e.g.
    * `api.anthropic.com`). Setting this (or `allowCidrs`) enables networking and
-   * restricts it to the listed hosts. Cloud target only.
+   * restricts it to the listed hosts; names are enforced at DNS inside the
+   * machine, so a host served from another domain (a CDN) needs its own entry.
+   * Enforced on both the local and cloud targets.
    */
   allowHosts?: string[];
   /** Storage disk size in GB (default: 20). */
@@ -143,7 +150,9 @@ export interface MachineConfig {
   /** Enable outbound network access. An alias for `resources.network`, which
    *  takes precedence when both are set. Accepted here because it is the
    *  shape callers reach for first, and was previously ignored without a
-   *  word — a machine that asked for network quietly got none. */
+   *  word — a machine that asked for network quietly got none. For an
+   *  allowlist rather than open access, set `resources.allowHosts` or
+   *  `resources.allowCidrs`. */
   network?: boolean;
   /** Keep the machine record after the process exits (default: false). (local) */
   persistent?: boolean;
