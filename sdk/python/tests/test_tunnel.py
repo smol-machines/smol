@@ -2,9 +2,8 @@ import asyncio
 from types import SimpleNamespace
 
 import pytest
-
-from smol.tunnel import open_tunnel
 from smol.transport import CloudTransport
+from smol.tunnel import open_tunnel
 
 
 async def roundtrip(endpoint):
