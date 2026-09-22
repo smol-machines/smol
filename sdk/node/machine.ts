@@ -272,9 +272,13 @@ export class Machine {
     return this.transport.stop();
   }
 
-  /** Start (resume) a stopped machine, awaiting until its agent is ready. The
-   *  counterpart to `stop()` — disk state is preserved across a stop/start, so
-   *  this is a cheap pause/resume. */
+  /** Save RAM and disk durably, then stop at that execution boundary. */
+  pause(): Promise<void> { return this.transport.pause(); }
+
+  /** Resume saved execution in this machine. */
+  resume(): Promise<void> { return this.transport.resume(); }
+
+  /** Boot a stopped machine with its disk state, not its previous RAM. */
   start(): Promise<void> {
     return this.transport.start();
   }

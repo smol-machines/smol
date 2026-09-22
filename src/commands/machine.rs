@@ -26,6 +26,10 @@ pub enum MachineSubcommand {
 
     /// Stop a machine
     Stop(crate::commands::stop::StopCmd),
+    /// Save RAM and disk durably before stopping
+    Pause(crate::commands::saved_execution::SavedExecutionCmd),
+    /// Resume saved execution in the same machine
+    Resume(crate::commands::saved_execution::SavedExecutionCmd),
 
     /// Delete a machine
     #[command(visible_alias = "delete")]
@@ -111,6 +115,8 @@ impl MachineCmd {
             MachineSubcommand::Create(cmd) => cmd.run(),
             MachineSubcommand::Start(cmd) => cmd.run(),
             MachineSubcommand::Stop(cmd) => cmd.run(),
+            MachineSubcommand::Pause(cmd) => cmd.run(false),
+            MachineSubcommand::Resume(cmd) => cmd.run(true),
             MachineSubcommand::Rm(cmd) => cmd.run(),
             MachineSubcommand::Ls(cmd) => cmd.run(),
             MachineSubcommand::Status(cmd) => cmd.run(),

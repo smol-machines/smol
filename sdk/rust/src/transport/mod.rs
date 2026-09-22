@@ -87,6 +87,8 @@ pub(crate) trait Transport: Send + Sync + std::fmt::Debug {
     fn start(&self) -> Result<()>;
     fn start_branchable(&self) -> Result<()>;
     fn stop(&self) -> Result<()>;
+    fn pause(&self) -> Result<()>;
+    fn resume(&self) -> Result<()>;
     fn delete(&self) -> Result<()>;
 
     fn exec(&self, command: Vec<String>, options: ExecOptions) -> Result<ExecResult>;

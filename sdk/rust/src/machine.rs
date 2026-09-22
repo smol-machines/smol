@@ -20,6 +20,10 @@ const READY_INTERVAL: std::time::Duration = std::time::Duration::from_secs(1);
 pub enum MachineState {
     /// Created or stopped; nothing is running.
     Stopped,
+    /// Saving execution before releasing compute resources.
+    Pausing,
+    /// Execution saved durably; use resume, not start.
+    Paused,
     /// Being created or booted.
     Starting,
     /// The VM process launched. This does *not* mean the guest is usable yet —
@@ -41,6 +45,8 @@ impl MachineState {
     pub(crate) fn parse(state: &str) -> Self {
         match state {
             "stopped" => Self::Stopped,
+            "paused" => Self::Paused,
+            "pausing" => Self::Pausing,
             "creating" | "starting" => Self::Starting,
             "started" => Self::Started,
             "running" => Self::Running,
@@ -55,6 +61,8 @@ impl MachineState {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Stopped => "stopped",
+            Self::Paused => "paused",
+            Self::Pausing => "pausing",
             Self::Starting => "starting",
             Self::Started => "started",
             Self::Running => "running",
@@ -725,6 +733,16 @@ impl Machine {
     /// Shut the machine down, keeping its disks.
     pub fn stop(&self) -> Result<()> {
         self.transport.stop()
+    }
+
+    /// Save RAM and disk durably, then stop at that boundary.
+    pub fn pause(&self) -> Result<()> {
+        self.transport.pause()
+    }
+
+    /// Resume saved execution in this machine.
+    pub fn resume(&self) -> Result<()> {
+        self.transport.resume()
     }
 
     /// Stop the machine and remove its storage. Not reversible.

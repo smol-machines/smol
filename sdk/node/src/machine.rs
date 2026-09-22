@@ -508,6 +508,27 @@ impl NapiMachine {
             .into_napi()
     }
 
+    /// Save execution durably and stop the machine.
+    #[napi]
+    pub async fn pause(&self) -> napi::Result<()> {
+        let runtime = runtime().into_napi()?;
+        let name = self.name.clone();
+        tokio::task::spawn_blocking(move || runtime.pause_machine(&name))
+            .await
+            .map_err(join_error)?
+            .into_napi()
+    }
+
+    #[napi]
+    pub async fn resume(&self) -> napi::Result<()> {
+        let runtime = runtime().into_napi()?;
+        let name = self.name.clone();
+        tokio::task::spawn_blocking(move || runtime.resume_machine(&name))
+            .await
+            .map_err(join_error)?
+            .into_napi()
+    }
+
     /// Stop the machine and clean up all storage (disks, config).
     #[napi]
     pub async fn delete(&self) -> napi::Result<()> {

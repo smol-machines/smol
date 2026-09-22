@@ -192,6 +192,26 @@ impl Client {
         )
     }
 
+    /// Save execution durably and stop the machine.
+    pub fn pause(&self, id: &str) -> Result<()> {
+        self.empty(
+            reqwest::Method::POST,
+            &format!("/v1/machines/{id}/pause"),
+            Body::None,
+            START_TIMEOUT,
+        )
+    }
+
+    /// Resume saved execution in the same machine.
+    pub fn resume(&self, id: &str) -> Result<()> {
+        self.empty(
+            reqwest::Method::POST,
+            &format!("/v1/machines/{id}/resume"),
+            Body::None,
+            START_TIMEOUT,
+        )
+    }
+
     /// Delete a machine.
     pub fn delete(&self, id: &str) -> Result<()> {
         self.empty(

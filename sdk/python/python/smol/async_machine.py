@@ -221,6 +221,14 @@ class AsyncMachine:
         """Stop the machine."""
         await asyncio.to_thread(self._m.stop)
 
+    async def pause(self) -> None:
+        """Save RAM and disk durably, then stop."""
+        await asyncio.to_thread(self._m.pause)
+
+    async def resume(self) -> None:
+        """Resume saved execution in this machine."""
+        await asyncio.to_thread(self._m.resume)
+
     async def start(self) -> None:
         """Start (resume) a stopped machine, waiting until its agent is ready. The
         counterpart to :meth:`stop`; disk state is preserved across the cycle."""

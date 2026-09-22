@@ -741,6 +741,18 @@ impl Machine {
             .map_err(err)
     }
 
+    fn pause(&self, py: Python<'_>) -> PyResult<()> {
+        let runtime = runtime().map_err(err)?;
+        py.allow_threads(|| runtime.pause_machine(&self.name))
+            .map_err(err)
+    }
+
+    fn resume(&self, py: Python<'_>) -> PyResult<()> {
+        let runtime = runtime().map_err(err)?;
+        py.allow_threads(|| runtime.resume_machine(&self.name))
+            .map_err(err)
+    }
+
     fn delete(&self, py: Python<'_>) -> PyResult<()> {
         let runtime = runtime().map_err(err)?;
         py.allow_threads(|| runtime.delete_machine(&self.name))

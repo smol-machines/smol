@@ -253,10 +253,16 @@ class Machine:
         self._t.stop()
 
     def start(self) -> None:
-        """Start (resume) a stopped machine, waiting until its agent is ready. The
-        counterpart to :meth:`stop` — a stopped machine keeps its disk state, so
-        ``start()`` brings it back with that state intact (cheap pause/resume)."""
+        """Boot a stopped machine with its disk state, not its previous RAM."""
         self._t.start()
+
+    def pause(self) -> None:
+        """Save RAM and disk durably, then stop at that execution boundary."""
+        self._t.pause()
+
+    def resume(self) -> None:
+        """Resume saved execution in this machine."""
+        self._t.resume()
 
     def delete(self, include_usage: bool = False) -> Optional[MachineUsageReport]:
         """Stop the machine and delete its storage. On the cloud target, pass

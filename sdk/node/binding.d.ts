@@ -228,6 +228,9 @@ export declare class NapiMachine {
   sync(): Promise<void>
   /** Stop the machine VM gracefully. */
   stop(): Promise<void>
+  /** Save execution durably and stop the machine. */
+  pause(): Promise<void>
+  resume(): Promise<void>
   /** Stop the machine and clean up all storage (disks, config). */
   delete(): Promise<void>
 }

@@ -127,6 +127,8 @@ export interface NapiMachine {
   execStream(command: string[], options?: NativeExecOptions): NativeExecStream;
   sync(): Promise<void>;
   stop(): Promise<void>;
+  pause(): Promise<void>;
+  resume(): Promise<void>;
   delete(): Promise<void>;
 }
 

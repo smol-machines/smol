@@ -111,6 +111,8 @@ export interface Transport {
   readonly machineId: string;
   sync(): Promise<void>;
   stop(): Promise<void>;
+  pause(): Promise<void>;
+  resume(): Promise<void>;
   start(): Promise<void>;
   delete(): Promise<void>;
   /** Cloud only: delete and return the settled usage + cost in one call. */
@@ -491,6 +493,17 @@ class LocalTransport implements Transport {
     } catch (e) {
       throw wrapNativeError(e);
     }
+  }
+
+  async pause(): Promise<void> {
+    try { await this.inner.pause(); } catch (e) { throw wrapNativeError(e); }
+    liveLocal.delete(this);
+  }
+
+  async resume(): Promise<void> {
+    try { await this.inner.resume(); } catch (e) { throw wrapNativeError(e); }
+    if (this.cleanupOnExit) liveLocal.add(this);
+    await this.waitUntilReady();
   }
 
   async start(): Promise<void> {
@@ -1131,6 +1144,15 @@ class CloudTransport implements Transport {
 
   async stop(): Promise<void> {
     await cloudFetch(this.conn, "POST", `/v1/machines/${this.id}/stop`);
+  }
+
+  async pause(): Promise<void> {
+    await cloudFetch(this.conn, "POST", `/v1/machines/${this.id}/pause`, { timeoutMs: CLOUD_START_TIMEOUT_MS });
+  }
+
+  async resume(): Promise<void> {
+    await cloudFetch(this.conn, "POST", `/v1/machines/${this.id}/resume`, { timeoutMs: CLOUD_START_TIMEOUT_MS });
+    await waitForReady(this.conn, this.id);
   }
 
   async start(): Promise<void> {
