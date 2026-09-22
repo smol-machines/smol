@@ -4,6 +4,7 @@ use clap::{Parser, Subcommand};
 use tracing_subscriber::EnvFilter;
 
 mod commands;
+mod telemetry;
 
 #[derive(Parser)]
 #[command(name = "smol")]
@@ -153,6 +154,11 @@ fn main() {
     // Initialize logging from the parsed verbosity count (env vars override).
     init_logging(cli.verbose);
 
+    // Anonymous usage telemetry: records the command path and outcome, uploads
+    // previously spooled events in the background. See `telemetry` for the
+    // exact contents and the off switches.
+    let telemetry = telemetry::begin(&std::env::args().collect::<Vec<_>>());
+
     let result = match cli.command {
         Commands::Run(cmd) => cmd.run(),
         Commands::New(cmd) => cmd.run(),
@@ -179,6 +185,8 @@ fn main() {
             Err(anyhow::anyhow!("the CUDA clone worker is unix-only"))
         }
     };
+
+    telemetry::finish(telemetry, result.is_ok());
 
     if let Err(e) = result {
         eprintln!("Error: {}", e);

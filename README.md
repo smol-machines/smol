@@ -210,6 +210,18 @@ native builds are produced by maintainers' CI. Most contributions don't need a
 native build — see [CONTRIBUTING.md](CONTRIBUTING.md). To report a security
 issue, see [SECURITY.md](SECURITY.md).
 
+## Telemetry
+
+`smol` records one anonymous event per command — the command path (`machine create`, never its arguments, names or paths), whether it succeeded, how long it took, and the CLI version and platform — and uploads the batch in the background on the next run. Events carry a random per-installation id; when you are logged in they are attributed to your account. Nothing is sent while a command runs, and nothing is sent at all if you turn it off:
+
+```bash
+smol config set telemetry off     # persistent
+SMOL_TELEMETRY=0 smol …           # this invocation
+DO_NOT_TRACK=1 smol …             # the cross-tool convention
+```
+
+`smol config show` prints the current setting. Events go to the control plane your CLI is configured for (`api.smolmachines.com` unless you point it at your own).
+
 ## License
 
 [Apache-2.0](LICENSE).

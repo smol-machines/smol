@@ -39,6 +39,7 @@ impl ConfigCmd {
 enum ConfigTarget {
     Endpoint,
     ApiKey,
+    Telemetry,
 }
 
 /// Map a user-supplied key to the setting it writes.
@@ -53,6 +54,7 @@ fn resolve_config_key(key: &str) -> Option<ConfigTarget> {
         "api_key" | "apikey" | "api-key" | "cloud.api_key" | "cloud.apikey" | "cloud.api-key" => {
             Some(ConfigTarget::ApiKey)
         }
+        "telemetry" | "telemetry.enabled" => Some(ConfigTarget::Telemetry),
         _ => None,
     }
 }
@@ -75,9 +77,22 @@ impl ConfigSetCmd {
                 eprintln!("API key configured.");
                 Ok(())
             }
+            Some(ConfigTarget::Telemetry) => {
+                let enabled = match self.value.trim().to_ascii_lowercase().as_str() {
+                    "on" | "true" | "1" | "yes" => true,
+                    "off" | "false" | "0" | "no" => false,
+                    other => anyhow::bail!("telemetry must be `on` or `off`, got '{other}'"),
+                };
+                crate::telemetry::set_enabled(enabled)?;
+                eprintln!(
+                    "Telemetry {}.",
+                    if enabled { "enabled" } else { "disabled" }
+                );
+                Ok(())
+            }
             None => anyhow::bail!(
                 "unknown config key: '{}'. Available: cloud.endpoint (alias: cloud), \
-                 cloud.api_key (alias: api_key)",
+                 cloud.api_key (alias: api_key), telemetry (on|off)",
                 self.key
             ),
         }
@@ -134,6 +149,12 @@ fn show_config() -> anyhow::Result<()> {
     println!(
         "cloud.api_key  = {}",
         mask_secret(settings.cloud.api_key.as_deref())
+    );
+    let telemetry = crate::telemetry::status();
+    println!(
+        "telemetry      = {} (from {})",
+        if telemetry.enabled { "on" } else { "off" },
+        telemetry.source
     );
 
     // Registries are the other half of the config; enumerate both sections so

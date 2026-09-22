@@ -41,6 +41,8 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 anyhow = "1"
 serde_json = "1"
 serde = { version = "1", features = ["derive"] }
+# Random per-installation id and event ids for anonymous telemetry.
+getrandom = { version = "0.3", features = ["std"] }
 toml = "0.8"
 tempfile = "3"
 dirs = "5"
