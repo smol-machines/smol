@@ -35,6 +35,7 @@ pub mod restore;
 pub mod rm;
 pub mod rollout;
 pub mod run;
+pub mod saved_execution;
 pub mod scale;
 pub mod start;
 pub mod status;

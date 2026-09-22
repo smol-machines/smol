@@ -125,6 +125,8 @@ class Transport(Protocol):
     def pull_image(self, image: str) -> ImageInfo: ...
     def list_images(self) -> list[ImageInfo]: ...
     def stop(self) -> None: ...
+    def pause(self) -> None: ...
+    def resume(self) -> None: ...
     def sync(self) -> None: ...
     def start(self) -> None: ...
     def delete(self) -> None: ...
@@ -472,6 +474,22 @@ class LocalTransport:
             self._inner.stop()
         except Exception as e:  # noqa: BLE001
             raise wrap_native_error(e) from e
+
+    def pause(self) -> None:
+        try:
+            self._inner.pause()
+        except Exception as e:  # noqa: BLE001
+            raise wrap_native_error(e) from e
+        _live_local.discard(self)
+
+    def resume(self) -> None:
+        try:
+            self._inner.resume()
+        except Exception as e:  # noqa: BLE001
+            raise wrap_native_error(e) from e
+        if self._cleanup_on_exit:
+            _live_local.add(self)
+        self.wait_until_ready()
 
     def start(self) -> None:
         try:
@@ -868,6 +886,13 @@ class CloudTransport:
 
     def stop(self) -> None:
         _cloud_fetch(self._base, self._key, "POST", f"/v1/machines/{self._id}/stop")
+
+    def pause(self) -> None:
+        _cloud_fetch(self._base, self._key, "POST", f"/v1/machines/{self._id}/pause", timeout=CLOUD_START_TIMEOUT_S)
+
+    def resume(self) -> None:
+        _cloud_fetch(self._base, self._key, "POST", f"/v1/machines/{self._id}/resume", timeout=CLOUD_START_TIMEOUT_S)
+        _wait_for_ready(self._base, self._key, self._id)
 
     def start(self) -> None:
         # Resume a stopped machine, then wait for its agent so the returned handle

@@ -289,6 +289,10 @@ const server = createServer(async (req, res) => {
   }
   if (method === "POST" && url === "/v1/machines/m1/stop")
     return json(200, { state: "stopped" });
+  if (method === "POST" && url === "/v1/machines/m1/pause")
+    return json(200, { state: "paused" });
+  if (method === "POST" && url === "/v1/machines/m1/resume")
+    return json(200, { state: "started" });
   if (method === "DELETE" && url === "/v1/machines/m1") {
     res.writeHead(204);
     return res.end();
@@ -626,6 +630,9 @@ async function main(): Promise<void> {
   check("machine exposes its id", m.id === "m1", m.id);
   await m.start(); // POST /start + wait-ready (both mocked) — must not throw
   check("start() resumes a stopped machine without error", true);
+  await m.pause();
+  await m.resume();
+  check("pause/resume use their explicit REST routes", true);
 
   // --- complete with score/result, read the outcome back via status() ---
   const episode2 = await m.assign({ leaseId: "task-100" });

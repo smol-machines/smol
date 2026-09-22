@@ -298,6 +298,16 @@ impl Transport for LocalTransport {
             .map(|_| ())
     }
 
+    fn pause(&self) -> Result<()> {
+        self.run(&["machine", "pause", "--name", &self.name])
+            .map(|_| ())
+    }
+
+    fn resume(&self) -> Result<()> {
+        self.run(&["machine", "resume", "--name", &self.name])
+            .map(|_| ())
+    }
+
     fn delete(&self) -> Result<()> {
         self.run(&["machine", "delete", "--name", &self.name, "--force"])
             .map(|_| ())

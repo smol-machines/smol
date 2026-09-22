@@ -189,6 +189,27 @@ fn ready_machine(id: &str) -> String {
 // ---------------------------------------------------------------------------
 
 #[test]
+fn pause_and_resume_use_saved_execution_routes() {
+    let cloud = MockCloud::start(routes(vec![
+        (
+            "GET /v1/machines/m-1",
+            Box::new(|_| Reply::json(ready_machine("m-1"))),
+        ),
+        (
+            "POST /v1/machines/m-1/pause",
+            Box::new(|_| Reply::json(r#"{"state":"paused"}"#)),
+        ),
+        (
+            "POST /v1/machines/m-1/resume",
+            Box::new(|_| Reply::json(ready_machine("m-1"))),
+        ),
+    ]));
+    let machine = Machine::connect_with("m-1", &cloud.connect()).unwrap();
+    machine.pause().unwrap();
+    machine.resume().unwrap();
+}
+
+#[test]
 fn creating_on_the_cloud_sends_the_image_starts_it_and_waits_for_ready() {
     let cloud = MockCloud::start(routes(vec![
         (

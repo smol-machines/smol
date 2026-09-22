@@ -128,6 +128,15 @@ impl Transport for CloudTransport {
         Ok(self.client.stop(&self.id)?)
     }
 
+    fn pause(&self) -> Result<()> {
+        Ok(self.client.pause(&self.id)?)
+    }
+
+    fn resume(&self) -> Result<()> {
+        self.client.resume(&self.id)?;
+        self.wait_until_ready(ReadyOptions::default())
+    }
+
     fn delete(&self) -> Result<()> {
         Ok(self.client.delete(&self.id)?)
     }

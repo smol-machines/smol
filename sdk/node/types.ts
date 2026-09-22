@@ -4,7 +4,7 @@
 /** Lifecycle state of a machine. Cloud `"started"` means the VM process
  * launched, not that the guest agent or workload is ready; use `ready()` or
  * `waitUntilReady()` before doing work. */
-export type MachineState = "created" | "started" | "running" | "stopped";
+export type MachineState = "created" | "started" | "running" | "stopped" | "pausing" | "paused";
 
 /** CPU / memory / disk / network allocation for a machine. */
 export interface ResourceSpec {

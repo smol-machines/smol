@@ -157,6 +157,12 @@ try {
 
 ## API
 
+`await machine.pause()` saves execution durably and stops the VM;
+`await machine.resume()` restores its processes, RAM and disks under the same identity.
+Use a branchable machine. Unlike stop/start, resume does not boot a fresh guest.
+Local saves need the machine's data directory; cloud saves use object storage.
+Existing network connections may need to reconnect.
+
 - `Machine.create(config?, conn?)` — create and start a machine; cloud waits for
   `ready === true` before returning.
 - `Machine.connect(id, conn?)` — attach to an existing machine without waiting;

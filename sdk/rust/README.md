@@ -199,6 +199,12 @@ let workers = source.branch_batch(names, BranchOptions::new().parallel(8))?;
 
 ## Checkpoints
 
+For a managed save under the same machine identity, use `machine.pause()?` and
+`machine.resume()?`. Pause waits for durable storage before stopping; resume
+restores processes, RAM and disks rather than booting a fresh guest. Use a
+branchable machine. Local saves need the machine's data directory; cloud saves
+use object storage. Existing network connections may need to reconnect.
+
 A checkpoint is a portable capture of a running machine. Point every capture of
 a machine at the same store and all but the first are incremental: unchanged
 chunks are reused rather than written again, which is what makes a warm capture

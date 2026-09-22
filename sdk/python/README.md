@@ -305,6 +305,12 @@ existing.wait_until_ready()
 ```
 
 ## API
+
+`machine.pause()` saves execution durably and stops the VM; `machine.resume()`
+restores its processes, RAM and disks under the same identity. Use a branchable
+machine. Unlike stop/start, resume does not boot a fresh guest. Local saves need
+the machine's data directory; cloud saves use object storage. Existing network
+connections may need to reconnect. Both methods are awaitable on `AsyncMachine`.
 - `Machine` (sync) / `AsyncMachine` (awaitable, non-blocking) — identical surface; see the async example above.
 - `RolloutClient` — publish versioned LoRAs and generate single- or multi-policy cohorts.
 - `Machine.create(config=None, conn=None)` — create and start a machine; cloud
