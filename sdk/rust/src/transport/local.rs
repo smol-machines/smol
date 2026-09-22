@@ -8,7 +8,7 @@
 //! The cost is that a local machine needs `smolvm` installed; see
 //! [`crate::RuntimeAssets::from_path_lookup`] for how it is found.
 
-use std::io::{BufRead, BufReader};
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::mpsc;
@@ -28,15 +28,49 @@ use crate::machine::{
 /// How many branches boot at once when a batch does not say.
 const DEFAULT_BRANCH_PARALLEL: usize = 8;
 
+fn transfer_dir() -> Result<tempfile::TempDir> {
+    let mut builder = tempfile::Builder::new();
+    builder.prefix("smolmachines-transfer-");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        builder.permissions(std::fs::Permissions::from_mode(0o700));
+    }
+    builder
+        .tempdir()
+        .map_err(|e| Error::new(ErrorKind::Storage, format!("stage file transfer: {e}")))
+}
+
+fn forward_output(
+    mut reader: impl Read,
+    tx: mpsc::Sender<ExecEvent>,
+    event: fn(Vec<u8>) -> ExecEvent,
+) {
+    let mut buffer = [0; 8192];
+    loop {
+        match reader.read(&mut buffer) {
+            Ok(0) => break,
+            Ok(n) => {
+                // Keep draining if the stream was dropped: the guest command
+                // must not fail or block because its reader went away.
+                let _ = tx.send(event(buffer[..n].to_vec()));
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+            Err(e) => {
+                let _ = tx.send(ExecEvent::Error(format!("read exec output: {e}")));
+                break;
+            }
+        }
+    }
+}
+
 /// Find the `smolvm` binary this transport drives.
 ///
 /// `SMOLVM` wins so a caller can pin a specific build; otherwise the installed
 /// CLI on `PATH`, then the two default install locations.
 pub(crate) fn resolve_cli() -> Result<PathBuf> {
     if let Some(explicit) = std::env::var_os("SMOLVM").map(PathBuf::from) {
-        if explicit.is_file() {
-            return Ok(explicit);
-        }
+        return explicit_cli(explicit);
     }
     if let Some(path) = std::env::var_os("PATH") {
         for dir in std::env::split_paths(&path) {
@@ -57,6 +91,17 @@ pub(crate) fn resolve_cli() -> Result<PathBuf> {
     // Nothing installed: fetch the engine this SDK was built against. Only a
     // local machine ever gets here, and only once — it is cached afterwards.
     crate::bootstrap::ensure_engine()
+}
+
+fn explicit_cli(path: PathBuf) -> Result<PathBuf> {
+    if path.is_file() {
+        Ok(path)
+    } else {
+        Err(Error::new(
+            ErrorKind::Config,
+            format!("SMOLVM must name an existing binary: {}", path.display()),
+        ))
+    }
 }
 
 #[derive(Debug)]
@@ -270,7 +315,8 @@ impl Transport for LocalTransport {
     }
 
     fn exec_stream(&self, command: Vec<String>, options: ExecOptions) -> Result<ExecStream> {
-        let args = self.exec_args(&command, &options);
+        let mut args = self.exec_args(&command, &options);
+        args.insert(2, "--stream".into());
         let mut child = Command::new(&self.cli)
             .args(&args)
             // Give the child no stdin. Inheriting the caller's makes the CLI
@@ -284,33 +330,20 @@ impl Transport for LocalTransport {
             .map_err(|e| Error::new(ErrorKind::Other, format!("start exec: {e}")))?;
 
         let (tx, rx) = mpsc::channel();
-        let out = child.stdout.take();
-        let err = child.stderr.take();
+        let out = child.stdout.take().expect("piped stdout");
+        let err = child.stderr.take().expect("piped stderr");
         let out_tx = tx.clone();
-        thread::spawn(move || {
-            if let Some(out) = out {
-                for line in BufReader::new(out).split(b'\n').map_while(|l| l.ok()) {
-                    if out_tx.send(ExecEvent::Stdout(line)).is_err() {
-                        return;
-                    }
-                }
-            }
-        });
+        let stdout = thread::spawn(move || forward_output(out, out_tx, ExecEvent::Stdout));
         let err_tx = tx.clone();
-        thread::spawn(move || {
-            if let Some(err) = err {
-                for line in BufReader::new(err).split(b'\n').map_while(|l| l.ok()) {
-                    if err_tx.send(ExecEvent::Stderr(line)).is_err() {
-                        return;
-                    }
-                }
-            }
-        });
+        let stderr = thread::spawn(move || forward_output(err, err_tx, ExecEvent::Stderr));
         thread::spawn(move || {
             let code = child.wait().ok().and_then(|s| s.code()).unwrap_or(-1);
-            // Dropping the other senders first is what ends the iterator, so
-            // the exit event has to be the last thing sent.
-            drop(tx.send(ExecEvent::Exit(code)));
+            let out_result = stdout.join();
+            let err_result = stderr.join();
+            if out_result.is_err() || err_result.is_err() {
+                let _ = tx.send(ExecEvent::Error("exec output reader failed".into()));
+            }
+            let _ = tx.send(ExecEvent::Exit(code));
         });
         Ok(ExecStream::from_receiver(rx))
     }
@@ -348,11 +381,8 @@ impl Transport for LocalTransport {
 
     fn read_file(&self, path: &str) -> Result<Vec<u8>> {
         // `machine cp` writes to a host path, so stage through a temp file.
-        let staged = std::env::temp_dir().join(format!(
-            "smolmachines-read-{}-{}",
-            std::process::id(),
-            path.replace('/', "_")
-        ));
+        let transfer = transfer_dir()?;
+        let staged = transfer.path().join("payload");
         self.run(&[
             "machine",
             "cp",
@@ -361,16 +391,12 @@ impl Transport for LocalTransport {
         ])?;
         let data = std::fs::read(&staged)
             .map_err(|e| Error::new(ErrorKind::Storage, format!("read {path}: {e}")))?;
-        let _ = std::fs::remove_file(&staged);
         Ok(data)
     }
 
     fn write_file(&self, path: &str, data: Vec<u8>, mode: Option<u32>) -> Result<()> {
-        let staged = std::env::temp_dir().join(format!(
-            "smolmachines-write-{}-{}",
-            std::process::id(),
-            path.replace('/', "_")
-        ));
+        let transfer = transfer_dir()?;
+        let staged = transfer.path().join("payload");
         std::fs::write(&staged, data)
             .map_err(|e| Error::new(ErrorKind::Storage, format!("stage {path}: {e}")))?;
         let staged_arg = staged.to_string_lossy().to_string();
@@ -381,9 +407,7 @@ impl Transport for LocalTransport {
             args.push("--mode");
             args.push(mode);
         }
-        let result = self.run(&args).map(|_| ());
-        let _ = std::fs::remove_file(&staged);
-        result
+        self.run(&args).map(|_| ())
     }
 
     fn pull_image(&self, _image: &str) -> Result<ImageInfo> {
@@ -667,5 +691,103 @@ mod capture_summary_tests {
         let (size, pause) = parse_capture_summary("Checkpointed 'x' to /p\n");
         assert!(size.is_none() && pause.is_none());
         assert!(parse_reused("nothing here").is_none());
+    }
+}
+
+#[cfg(all(test, unix))]
+mod io_tests {
+    use super::*;
+    use std::os::unix::fs::PermissionsExt;
+
+    fn cli(root: &Path, script: &str) -> LocalTransport {
+        let path = root.join("cli");
+        std::fs::write(&path, format!("#!/bin/sh\nset -eu\n{script}\n")).unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o700)).unwrap();
+        LocalTransport {
+            name: "test".into(),
+            cli: path,
+            ports: vec![],
+        }
+    }
+
+    #[test]
+    fn streaming_preserves_bytes_before_exit_and_delivers_partial_lines() {
+        let dir = tempfile::tempdir().unwrap();
+        let transport = cli(dir.path(), "test \"$3\" = --stream\nprintf 'first\\000'\nsleep 1\nprintf '\\nlast\\n'\nprintf 'error\\n' >&2\nexit 7");
+        let start = Instant::now();
+        let mut stream = transport
+            .exec_stream(vec!["true".into()], ExecOptions::new())
+            .unwrap();
+        assert_eq!(stream.next(), Some(ExecEvent::Stdout(b"first\0".to_vec())));
+        assert!(start.elapsed() < Duration::from_millis(800));
+        let events: Vec<_> = stream.collect();
+        assert_eq!(events.last(), Some(&ExecEvent::Exit(7)));
+        let mut out = Vec::new();
+        let mut err = Vec::new();
+        for event in events {
+            match event {
+                ExecEvent::Stdout(b) => out.extend(b),
+                ExecEvent::Stderr(b) => err.extend(b),
+                ExecEvent::Exit(_) => (),
+                ExecEvent::Error(e) => panic!("{e}"),
+            }
+        }
+        assert_eq!(out, b"\nlast\n");
+        assert_eq!(err, b"error\n");
+    }
+
+    #[test]
+    fn transfers_use_private_independent_staging_and_clean_up_on_failure() {
+        let a = transfer_dir().unwrap();
+        let b = transfer_dir().unwrap();
+        assert_ne!(a.path(), b.path());
+        assert_eq!(
+            std::fs::metadata(a.path()).unwrap().permissions().mode() & 0o077,
+            0
+        );
+        let dir = tempfile::tempdir().unwrap();
+        let record = dir.path().join("staged");
+        let transport = cli(
+            dir.path(),
+            &format!("printf '%s' \"$3\" > '{}'\nexit 1", record.display()),
+        );
+        assert!(transport
+            .write_file("/same", b"data".to_vec(), None)
+            .is_err());
+        let staged = PathBuf::from(std::fs::read_to_string(&record).unwrap());
+        assert!(!staged.parent().unwrap().exists());
+        let transport = cli(
+            dir.path(),
+            &format!("printf '%s' \"$4\" > '{}'\nexit 1", record.display()),
+        );
+        assert!(transport.read_file("/same").is_err());
+        let staged = PathBuf::from(std::fs::read_to_string(record).unwrap());
+        assert!(!staged.parent().unwrap().exists());
+    }
+
+    #[test]
+    fn explicit_runtime_must_exist_and_be_a_file() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(explicit_cli(dir.path().join("missing")).is_err());
+        assert!(explicit_cli(dir.path().into()).is_err());
+        let file = tempfile::NamedTempFile::new_in(dir.path()).unwrap();
+        assert_eq!(explicit_cli(file.path().into()).unwrap(), file.path());
+    }
+
+    #[test]
+    fn output_errors_are_not_overwritten_by_a_successful_exit() {
+        struct Broken;
+        impl Read for Broken {
+            fn read(&mut self, _: &mut [u8]) -> std::io::Result<usize> {
+                Err(std::io::Error::other("broken pipe"))
+            }
+        }
+        let (tx, rx) = mpsc::channel();
+        forward_output(Broken, tx.clone(), ExecEvent::Stdout);
+        tx.send(ExecEvent::Exit(0)).unwrap();
+        drop(tx);
+        let result = ExecStream::from_receiver(rx).collect_result();
+        assert_eq!(result.exit_code, -1);
+        assert!(result.stderr_utf8().contains("broken pipe"));
     }
 }

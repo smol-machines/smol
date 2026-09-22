@@ -105,16 +105,20 @@ impl ExecStream {
         let mut stdout = Vec::new();
         let mut stderr = Vec::new();
         let mut exit_code = -1;
+        let mut failed = false;
         for event in self {
             match event {
                 ExecEvent::Stdout(chunk) => stdout.extend_from_slice(&chunk),
                 ExecEvent::Stderr(chunk) => stderr.extend_from_slice(&chunk),
                 ExecEvent::Exit(code) => exit_code = code,
-                ExecEvent::Error(message) => stderr.extend_from_slice(message.as_bytes()),
+                ExecEvent::Error(message) => {
+                    failed = true;
+                    stderr.extend_from_slice(message.as_bytes());
+                }
             }
         }
         ExecResult {
-            exit_code,
+            exit_code: if failed { -1 } else { exit_code },
             stdout,
             stderr,
         }
