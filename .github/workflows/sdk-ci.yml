@@ -1,7 +1,7 @@
 name: SDK CI
 
-# Per-PR gate for the smol SDKs. Runs only the checks that work on a stock
-# runner with NO hypervisor and NO libkrun:
+# Per-PR gates for the smol SDKs:
+#   * Bun:    native Linux lifecycle using KVM and bundled libkrun.
 #   * Node:   TypeScript type-check (the native .node addon is loaded lazily /
 #             via a dynamic require, so `tsc --noEmit` needs no built binary).
 #   * Python: the pure-stdlib unit + cloud-mock test scripts (the native
@@ -10,11 +10,6 @@ name: SDK CI
 #             `smol-cloud` crate. These compile the engine but never boot a VM,
 #             and the cloud tests run against a loopback mock, so they need the
 #             monorepo layout but no hypervisor and no credentials.
-#
-# The native build and the local/live-cloud end-to-end tests need a microVM
-# (libkrun + hypervisor) AND the monorepo layout (the crates depend on the
-# engine via `path = "../../.."`), so they live in the manually-triggered
-# `native-e2e` job below — not the per-PR gate.
 
 on:
   push:
@@ -228,20 +223,3 @@ jobs:
         env:
           PYTHONPATH: python
         run: python -m pytest -q tests/test_harbor_adapter.py
-
-  # --------------------------------------------------------------------------
-  # The Bun job above covers the native Linux lifecycle on every SDK PR. Keep a
-  # manual placeholder for future Python-native and macOS coverage.
-  # --------------------------------------------------------------------------
-  native-e2e:
-    name: Native build + e2e (manual; needs libkrun)
-    if: github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-latest # replace with: [self-hosted, libkrun]
-    steps:
-      - uses: actions/checkout@v4
-      - name: Placeholder
-        run: |
-          echo "Configure a libkrun-equipped self-hosted runner, then run e.g.:"
-          echo "  # Python: maturin develop --release && python tests/test_local_e2e.py"
-          echo "  # Node:   npm run test:e2e"
-          echo "These need /dev/kvm (Linux) or HVF (macOS) + the bundled libkrun."

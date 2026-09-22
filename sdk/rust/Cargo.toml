@@ -32,6 +32,7 @@ reqwest = { version = "0.12", default-features = false, features = [
 sha2 = "0.10"
 flate2 = "1"
 tar = "0.4"
+tempfile = "3"
 tokio = { version = "1", features = ["rt", "net", "io-util", "sync", "time", "macros"] }
 tokio-tungstenite = { version = "0.28", default-features = false, features = ["connect", "rustls-tls-webpki-roots"] }
 futures-util = { version = "0.3", features = ["sink"] }
