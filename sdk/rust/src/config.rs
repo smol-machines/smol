@@ -103,6 +103,10 @@ pub struct Resources {
 /// Everything needed to create a machine.
 #[derive(Debug, Clone, Default)]
 pub struct MachineConfig {
+    /// Cloud creation waits for published services by default. Set false to
+    /// wait only for guest exec, then install or start the service yourself.
+    /// Local creation remains stopped until `start()`.
+    pub wait_for_ports: Option<bool>,
     /// Unique machine name.
     pub name: String,
     /// OCI image to boot. Without one the guest comes up as a bare VM.
@@ -398,6 +402,12 @@ impl MachineBuilder {
     /// Forward a host port into the guest.
     pub fn port(mut self, port: Port) -> Self {
         self.config.ports.push(port);
+        self
+    }
+
+    /// Whether cloud creation waits for published services (default true).
+    pub fn wait_for_ports(mut self, wait: bool) -> Self {
+        self.config.wait_for_ports = Some(wait);
         self
     }
 

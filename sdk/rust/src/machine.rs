@@ -356,10 +356,14 @@ impl Machine {
             }
             Target::Cloud => {
                 let branchable = config.branchable;
+                let wait_for_ports = config.wait_for_ports.unwrap_or(true);
                 let request = config.into_cloud_request()?;
                 let client = connect.client()?;
                 Ok(Self::from_transport(Box::new(cloud::create(
-                    &client, &request, branchable,
+                    &client,
+                    &request,
+                    branchable,
+                    wait_for_ports,
                 )?)))
             }
         }
@@ -525,6 +529,15 @@ impl Machine {
     /// How to reach a published guest port over HTTP or WebSocket.
     pub fn endpoint(&self, port: u16, path: &str) -> Result<PortEndpoint> {
         self.transport.endpoint(port, path)
+    }
+
+    /// Open a loopback TCP tunnel to a published guest port.
+    /// Closing or dropping the handle disconnects its clients.
+    pub fn tunnel(&self, port: u16) -> Result<crate::Tunnel> {
+        if port == 0 {
+            return Err(Error::new(ErrorKind::Config, "guest port must be nonzero"));
+        }
+        crate::Tunnel::open(self.transport.tunnel_target(port)?)
     }
 
     /// The machine's public URL, if its target publishes one.
