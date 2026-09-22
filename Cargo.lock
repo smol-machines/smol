@@ -142,7 +142,7 @@ checksum = "82f6aeea286b8eb4dd3431a1be1b59d290ace00f5bfd8e2a159bc2a05e2c1667"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 3.0.4",
+ "syn 3.0.6",
 ]
 
 [[package]]
@@ -274,25 +274,6 @@ name = "base64"
 version = "0.22.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "72b3254f16251a8381aa12e40e3c4d2f0199f8c6508fbecb9d91f575e0fbb8c6"
-
-[[package]]
-name = "bincode"
-version = "2.0.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "36eaf5d7b090263e8150820482d5d93cd964a81e4019913c972f4edcc6edb740"
-dependencies = [
- "bincode_derive",
- "unty",
-]
-
-[[package]]
-name = "bincode_derive"
-version = "2.0.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bf95709a440f45e986983918d0e8a1f30a9b1df04918fc828670606804ac3c09"
-dependencies = [
- "virtue",
-]
 
 [[package]]
 name = "bitflags"
@@ -1205,12 +1186,11 @@ dependencies = [
 
 [[package]]
 name = "imago"
-version = "0.2.4"
+version = "0.2.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "404f567d70cd6d288e43f95ea8f2d6e8fe6156dd07df7da955cb9b147c4ab2a5"
+checksum = "10824637f85b06dd6652a11caa62110e8cd33af4c875863c3c192f9ccc698375"
 dependencies = [
  "async-trait",
- "bincode",
  "cfg-if",
  "futures",
  "libc",
@@ -2425,7 +2405,7 @@ dependencies = [
 
 [[package]]
 name = "smolfile"
-version = "1.16.2"
+version = "1.17.0"
 dependencies = [
  "serde",
  "smolvm-protocol",
@@ -2450,7 +2430,7 @@ dependencies = [
 
 [[package]]
 name = "smolvm"
-version = "1.16.2"
+version = "1.17.0"
 dependencies = [
  "async-stream",
  "axum",
@@ -2485,6 +2465,7 @@ dependencies = [
  "sha1",
  "sha2",
  "smolfile",
+ "smolvm-checkpoint",
  "smolvm-cuda",
  "smolvm-network",
  "smolvm-pack",
@@ -2510,8 +2491,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "smolvm-checkpoint"
+version = "1.17.0"
+dependencies = [
+ "hex",
+ "libc",
+ "ring",
+ "serde",
+ "serde_json",
+ "smolvm-pack",
+ "tempfile",
+ "tracing",
+ "zstd",
+]
+
+[[package]]
 name = "smolvm-cuda"
-version = "1.16.2"
+version = "1.17.0"
 dependencies = [
  "getrandom 0.3.4",
  "libc",
@@ -2520,7 +2516,7 @@ dependencies = [
 
 [[package]]
 name = "smolvm-network"
-version = "1.16.2"
+version = "1.17.0"
 dependencies = [
  "crossbeam-queue",
  "getrandom 0.3.4",
@@ -2534,7 +2530,7 @@ dependencies = [
 
 [[package]]
 name = "smolvm-pack"
-version = "1.16.2"
+version = "1.17.0"
 dependencies = [
  "crc32fast",
  "dirs",
@@ -2554,7 +2550,7 @@ dependencies = [
 
 [[package]]
 name = "smolvm-protocol"
-version = "1.16.2"
+version = "1.17.0"
 dependencies = [
  "base64",
  "serde",
@@ -2564,7 +2560,7 @@ dependencies = [
 
 [[package]]
 name = "smolvm-registry"
-version = "1.16.2"
+version = "1.17.0"
 dependencies = [
  "bytes",
  "dirs",
@@ -2623,9 +2619,9 @@ dependencies = [
 
 [[package]]
 name = "syn"
-version = "3.0.4"
+version = "3.0.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e6275cddf4610d1775e6d1fe9469b2e77d0f39fd98fb7450901b821e0c53649f"
+checksum = "8593e8e72159ed2257d083c7a454a85cbf854f37a0966d8d483aff8c8a3ebcee"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -3085,12 +3081,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8ecb6da28b8a351d773b68d5825ac39017e680750f980f3a1a85cd8dd28a47c1"
 
 [[package]]
-name = "unty"
-version = "0.0.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6d49784317cd0d1ee7ec5c716dd598ec5b4483ea832a2dced265471cc0f690ae"
-
-[[package]]
 name = "url"
 version = "2.5.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3199,12 +3189,6 @@ name = "version_check"
 version = "0.9.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
-
-[[package]]
-name = "virtue"
-version = "0.0.18"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "051eb1abcf10076295e815102942cc58f9d5e3b4560e46e53c21e8ff6f3af7b1"
 
 [[package]]
 name = "walkdir"
