@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Cut a smol CLI + SDK release: bump every manifest to VERSION on a fresh
-# branch off origin/main, tag vVERSION, and push — which triggers the
+# Cut a smol CLI + SDK release from version-aligned origin/main, tag vVERSION,
+# and push — which triggers the
 # "Release smol" (CLI dist) and "SDK Release" (npm/PyPI) workflows.
 #
 # HARD PRECONDITION (enforced): the smolvm engine release vVERSION must
@@ -9,11 +9,35 @@
 # tarballs, so tagging smol before the engine has published fails every
 # platform job with "release not found".
 #
-# Usage: ./scripts/cut-release.sh 1.7.0
+# Use --prepare to update the current worktree for a release PR, without publishing.
+# Usage: ./scripts/cut-release.sh 1.7.0 [--prepare]
 set -euo pipefail
 
 VERSION="${1:?usage: cut-release.sh X.Y.Z}"
 [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "error: '$VERSION' is not X.Y.Z" >&2; exit 1; }
+MODE="${2:-}"
+[[ $# -le 2 && ( -z "$MODE" || "$MODE" == --prepare ) ]] || { echo "usage: cut-release.sh X.Y.Z [--prepare]" >&2; exit 1; }
+
+bump_versions() {
+  for f in Cargo.toml sdk/python/Cargo.toml sdk/python/pyproject.toml sdk/node/Cargo.toml sdk/rust/Cargo.toml crates/smol-cloud/Cargo.toml; do
+    perl -i -pe "s/^version = \"[^\"]+\"/version = \"$VERSION\"/" "$f"
+  done
+  perl -i -pe "s/^(smol-cloud = .*version = )\"[^\"]+\"/\$1\"$VERSION\"/" sdk/rust/Cargo.toml
+  perl -i -pe "s/^  \"version\": \"[^\"]+\"/  \"version\": \"$VERSION\"/" sdk/node/package.json
+  perl -i -pe "s/__version__ = \"[^\"]+\"/__version__ = \"$VERSION\"/" sdk/python/python/smol/__init__.py
+  perl -0777 -i -pe "s/(\"name\": \"smolmachines\",\n\\s*\"version\": )\"[^\"]+\"/\$1\"$VERSION\"/g" sdk/node/package-lock.json
+  for f in Cargo.lock sdk/node/Cargo.lock sdk/python/Cargo.lock sdk/rust/Cargo.lock; do
+    perl -0777 -i -pe "s/(name = \"(?:smol-cli|smol-cloud|smol-node|smol-py|smolmachines)\"\nversion = )\"[^\"]+\"/\$1\"$VERSION\"/g" "$f"
+  done
+  bash scripts/check-versions.sh
+}
+
+if [ "$MODE" = --prepare ]; then
+  cd "$(git rev-parse --show-toplevel)"
+  bump_versions
+  echo ">>> Prepared $VERSION in this worktree; no commit, tag, or publication made."
+  exit 0
+fi
 
 ENGINE_REPO="${ENGINE_REPO:-smol-machines/smolvm}"
 
@@ -40,23 +64,17 @@ git worktree add -b "$BRANCH" "$WT" origin/main
 trap 'git worktree remove "$WT" --force 2>/dev/null || true' EXIT
 cd "$WT"
 
-# The current baseline is whatever the CLI manifest declares on main (version
-# bumps live only on release branches, so main sits at the last baseline).
-BASE="$(grep -m1 '^version = ' Cargo.toml | sed -E 's/version = "(.*)"/\1/')"
-echo ">>> bumping manifests $BASE -> $VERSION"
+MAIN_VERSION="$(grep -m1 '^version = ' Cargo.toml | cut -d '"' -f 2)"
+if [ "$MAIN_VERSION" != "$VERSION" ]; then
+  echo "error: main is at $MAIN_VERSION; run --prepare and merge the $VERSION bump first." >&2
+  exit 1
+fi
+bump_versions
 
-for f in Cargo.toml sdk/python/Cargo.toml sdk/python/pyproject.toml sdk/node/Cargo.toml sdk/rust/Cargo.toml crates/smol-cloud/Cargo.toml; do
-  perl -i -pe "s/^version = \"\Q$BASE\E\"/version = \"$VERSION\"/" "$f"
-done
-perl -i -pe "s/\"version\": \"\Q$BASE\E\"/\"version\": \"$VERSION\"/" sdk/node/package.json
-perl -i -pe "s/__version__ = \"\Q$BASE\E\"/__version__ = \"$VERSION\"/" sdk/python/python/smol/__init__.py
-
-# The same gate CI runs — catches any manifest this script (or a future
-# layout change) missed.
-bash scripts/check-versions.sh
-
-git add Cargo.toml sdk/ crates/
-git commit -m "Bump smol CLI and SDKs to $VERSION"
+git add Cargo.toml Cargo.lock sdk/ crates/
+if ! git diff --cached --quiet; then
+  git commit -m "Bump smol CLI and SDKs to $VERSION"
+fi
 git tag -a "v$VERSION" -m "smol v$VERSION"
 git push -u origin "$BRANCH"
 git push origin "v$VERSION"
