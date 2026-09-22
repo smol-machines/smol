@@ -238,6 +238,32 @@ fn creating_on_the_cloud_sends_the_image_starts_it_and_waits_for_ready() {
 }
 
 #[test]
+fn create_can_wait_for_exec_without_waiting_for_a_service() {
+    let cloud = MockCloud::start(routes(vec![
+        (
+            "POST /v1/machines",
+            Box::new(|_| Reply::json(ready_machine("m-exec"))),
+        ),
+        (
+            "POST /v1/machines/m-exec/start",
+            Box::new(|_| Reply::status(204, "")),
+        ),
+        (
+            "POST /v1/machines/m-exec/exec",
+            Box::new(|_| Reply::json(r#"{"exitCode":0}"#)),
+        ),
+    ]));
+    Machine::builder("service")
+        .image("alpine:latest")
+        .wait_for_ports(false)
+        .create_with(&cloud.connect())
+        .unwrap();
+    let requests = cloud.requests();
+    assert!(requests.iter().any(|r| r.path.ends_with("/exec")));
+    assert!(!requests.iter().any(|r| r.method == "GET"));
+}
+
+#[test]
 fn a_branchable_machine_asks_for_it_at_create_time_and_again_at_start() {
     let cloud = MockCloud::start(routes(vec![
         (

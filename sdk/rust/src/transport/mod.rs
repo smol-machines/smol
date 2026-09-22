@@ -105,6 +105,7 @@ pub(crate) trait Transport: Send + Sync + std::fmt::Debug {
 
     /// How to reach a published guest port over HTTP or WebSocket.
     fn endpoint(&self, port: u16, path: &str) -> Result<PortEndpoint>;
+    fn tunnel_target(&self, port: u16) -> Result<crate::tunnel::Target>;
 
     /// The machine's public URL, if its target publishes one.
     fn url(&self) -> Result<Option<String>>;

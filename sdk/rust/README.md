@@ -1,9 +1,8 @@
 # smolmachines — Rust SDK
 
-Run isolated **microVMs** from Rust, either embedded in your own process or on
+Run isolated **microVMs** from Rust, either locally or on
 **smol cloud** — one `Machine` API, the target chosen by `ConnectOptions`.
-Locally there is no daemon and no socket: the engine is a library in your
-process and the VM is its child. Mirrors the [Node SDK](../node) and
+Locally the SDK drives the installed `smolvm` CLI. Mirrors the [Node SDK](../node) and
 [Python SDK](../python), which wrap the same engine through NAPI and pyo3.
 
 > **Supported platforms** (local target): macOS on Apple Silicon, and Linux
@@ -27,6 +26,30 @@ println!("{}", result.stdout_utf8());
 machine.delete()?;
 ```
 
+## TCP tunnels
+
+Use `machine.tunnel(22)?` to reach a published port through a scoped loopback
+listener, locally or over an authenticated cloud WebSocket:
+
+Local tunnels use the port mappings supplied when this SDK handle created the
+machine; reconnecting by name cannot recover mappings from older CLIs.
+
+```rust,no_run
+# use smolmachines::Machine;
+# fn connect(machine: &Machine) -> smolmachines::Result<()> {
+let tunnel = machine.tunnel(22)?;
+println!("Connect your SSH client to {}", tunnel.address());
+// Keep the handle alive while clients use it.
+drop(tunnel); // Disconnects clients, not the machine.
+# Ok(())
+# }
+```
+
+For cloud services you start through exec, set `.wait_for_ports(false)` on the
+builder. Creation then waits for guest exec readiness, not the published service.
+The default still waits for service readiness. Local creation still requires
+`machine.start()`.
+
 ## Local or cloud
 
 The default is local. Only an **explicit** credential moves that — an `api_key`
@@ -36,7 +59,7 @@ redirects a program that meant to run locally.
 ```rust
 use smolmachines::{ConnectOptions, Machine};
 
-// Local: the engine runs in this process.
+// Local: the SDK drives smolvm on this host.
 let local = Machine::builder("here").image("alpine:latest").create()?;
 
 // Cloud: the control plane runs it. create_with also starts the machine and

@@ -463,6 +463,14 @@ impl Transport for LocalTransport {
         })
     }
 
+    fn tunnel_target(&self, port: u16) -> Result<crate::tunnel::Target> {
+        let host = self
+            .host_port(port)?
+            .filter(|p| *p != 0)
+            .ok_or_else(|| Error::new(ErrorKind::NotFound, "guest port is not published"))?;
+        Ok(crate::tunnel::Target::Local(([127, 0, 0, 1], host).into()))
+    }
+
     fn url(&self) -> Result<Option<String>> {
         Ok(self
             .ports

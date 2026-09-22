@@ -127,6 +127,7 @@ mod error;
 mod exec;
 mod machine;
 mod transport;
+mod tunnel;
 
 pub use assets::{configure_runtime_assets, RuntimeAssets};
 pub use config::{MachineBuilder, MachineConfig, Mount, Port, Resources};
@@ -139,6 +140,7 @@ pub use machine::{
     UsageReport, UsageTotals,
 };
 pub use transport::ReadyOptions;
+pub use tunnel::Tunnel;
 
 /// The shared control-plane crate, re-exported so a caller can reach the raw
 /// API without taking a second dependency on it.

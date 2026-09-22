@@ -260,6 +260,15 @@ impl Transport for CloudTransport {
         })
     }
 
+    fn tunnel_target(&self, port: u16) -> Result<crate::tunnel::Target> {
+        crate::tunnel::Target::cloud(
+            self.client.credentials().base_url(),
+            &self.id,
+            port,
+            self.client.credentials().api_key(),
+        )
+    }
+
     fn url(&self) -> Result<Option<String>> {
         Ok(self.client.machine(&self.id)?.url)
     }
@@ -382,6 +391,7 @@ pub(crate) fn create(
     client: &Client,
     request: &wire::CreateMachine,
     branchable: bool,
+    wait_for_ports: bool,
 ) -> Result<CloudTransport> {
     let created = client.create_machine(request)?;
     let transport = CloudTransport::from_machine(client.clone(), created);
@@ -391,7 +401,12 @@ pub(crate) fn create(
     // also fails — the machine record carries no error detail of its own.
     let start_error = client.start(&transport.id, branchable).err();
 
-    match transport.wait_until_ready(ReadyOptions::default()) {
+    let ready = if wait_for_ports {
+        transport.wait_until_ready(ReadyOptions::default())
+    } else {
+        wait_for_exec(&transport)
+    };
+    match ready {
         Ok(()) => Ok(transport),
         Err(error) => {
             let _ = transport.delete();
@@ -404,6 +419,35 @@ pub(crate) fn create(
             })
         }
     }
+}
+
+fn wait_for_exec(transport: &CloudTransport) -> Result<()> {
+    let deadline = std::time::Instant::now() + ReadyOptions::default().timeout;
+    let command = CloudTransport::command(
+        vec!["/bin/sh".into(), "-c".into(), "true".into()],
+        &ExecOptions::new().timeout(Duration::from_secs(2)),
+    );
+    while let Some(remaining) = deadline.checked_duration_since(std::time::Instant::now()) {
+        match transport.client.exec(
+            &transport.id,
+            &command,
+            remaining.min(Duration::from_secs(2)),
+        ) {
+            Ok(result) if result.exit_code == Some(0) => return Ok(()),
+            Err(error) => {
+                let error = Error::from(error);
+                if matches!(error.kind(), ErrorKind::Unauthorized | ErrorKind::NotFound) {
+                    return Err(error);
+                }
+            }
+            _ => {}
+        }
+        std::thread::sleep(Duration::from_millis(200).min(remaining));
+    }
+    Err(Error::new(
+        ErrorKind::Timeout,
+        "Guest exec did not become ready within 120 seconds",
+    ))
 }
 
 /// Attach to an existing cloud machine by id or name.
