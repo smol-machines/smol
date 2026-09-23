@@ -124,6 +124,7 @@ permission to exec, connect, or expect the workload to respond.
 | Command | Description |
 |---------|-------------|
 | `smol config set <key> <value>` | Set a config value (e.g. cloud endpoint, API key). Plain-HTTP endpoints are rejected for non-loopback hosts. |
+| `smol config set telemetry on\|off` | Turn anonymous usage telemetry on or off. `SMOL_TELEMETRY=0` or `DO_NOT_TRACK=1` disables it for one invocation. |
 | `smol config show` | Show config (secrets masked). |
 
 > This reference is a map of the command surface; for authoritative flags and
