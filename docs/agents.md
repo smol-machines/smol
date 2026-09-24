@@ -65,7 +65,8 @@ before sharing one:
 
 - It runs sessions with **its own** smol cloud credentials (for `"cloud": true`),
   so everyone holding the token uses that account. Run one per user or team.
-- A turn's `env` (typically the model API key) travels in the request body. Keep
+- Local sessions use the model key from the service's own environment. Cloud
+  sessions take it in a turn's `env`, which travels in the request body; keep
   the service on loopback or behind TLS.
 
 ## From code
@@ -85,8 +86,14 @@ session.rewind(0)?;
 
 - Session records are JSON files under `~/.smol/agents` (`SMOL_AGENTS_DIR`), and
   local checkpoints sit beside them.
-- The API key is passed to each turn's process environment. It is never written to
-  the machine's configuration or the session record, but the agent process can
-  read it while it runs.
+- On the local engine, when `ANTHROPIC_API_KEY` is set as the session starts, the
+  key never enters the machine: the agent sees a placeholder, and the engine
+  swaps in the real key only on HTTPS requests to `api.anthropic.com`. The engine
+  reads the key from the environment of whichever command starts or resumes the
+  machine, so keep it set there. A turn that passes the key in its own `env` is
+  refused, since that would put it inside the machine.
+- On smol cloud, or with `key_outside_machine` off, the key is passed to each
+  turn's process environment instead. It is never written to the machine's
+  configuration or the session record, but the agent can read it while it runs.
 - Rewinding or forking restores a checkpoint into a new machine. Pausing such a
   machine and resuming it needs smolvm with the resume-after-restore fix.

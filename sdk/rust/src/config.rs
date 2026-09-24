@@ -6,6 +6,18 @@
 
 use crate::error::{Error, ErrorKind, Result};
 
+/// A credential kept outside the machine. See [`MachineBuilder::credential`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Credential {
+    /// Name of the binding.
+    pub name: String,
+    /// The environment variable the workload reads (and that holds the real
+    /// value on the host).
+    pub env_var: String,
+    /// Hosts the real value may be sent to.
+    pub hosts: Vec<String>,
+}
+
 /// A directory exposed inside the guest.
 ///
 /// A local `source` is bind-mounted from the host. An `s3://` source is fetched
@@ -129,6 +141,9 @@ pub struct MachineConfig {
     pub labels: Vec<(String, String)>,
     /// Hostnames the egress filter permits.
     pub allowed_hosts: Vec<String>,
+    /// Credentials substituted on the way out: the guest sees a placeholder, and
+    /// the engine swaps in the real value on requests to the named hosts.
+    pub credentials: Vec<Credential>,
     /// Keep the machine's disks across stop and start.
     pub persistent: bool,
     /// Back guest RAM with a memfd on every start, so the machine can be
@@ -218,6 +233,15 @@ impl MachineConfig {
             args.push("--allow-host".into());
             args.push(host.clone());
         }
+        for credential in &self.credentials {
+            args.push("--credential".into());
+            args.push(format!(
+                "{}={}@{}",
+                credential.name,
+                credential.env_var,
+                credential.hosts.join(",")
+            ));
+        }
         for cidr in &self.allowed_cidrs {
             args.push("--allow-cidr".into());
             args.push(cidr.clone());
@@ -293,6 +317,13 @@ impl MachineConfig {
                 ErrorKind::NotSupported,
                 "host mounts are local-only and are not applied on the cloud target; \
                  use cloud volumes for persistent storage instead",
+            ));
+        }
+        if !self.credentials.is_empty() {
+            return Err(Error::new(
+                ErrorKind::NotSupported,
+                "credential substitution runs in the local engine; the cloud target \
+                 cannot keep a credential outside the machine yet",
             ));
         }
 
@@ -487,6 +518,23 @@ impl MachineBuilder {
     /// Back guest RAM with a memfd so the machine can be branched.
     pub fn branchable(mut self, branchable: bool) -> Self {
         self.config.branchable = branchable;
+        self
+    }
+
+    /// Keep a credential out of the machine: the guest's `env_var` holds a
+    /// placeholder, and the engine substitutes the real value — read from the
+    /// same variable in the environment the machine starts from — only on
+    /// requests to `hosts`. Local target only.
+    pub fn credential<I, H>(mut self, name: impl Into<String>, env_var: impl Into<String>, hosts: I) -> Self
+    where
+        I: IntoIterator<Item = H>,
+        H: Into<String>,
+    {
+        self.config.credentials.push(Credential {
+            name: name.into(),
+            env_var: env_var.into(),
+            hosts: hosts.into_iter().map(Into::into).collect(),
+        });
         self
     }
 

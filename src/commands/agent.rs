@@ -158,7 +158,16 @@ impl AgentCmd {
                     r.machine
                 );
                 if let Some(key) = r.harness.api_key_env() {
-                    println!("Each turn reads {key} from your environment; it is never stored.");
+                    if r.key_outside_machine {
+                        println!(
+                            "{key} stays on this host: the machine holds a placeholder and the \
+                             engine substitutes the key on requests to the provider."
+                        );
+                    } else {
+                        println!(
+                            "Each turn reads {key} from your environment; it is never stored."
+                        );
+                    }
                 }
                 Ok(())
             }

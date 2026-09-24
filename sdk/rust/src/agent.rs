@@ -92,6 +92,14 @@ impl Harness {
         }
     }
 
+    /// The model provider the API key is sent to.
+    fn provider_host(&self) -> Option<&'static str> {
+        match self {
+            Harness::ClaudeCode => Some("api.anthropic.com"),
+            Harness::Command { .. } => None,
+        }
+    }
+
     /// Environment every turn runs with.
     fn turn_env(&self) -> &'static [(&'static str, &'static str)] {
         match self {
@@ -298,6 +306,10 @@ pub struct SessionOptions {
     pub checkpoint_turns: bool,
     /// Pause the machine between turns so an idle agent holds no CPU.
     pub pause_between_turns: bool,
+    /// Keep the model API key out of the machine (local target, when the key is
+    /// in this process's environment at start). The engine substitutes it on the
+    /// way to the provider; the agent only ever sees a placeholder.
+    pub key_outside_machine: bool,
     /// vCPUs for the machine.
     pub cpus: u8,
     /// Memory for the machine, in MiB.
@@ -315,6 +327,7 @@ impl SessionOptions {
             open_network: false,
             checkpoint_turns: true,
             pause_between_turns: false,
+            key_outside_machine: true,
             cpus: 2,
             memory_mib: 2048,
         }
@@ -377,6 +390,10 @@ pub struct SessionRecord {
     pub checkpoint_turns: bool,
     /// Pause between turns.
     pub pause_between_turns: bool,
+    /// The model API key never enters the machine: the guest holds a placeholder
+    /// and the engine substitutes the real key on requests to the provider.
+    #[serde(default)]
+    pub key_outside_machine: bool,
     /// Completed turns, oldest first.
     pub turns: Vec<TurnRecord>,
 }
@@ -442,6 +459,14 @@ impl Session {
             Target::Cloud => "cloud",
             _ => "local",
         };
+        // Substitution runs in the local engine and reads the real key from the
+        // environment the machine boots from — this process's.
+        let key_outside_machine = options.key_outside_machine
+            && target == "local"
+            && options
+                .harness
+                .api_key_env()
+                .is_some_and(|k| std::env::var(k).is_ok_and(|v| !v.is_empty()));
         let record = SessionRecord {
             name: options.name.clone(),
             harness: options.harness.clone(),
@@ -452,6 +477,7 @@ impl Session {
             open_network: options.open_network,
             checkpoint_turns: options.checkpoint_turns,
             pause_between_turns: options.pause_between_turns,
+            key_outside_machine,
             turns: Vec::new(),
         };
         let mut builder = Machine::builder(&record.machine)
@@ -462,6 +488,13 @@ impl Session {
             .branchable(options.checkpoint_turns)
             .label("smol.agent", &options.name)
             .label("smol.harness", options.harness.name());
+        if key_outside_machine {
+            if let (Some(key_env), Some(host)) =
+                (options.harness.api_key_env(), options.harness.provider_host())
+            {
+                builder = builder.credential("model", key_env, [host]);
+            }
+        }
         if !options.open_network {
             for host in options.harness.allowed_hosts() {
                 builder = builder.allow_host(*host);
@@ -615,7 +648,21 @@ impl Session {
             options = options.env(k.clone(), v.clone());
         }
         let provided = |name: &str| env.iter().any(|(k, _)| k == name);
-        if let Some(key_env) = harness.api_key_env().filter(|k| !provided(k)) {
+        if self.record.key_outside_machine {
+            // The machine's own environment holds a placeholder for the key and
+            // the engine substitutes the real one; passing the key here would
+            // put it inside the machine after all.
+            if let Some(key_env) = harness.api_key_env().filter(|k| provided(k)) {
+                return Err(Error::new(
+                    ErrorKind::Config,
+                    format!(
+                        "session '{}' keeps {key_env} outside its machine; it uses the key \
+                         the machine was started with, not one passed per turn",
+                        self.record.name
+                    ),
+                ));
+            }
+        } else if let Some(key_env) = harness.api_key_env().filter(|k| !provided(k)) {
             let key = std::env::var(key_env).map_err(|_| {
                 Error::new(
                     ErrorKind::Config,
