@@ -988,7 +988,7 @@ checksum = "ba467056f1b547ed52077911161fc86985becbc60e8e1857c8a144dab0def891"
 
 [[package]]
 name = "smol-cloud"
-version = "1.17.1"
+version = "1.18.0"
 dependencies = [
  "base64",
  "reqwest",
@@ -998,7 +998,7 @@ dependencies = [
 
 [[package]]
 name = "smolmachines"
-version = "1.17.1"
+version = "1.18.0"
 dependencies = [
  "flate2",
  "futures-util",
