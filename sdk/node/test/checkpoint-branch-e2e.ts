@@ -37,9 +37,12 @@ async function main(): Promise<void> {
     if (!second.reusedBytes || second.reusedBytes <= 0) {
       throw new Error("periodic checkpoint did not reuse existing objects");
     }
+    // The second checkpoint retains the first's generation as history (hard
+    // links to its objects), so deleting the first artifact frees nothing the
+    // history still needs. Pruning now must leave the second checkpoint whole:
+    // the export and restore below read every one of its objects.
     rmSync(firstArtifact, { recursive: true });
-    const reclaimed = Machine.pruneCheckpointStore(store);
-    if (reclaimed <= 0) throw new Error("checkpoint prune reclaimed no objects");
+    Machine.pruneCheckpointStore(store);
     const exportedBytes = Machine.exportCheckpoint(secondArtifact, portableArtifact);
     if (exportedBytes <= 0 || statSync(portableArtifact).size <= 0) {
       throw new Error("stored checkpoint export was empty");
@@ -74,6 +77,18 @@ async function main(): Promise<void> {
     ]);
     if (sibling.stdout.trim() !== "ISOLATED") {
       throw new Error("batch branch sibling isolation failed");
+    }
+
+    // With the whole lineage deleted, no checkpoint references the store's
+    // objects and pruning must reclaim them. Retire the machines restored from
+    // it first so nothing still reads those objects.
+    await Promise.all(children.splice(0).map((machine) => machine.delete()));
+    await restored.delete();
+    restored = undefined;
+    rmSync(secondArtifact, { recursive: true });
+    const reclaimed = Machine.pruneCheckpointStore(store);
+    if (reclaimed <= 0) {
+      throw new Error("checkpoint prune reclaimed nothing after the whole lineage was deleted");
     }
 
     console.log("checkpoint-branch-e2e: passed");
