@@ -34,6 +34,7 @@
 //! machine's configuration or the session record.
 
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -545,6 +546,12 @@ pub struct SessionOptions {
     /// in this process's environment at start). The engine substitutes it on the
     /// way to the provider; the agent only ever sees a placeholder.
     pub key_outside_machine: bool,
+    /// Start from a template — a checkpoint of a machine with this exact setup,
+    /// taken right after its harness was installed — instead of installing it
+    /// again, and save one after a fresh install. Local sessions with
+    /// checkpoints on; templates are rebuilt after a week so the harness stays
+    /// current.
+    pub use_template: bool,
     /// vCPUs for the machine.
     pub cpus: u8,
     /// Memory for the machine, in MiB.
@@ -563,6 +570,7 @@ impl SessionOptions {
             checkpoint_turns: true,
             pause_between_turns: false,
             key_outside_machine: true,
+            use_template: true,
             cpus: 2,
             memory_mib: 2048,
         }
@@ -679,6 +687,67 @@ fn connect_for(target: &str) -> ConnectOptions {
     }
 }
 
+/// Templates older than this are rebuilt, picking up a newer harness.
+const TEMPLATE_MAX_AGE: Duration = Duration::from_secs(7 * 24 * 60 * 60);
+
+/// Name a template by everything its checkpoint fixes: the machine it came
+/// from and how that machine reaches the network and the model key.
+fn template_key(options: &SessionOptions, key_outside_machine: bool) -> String {
+    use sha2::{Digest, Sha256};
+    let mut extra_hosts = options.extra_hosts.clone();
+    extra_hosts.sort();
+    let setup = serde_json::json!({
+        "harness": options.harness,
+        "image": options.harness.image(),
+        "setup": options.harness.setup_script(),
+        "extra_hosts": extra_hosts,
+        "open_network": options.open_network,
+        "key_outside_machine": key_outside_machine,
+        "cpus": options.cpus,
+        "memory_mib": options.memory_mib,
+    });
+    let digest = Sha256::digest(setup.to_string().as_bytes());
+    let hex: String = digest.iter().take(8).map(|b| format!("{b:02x}")).collect();
+    format!("{}-{hex}.smolcheckpoint", options.harness.name())
+}
+
+fn is_fresh(path: &Path) -> bool {
+    std::fs::metadata(path)
+        .and_then(|m| m.modified())
+        .is_ok_and(|t| t.elapsed().is_ok_and(|age| age < TEMPLATE_MAX_AGE))
+}
+
+fn save_template(machine: &Machine, path: &Path) -> Result<()> {
+    let parent = path.parent().unwrap_or(Path::new("."));
+    std::fs::create_dir_all(parent).map_err(|e| io_err("create templates dir", e))?;
+    // Capture beside the final name and rename, so a half-written template is
+    // never picked up by a concurrent start.
+    let staging = parent.join(format!(
+        ".staging-{}-{}",
+        std::process::id(),
+        path.file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("template")
+    ));
+    let captured = machine.checkpoint(Some(&staging));
+    let result = captured
+        .and_then(|_| std::fs::rename(&staging, path).map_err(|e| io_err("save template", e)));
+    if result.is_err() {
+        let _ = std::fs::remove_file(&staging);
+        let _ = std::fs::remove_dir_all(&staging);
+    }
+    // Templates hold a whole machine; drop the ones too old to be used again.
+    if let Ok(entries) = std::fs::read_dir(parent) {
+        for entry in entries.flatten() {
+            let old = entry.path();
+            if old.extension().is_some_and(|e| e == "smolcheckpoint") && !is_fresh(&old) {
+                let _ = std::fs::remove_file(&old);
+            }
+        }
+    }
+    result
+}
+
 impl Session {
     /// Create the machine, install the harness, and record the session.
     pub fn start(options: SessionOptions) -> Result<Session> {
@@ -715,6 +784,28 @@ impl Session {
             key_outside_machine,
             turns: Vec::new(),
         };
+        let template = (options.use_template && target == "local" && options.checkpoint_turns)
+            .then(|| {
+                dir.join("templates")
+                    .join(template_key(&options, key_outside_machine))
+            });
+        let session = Session { record, dir };
+        if let Some(path) = template.as_ref().filter(|p| is_fresh(p)) {
+            match session.restore(
+                &CheckpointRef::Local { path: path.clone() },
+                &session.record.machine,
+            ) {
+                Ok(machine) => return session.finish_start(&machine),
+                // A template this engine cannot restore is rebuilt below.
+                Err(_) => {
+                    if let Ok(m) = session.machine() {
+                        let _ = m.delete();
+                    }
+                    let _ = std::fs::remove_file(path);
+                }
+            }
+        }
+        let record = &session.record;
         let mut builder = Machine::builder(&record.machine)
             .image(options.harness.image())
             .cpus(options.cpus)
@@ -764,12 +855,19 @@ impl Session {
                 ));
             }
         }
-        let session = Session { record, dir };
-        session.save()?;
-        if session.record.pause_between_turns {
+        if let Some(path) = &template {
+            // Best effort: without a template the next session installs again.
+            let _ = save_template(&machine, path);
+        }
+        session.finish_start(&machine)
+    }
+
+    fn finish_start(self, machine: &Machine) -> Result<Session> {
+        self.save()?;
+        if self.record.pause_between_turns {
             let _ = machine.pause();
         }
-        Ok(session)
+        Ok(self)
     }
 
     /// Load a recorded session.
@@ -1349,6 +1447,27 @@ mod tests {
             .unwrap()["kind"],
             "opencode"
         );
+    }
+
+    #[test]
+    fn templates_are_keyed_by_the_setup_they_fix() {
+        let opts = |hosts: &[&str]| {
+            let mut o = SessionOptions::new("s", Harness::ClaudeCode);
+            o.extra_hosts = hosts.iter().map(|h| h.to_string()).collect();
+            o
+        };
+        let base = template_key(&opts(&["a.com", "b.com"]), true);
+        assert!(base.starts_with("claude-code-") && base.ends_with(".smolcheckpoint"));
+        // The session's own name and host order don't matter; what the machine
+        // can reach and whether the key stays outside it do.
+        let mut renamed = opts(&["b.com", "a.com"]);
+        renamed.name = "other".into();
+        assert_eq!(template_key(&renamed, true), base);
+        assert_ne!(template_key(&opts(&["a.com"]), true), base);
+        assert_ne!(template_key(&opts(&["a.com", "b.com"]), false), base);
+        let mut bigger = opts(&["a.com", "b.com"]);
+        bigger.memory_mib *= 2;
+        assert_ne!(template_key(&bigger, true), base);
     }
 
     #[test]

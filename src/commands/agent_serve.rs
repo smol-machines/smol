@@ -186,6 +186,8 @@ struct StartRequest {
     #[serde(default)]
     pause_between_turns: bool,
     #[serde(default)]
+    template: Option<bool>,
+    #[serde(default)]
     cpus: Option<u8>,
     #[serde(default)]
     memory_mib: Option<u32>,
@@ -234,6 +236,7 @@ async fn start_session(
     opts.open_network = req.open_network;
     opts.checkpoint_turns = req.checkpoints.unwrap_or(true);
     opts.pause_between_turns = req.pause_between_turns;
+    opts.use_template = req.template.unwrap_or(true);
     if let Some(cpus) = req.cpus {
         opts.cpus = cpus;
     }

@@ -30,6 +30,16 @@ smol agent rm fixer
 | `opencode` | `opencode run --format json` with `--model provider/model`; each turn continues the previous session | the provider's key: `ANTHROPIC_API_KEY` for `anthropic/*`, `OPENAI_API_KEY` for `openai/*`, none for OpenCode's own `opencode/*` models |
 | `command` | any program, with the prompt appended as its last argument (`--program "sh -c"`, `--image`) | — |
 
+## Templates
+
+The first session of a given setup installs its harness, then saves a template:
+a checkpoint of the machine taken right after the install. Later sessions with
+the same setup — harness, model, network hosts, key handling, size — start from
+it in a few seconds instead of installing again. Templates live in
+`~/.smol/agents/templates`, hold a whole machine (several hundred MB each), and
+are rebuilt after a week so the harness stays current. `--no-template` installs
+from scratch. Templates are local; cloud sessions always install.
+
 ## Network
 
 By default a session can reach only its harness's model provider and package

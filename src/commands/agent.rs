@@ -60,6 +60,10 @@ enum AgentSubcommand {
         /// Pause the machine between turns so an idle agent holds no CPU
         #[arg(long)]
         pause_between_turns: bool,
+        /// Install the harness from scratch instead of starting from a saved
+        /// template of the same setup
+        #[arg(long)]
+        no_template: bool,
         /// vCPUs
         #[arg(long, default_value_t = 2)]
         cpus: u8,
@@ -134,6 +138,7 @@ impl AgentCmd {
                 open_network,
                 no_checkpoints,
                 pause_between_turns,
+                no_template,
                 cpus,
                 memory,
             } => {
@@ -163,6 +168,7 @@ impl AgentCmd {
                 opts.open_network = open_network;
                 opts.checkpoint_turns = !no_checkpoints;
                 opts.pause_between_turns = pause_between_turns;
+                opts.use_template = !no_template;
                 opts.cpus = cpus;
                 opts.memory_mib = memory;
                 let session = Session::start(opts)?;
