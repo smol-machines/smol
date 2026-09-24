@@ -392,8 +392,14 @@ impl Machine {
             Target::Local => {
                 let transport = LocalTransport::new(&name)?;
                 // Connecting borrows a machine: start it if it is not already up.
+                // A paused machine holds saved execution, which only resume
+                // continues; starting it would be refused.
                 if !transport.is_running() {
-                    transport.start()?;
+                    if transport.state() == MachineState::Paused {
+                        transport.resume()?;
+                    } else {
+                        transport.start()?;
+                    }
                 }
                 Ok(Self::from_transport(Box::new(transport)))
             }

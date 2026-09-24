@@ -55,6 +55,10 @@ enum Commands {
     /// Manage framework-aware fused rollout executors and policy versions
     Rollout(commands::rollout::RolloutCmd),
 
+    /// Run an agent (Claude Code, or any program) in its own machine as a session of
+    /// turns: start, send, log, rewind, fork, pause, resume, rm
+    Agent(commands::agent::AgentCmd),
+
     /// Internal: boot a VM subprocess (not for direct use)
     #[command(name = "_boot-vm", hide = true)]
     BootVm {
@@ -164,6 +168,7 @@ fn main() {
         Commands::Cloud(cmd) => cmd.run(),
         Commands::Config(cmd) => cmd.run(),
         Commands::Rollout(cmd) => cmd.run(),
+        Commands::Agent(cmd) => cmd.run(),
         Commands::BootVm { config } => boot_vm(config).map_err(|e| anyhow::anyhow!("{}", e)),
         #[cfg(unix)]
         Commands::CudaDaemon { socket } => {

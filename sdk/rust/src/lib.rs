@@ -119,6 +119,7 @@
 
 #![warn(missing_docs)]
 
+pub mod agent;
 mod assets;
 pub mod bootstrap;
 mod config;
