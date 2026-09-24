@@ -106,7 +106,7 @@
 //! use smolmachines::{configure_runtime_assets, RuntimeAssets};
 //!
 //! # fn main() -> smolmachines::Result<()> {
-//! // Borrow an installed smolvm, if there is one on PATH.
+//! // Borrow an installed smolvm of this SDK's version, if one is on PATH.
 //! if let Some(assets) = RuntimeAssets::from_path_lookup() {
 //!     configure_runtime_assets(assets)?;
 //! }

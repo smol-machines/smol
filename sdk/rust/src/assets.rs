@@ -78,15 +78,23 @@ impl RuntimeAssets {
         }
     }
 
-    /// Find an installed smolvm on `PATH` and read its assets.
+    /// Find an installed smolvm on `PATH` whose version matches this SDK's
+    /// engine, and read its assets.
     ///
-    /// Returns `None` when no install is on `PATH`, which is the caller's cue
-    /// to ship its own assets instead.
+    /// Returns `None` when no compatible install is on `PATH`, which is the
+    /// caller's cue to ship its own assets instead. An older or newer install
+    /// is passed over: its libraries and boot helper belong to a different
+    /// engine release.
     pub fn from_path_lookup() -> Option<Self> {
         let path = std::env::var_os("PATH")?;
+        let wanted = crate::bootstrap::engine_version();
         std::env::split_paths(&path)
             .map(|dir| dir.join("smolvm"))
-            .find(|candidate| candidate.is_file())
+            .filter(|candidate| candidate.is_file())
+            .find(|candidate| {
+                crate::transport::local::engine_version_of(candidate)
+                    .is_some_and(|v| crate::bootstrap::is_compatible_engine(&v, &wanted))
+            })
             .and_then(|candidate| std::fs::canonicalize(candidate).ok())
             .and_then(|resolved| resolved.parent().map(Self::from_install_dir))
     }
