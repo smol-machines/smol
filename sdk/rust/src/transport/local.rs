@@ -1,12 +1,13 @@
-//! The local engine, driven through an installed `smolvm` binary.
+//! The local engine, driven through a `smolvm` binary.
 //!
 //! The SDK deliberately does not link the engine crate. Linking it would make
-//! this crate unpublishable — crates.io resolves every dependency, optional
+//! this crate unpublishable: crates.io resolves every dependency, optional
 //! ones included, and the engine is not published. Driving the CLI keeps the
 //! SDK self-contained on crates.io while still running machines on this host.
 //!
-//! The cost is that a local machine needs `smolvm` installed; see
-//! [`crate::RuntimeAssets::from_path_lookup`] for how it is found.
+//! [`resolve_cli`] picks the binary: an installed `smolvm` when its version
+//! matches this SDK, otherwise the matching engine release, fetched once and
+//! cached.
 
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -66,31 +67,120 @@ fn forward_output(
 
 /// Find the `smolvm` binary this transport drives.
 ///
-/// `SMOLVM` wins so a caller can pin a specific build; otherwise the installed
-/// CLI on `PATH`, then the two default install locations.
+/// `SMOLVM` wins so a caller can pin a specific build. Otherwise an installed
+/// CLI (on `PATH`, then the two default install locations) is used only when
+/// its version matches this SDK's engine; an older or newer release would
+/// silently drop or change features, so it is skipped and the matching engine
+/// is fetched instead.
 pub(crate) fn resolve_cli() -> Result<PathBuf> {
     if let Some(explicit) = std::env::var_os("SMOLVM").map(PathBuf::from) {
         return explicit_cli(explicit);
     }
+    let wanted = crate::bootstrap::engine_version();
+    let (found, skipped) = first_compatible(installed_candidates(), &wanted, engine_version_of);
+    if let Some(cli) = found {
+        return Ok(cli);
+    }
+    // Nothing usable installed: fetch the engine this SDK was built against.
+    // Only a local machine ever gets here, and only once; it is cached after.
+    crate::bootstrap::ensure_engine().map_err(|e| {
+        if skipped.is_empty() {
+            return e;
+        }
+        let found: Vec<String> = skipped
+            .iter()
+            .map(|(path, version)| {
+                let version = version.as_deref().unwrap_or("an unknown version");
+                format!("{} ({version})", path.display())
+            })
+            .collect();
+        Error::new(
+            e.kind(),
+            format!(
+                "{e}; installed smolvm skipped because this SDK needs engine {wanted}: {}",
+                found.join(", ")
+            ),
+        )
+    })
+}
+
+/// Installed `smolvm` binaries, most preferred first.
+fn installed_candidates() -> Vec<PathBuf> {
+    let mut candidates = Vec::new();
     if let Some(path) = std::env::var_os("PATH") {
         for dir in std::env::split_paths(&path) {
             let candidate = dir.join("smolvm");
             if candidate.is_file() {
-                return Ok(candidate);
+                candidates.push(candidate);
             }
         }
     }
-    let home = std::env::var_os("HOME").map(PathBuf::from);
-    for suffix in [".local/bin/smolvm", ".smolvm/smolvm"] {
-        if let Some(candidate) = home.as_ref().map(|h| h.join(suffix)) {
-            if candidate.is_file() {
-                return Ok(candidate);
+    if let Some(home) = std::env::var_os("HOME").map(PathBuf::from) {
+        for suffix in [".local/bin/smolvm", ".smolvm/smolvm"] {
+            let candidate = home.join(suffix);
+            if candidate.is_file() && !candidates.contains(&candidate) {
+                candidates.push(candidate);
             }
         }
     }
-    // Nothing installed: fetch the engine this SDK was built against. Only a
-    // local machine ever gets here, and only once — it is cached afterwards.
-    crate::bootstrap::ensure_engine()
+    candidates
+}
+
+/// The first candidate whose engine version is compatible with `wanted`, and
+/// every candidate passed over with the version it reported.
+fn first_compatible(
+    candidates: Vec<PathBuf>,
+    wanted: &str,
+    version_of: impl Fn(&Path) -> Option<String>,
+) -> (Option<PathBuf>, Vec<(PathBuf, Option<String>)>) {
+    let mut skipped = Vec::new();
+    for candidate in candidates {
+        let version = version_of(&candidate);
+        if version
+            .as_deref()
+            .is_some_and(|v| crate::bootstrap::is_compatible_engine(v, wanted))
+        {
+            return (Some(candidate), skipped);
+        }
+        skipped.push((candidate, version));
+    }
+    (None, skipped)
+}
+
+/// The version `smolvm --version` reports (`smolvm 1.18.0` → `1.18.0`),
+/// remembered per binary so each machine operation does not re-run it.
+pub(crate) fn engine_version_of(cli: &Path) -> Option<String> {
+    use std::collections::HashMap;
+    use std::sync::{Mutex, OnceLock};
+    static SEEN: OnceLock<Mutex<HashMap<PathBuf, Option<String>>>> = OnceLock::new();
+    let seen = SEEN.get_or_init(Default::default);
+    if let Some(version) = seen.lock().ok().and_then(|s| s.get(cli).cloned()) {
+        return version;
+    }
+    let version = Command::new(cli)
+        .arg("--version")
+        .stdin(Stdio::null())
+        .stderr(Stdio::null())
+        .output()
+        .ok()
+        .filter(|out| out.status.success())
+        .and_then(|out| parse_version_line(&String::from_utf8_lossy(&out.stdout)));
+    if let Ok(mut s) = seen.lock() {
+        s.insert(cli.to_path_buf(), version.clone());
+    }
+    version
+}
+
+fn parse_version_line(output: &str) -> Option<String> {
+    output
+        .lines()
+        .next()?
+        .split_whitespace()
+        .find(|word| {
+            word.trim_start_matches('v')
+                .starts_with(|c: char| c.is_ascii_digit())
+        })
+        .map(str::to_string)
 }
 
 fn explicit_cli(path: PathBuf) -> Result<PathBuf> {
@@ -701,6 +791,86 @@ mod capture_summary_tests {
         let (size, pause) = parse_capture_summary("Checkpointed 'x' to /p\n");
         assert!(size.is_none() && pause.is_none());
         assert!(parse_reused("nothing here").is_none());
+    }
+}
+
+#[cfg(test)]
+mod engine_selection_tests {
+    use super::*;
+
+    #[test]
+    fn an_older_install_is_skipped_for_a_matching_one() {
+        let candidates = vec![PathBuf::from("/old/smolvm"), PathBuf::from("/new/smolvm")];
+        let version = |p: &Path| {
+            Some(
+                if p.starts_with("/old") {
+                    "1.16.1"
+                } else {
+                    "1.18.0"
+                }
+                .to_string(),
+            )
+        };
+        let (found, skipped) = first_compatible(candidates, "1.18.0", version);
+        assert_eq!(found, Some(PathBuf::from("/new/smolvm")));
+        assert_eq!(
+            skipped,
+            vec![(PathBuf::from("/old/smolvm"), Some("1.16.1".to_string()))]
+        );
+    }
+
+    #[test]
+    fn no_compatible_install_falls_through_to_the_download() {
+        let candidates = vec![PathBuf::from("/a/smolvm"), PathBuf::from("/b/smolvm")];
+        let (found, skipped) = first_compatible(candidates, "1.18.0", |p: &Path| {
+            p.starts_with("/a").then(|| "1.17.0".to_string())
+        });
+        assert!(found.is_none());
+        assert_eq!(skipped.len(), 2);
+        assert_eq!(
+            skipped[1].1, None,
+            "an unreadable version is reported as unknown"
+        );
+    }
+
+    #[test]
+    fn the_version_is_read_from_the_cli_banner() {
+        assert_eq!(
+            parse_version_line("smolvm 1.18.0\n").as_deref(),
+            Some("1.18.0")
+        );
+        assert_eq!(
+            parse_version_line("smolvm v1.18.0 (abc)\n").as_deref(),
+            Some("v1.18.0")
+        );
+        assert_eq!(parse_version_line(""), None);
+        assert_eq!(parse_version_line("smolvm dev\n"), None);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn installed_binaries_are_asked_for_their_version() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let fake = |name: &str, body: &str| {
+            let path = dir.path().join(name);
+            std::fs::write(&path, format!("#!/bin/sh\n{body}\n")).unwrap();
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+            path
+        };
+        let old = fake("old", "echo smolvm 1.16.1");
+        let broken = fake("broken", "exit 3");
+        let current = fake("current", "echo smolvm 1.18.0");
+        let (found, skipped) = first_compatible(
+            vec![old.clone(), broken.clone(), current.clone()],
+            "1.18.0",
+            engine_version_of,
+        );
+        assert_eq!(found, Some(current));
+        assert_eq!(
+            skipped,
+            vec![(old, Some("1.16.1".to_string())), (broken, None)]
+        );
     }
 }
 

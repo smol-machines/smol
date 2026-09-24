@@ -19,12 +19,32 @@ const RELEASES: &str = "https://github.com/smol-machines/smolvm/releases/downloa
 ///
 /// A `smol` release bundles the engine of the same version, so the SDK and the
 /// engine it drives cannot drift: whatever version this crate was published at
-/// is the engine it fetches.
-fn engine_version() -> String {
+/// is the engine it fetches, and an installed engine is only used when
+/// [`is_compatible_engine`] accepts its version.
+pub(crate) fn engine_version() -> String {
     std::env::var("SMOLMACHINES_ENGINE_VERSION")
         .ok()
         .filter(|v| !v.is_empty())
         .unwrap_or_else(|| env!("CARGO_PKG_VERSION").to_string())
+}
+
+/// Whether an engine reporting `installed` can serve an SDK that wants
+/// `wanted`: the same major and minor release, at the same patch or newer.
+/// Minor releases change the engine's behavior and CLI surface, so an older
+/// or newer minor is refused rather than half-working.
+pub(crate) fn is_compatible_engine(installed: &str, wanted: &str) -> bool {
+    fn parse(version: &str) -> Option<(u64, u64, u64)> {
+        let core = version.trim().trim_start_matches('v');
+        let core = core.split(['-', '+']).next()?;
+        let mut parts = core.split('.').map(|p| p.parse::<u64>().ok());
+        Some((parts.next()??, parts.next()??, parts.next()??))
+    }
+    match (parse(installed), parse(wanted)) {
+        (Some((imaj, imin, ipatch)), Some((wmaj, wmin, wpatch))) => {
+            imaj == wmaj && imin == wmin && ipatch >= wpatch
+        }
+        _ => false,
+    }
 }
 
 /// The release artifact name for the host, or an error naming the platform.
@@ -197,6 +217,18 @@ fn extract(bytes: &[u8], root: &Path) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_installed_engine_must_match_the_minor_release() {
+        assert!(is_compatible_engine("1.18.0", "1.18.0"));
+        assert!(is_compatible_engine("1.18.2", "1.18.0"));
+        assert!(is_compatible_engine("v1.18.1", "1.18.0"));
+        assert!(!is_compatible_engine("1.16.1", "1.18.0"));
+        assert!(!is_compatible_engine("1.19.0", "1.18.0"));
+        assert!(!is_compatible_engine("1.18.0", "1.18.1"));
+        assert!(!is_compatible_engine("2.18.0", "1.18.0"));
+        assert!(!is_compatible_engine("garbage", "1.18.0"));
+    }
 
     #[test]
     fn the_engine_version_follows_this_crate_unless_overridden() {
