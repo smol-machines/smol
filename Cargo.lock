@@ -2389,6 +2389,7 @@ name = "smol-cli"
 version = "1.18.0"
 dependencies = [
  "anyhow",
+ "axum",
  "base64",
  "chrono",
  "clap",

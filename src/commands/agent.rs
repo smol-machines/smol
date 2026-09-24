@@ -107,6 +107,8 @@ enum AgentSubcommand {
         /// Session name
         name: String,
     },
+    /// Serve sessions over HTTP; turns run in the service and survive clients
+    Serve(super::agent_serve::AgentServeCmd),
 }
 
 impl AgentCmd {
@@ -263,6 +265,7 @@ impl AgentCmd {
                 println!("Resumed '{name}'");
                 Ok(())
             }
+            AgentSubcommand::Serve(cmd) => cmd.run(),
             AgentSubcommand::Rm { name } => {
                 Session::open(&name)?.delete()?;
                 println!("Deleted '{name}'");
@@ -283,7 +286,7 @@ fn one_line(text: &str, max: usize) -> String {
 
 fn print_event(event: &AgentEvent) {
     match event {
-        AgentEvent::Text(t) => println!("{t}"),
+        AgentEvent::Text { text } => println!("{text}"),
         AgentEvent::ToolUse { name, input } => {
             let detail = input
                 .get("command")
@@ -300,7 +303,7 @@ fn print_event(event: &AgentEvent) {
             println!("  {mark} {}", one_line(first, 90));
         }
         AgentEvent::Finished { .. } | AgentEvent::Started { .. } | AgentEvent::Other(_) => {}
-        AgentEvent::Stderr(line) => {
+        AgentEvent::Stderr { line } => {
             if std::env::var_os("SMOL_AGENT_VERBOSE").is_some() {
                 eprintln!("{line}");
             }

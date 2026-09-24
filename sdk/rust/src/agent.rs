@@ -154,7 +154,9 @@ impl Harness {
     pub fn parse_line(&self, line: &str) -> Vec<AgentEvent> {
         match self {
             Harness::ClaudeCode => parse_claude_line(line),
-            Harness::Command { .. } => vec![AgentEvent::Text(line.to_string())],
+            Harness::Command { .. } => vec![AgentEvent::Text {
+                text: line.to_string(),
+            }],
         }
     }
 }
@@ -169,7 +171,10 @@ pub enum AgentEvent {
         session_id: String,
     },
     /// Text the agent wrote.
-    Text(String),
+    Text {
+        /// The text.
+        text: String,
+    },
     /// The agent called a tool.
     ToolUse {
         /// Tool name.
@@ -194,7 +199,10 @@ pub enum AgentEvent {
         cost_usd: Option<f64>,
     },
     /// A line of the harness's stderr.
-    Stderr(String),
+    Stderr {
+        /// The line.
+        line: String,
+    },
     /// Output the parser did not recognise, kept verbatim.
     Other(Value),
 }
@@ -204,7 +212,9 @@ fn parse_claude_line(line: &str) -> Vec<AgentEvent> {
         return if line.trim().is_empty() {
             vec![]
         } else {
-            vec![AgentEvent::Text(line.to_string())]
+            vec![AgentEvent::Text {
+                text: line.to_string(),
+            }]
         };
     };
     let str_of = |key: &str| v.get(key).and_then(Value::as_str).map(str::to_string);
@@ -216,10 +226,14 @@ fn parse_claude_line(line: &str) -> Vec<AgentEvent> {
         }
         Some("assistant") => content_blocks(&v)
             .filter_map(|block| match block.get("type").and_then(Value::as_str) {
-                Some("text") => block
-                    .get("text")
-                    .and_then(Value::as_str)
-                    .map(|t| AgentEvent::Text(t.to_string())),
+                Some("text") => {
+                    block
+                        .get("text")
+                        .and_then(Value::as_str)
+                        .map(|t| AgentEvent::Text {
+                            text: t.to_string(),
+                        })
+                }
                 Some("tool_use") => Some(AgentEvent::ToolUse {
                     name: block
                         .get("name")
@@ -567,9 +581,22 @@ impl Session {
     }
 
     /// Run one turn: ask the agent `prompt`, streaming its events to `on_event`.
+    /// The harness's API key comes from this process's environment.
     pub fn send(
         &mut self,
         prompt: &str,
+        on_event: &mut dyn FnMut(&AgentEvent),
+    ) -> Result<TurnRecord> {
+        self.send_with_env(prompt, &[], on_event)
+    }
+
+    /// [`send`](Self::send) with extra environment for this turn only. A key the
+    /// harness needs is taken from `env` first, then from this process's
+    /// environment — so a service can pass each caller's key per request.
+    pub fn send_with_env(
+        &mut self,
+        prompt: &str,
+        env: &[(String, String)],
         on_event: &mut dyn FnMut(&AgentEvent),
     ) -> Result<TurnRecord> {
         let machine = self.machine()?;
@@ -584,7 +611,11 @@ impl Session {
         for (k, v) in harness.turn_env() {
             options = options.env(*k, *v);
         }
-        if let Some(key_env) = harness.api_key_env() {
+        for (k, v) in env {
+            options = options.env(k.clone(), v.clone());
+        }
+        let provided = |name: &str| env.iter().any(|(k, _)| k == name);
+        if let Some(key_env) = harness.api_key_env().filter(|k| !provided(k)) {
             let key = std::env::var(key_env).map_err(|_| {
                 Error::new(
                     ErrorKind::Config,
@@ -617,7 +648,7 @@ impl Session {
                 AgentEvent::Started { session_id } => {
                     turn.harness_session = Some(session_id.clone())
                 }
-                AgentEvent::Text(t) => texts.push(t.clone()),
+                AgentEvent::Text { text } => texts.push(text.clone()),
                 AgentEvent::Finished {
                     result,
                     is_error,
@@ -647,7 +678,9 @@ impl Session {
                     while let Some(pos) = stderr_buf.find('\n') {
                         let line: String = stderr_buf.drain(..=pos).collect();
                         handle(
-                            AgentEvent::Stderr(line.trim_end().to_string()),
+                            AgentEvent::Stderr {
+                                line: line.trim_end().to_string(),
+                            },
                             &mut turn,
                             &mut texts,
                         );
@@ -814,7 +847,7 @@ mod tests {
                 r#"{"type":"assistant","message":{"content":[{"type":"text","text":"Looking."},{"type":"tool_use","name":"Bash","input":{"command":"ls"}}]}}"#
             ),
             vec![
-                AgentEvent::Text("Looking.".into()),
+                AgentEvent::Text { text: "Looking.".into() },
                 AgentEvent::ToolUse { name: "Bash".into(), input: serde_json::json!({"command": "ls"}) },
             ]
         );
@@ -831,7 +864,9 @@ mod tests {
         assert!(h.parse_line("").is_empty());
         assert_eq!(
             h.parse_line("not json"),
-            vec![AgentEvent::Text("not json".into())]
+            vec![AgentEvent::Text {
+                text: "not json".into()
+            }]
         );
     }
 
@@ -852,7 +887,47 @@ mod tests {
             program: vec!["sh".into(), "-c".into()],
         };
         assert_eq!(h.turn_command("echo hi", None), ["sh", "-c", "echo hi"]);
-        assert_eq!(h.parse_line("hi"), vec![AgentEvent::Text("hi".into())]);
+        assert_eq!(
+            h.parse_line("hi"),
+            vec![AgentEvent::Text { text: "hi".into() }]
+        );
+    }
+
+    // Every event must encode: the CLI's --json output and the service's event
+    // files are written this way, and a variant that fails to serialize would
+    // silently vanish from both.
+    #[test]
+    fn every_event_serializes_with_its_type() {
+        let events = [
+            AgentEvent::Started {
+                session_id: "s".into(),
+            },
+            AgentEvent::Text { text: "t".into() },
+            AgentEvent::ToolUse {
+                name: "Bash".into(),
+                input: serde_json::json!({"command": "ls"}),
+            },
+            AgentEvent::ToolResult {
+                output: "o".into(),
+                is_error: false,
+            },
+            AgentEvent::Finished {
+                result: Some("r".into()),
+                is_error: false,
+                cost_usd: Some(0.1),
+            },
+            AgentEvent::Stderr { line: "e".into() },
+            AgentEvent::Other(serde_json::json!({"x": 1})),
+        ];
+        for event in events {
+            let encoded = serde_json::to_string(&event).expect("event must serialize");
+            let back: AgentEvent = serde_json::from_str(&encoded).expect("and round-trip");
+            assert_eq!(back, event, "{encoded}");
+        }
+        assert_eq!(
+            serde_json::to_string(&AgentEvent::Text { text: "hi".into() }).unwrap(),
+            r#"{"type":"text","text":"hi"}"#
+        );
     }
 
     #[test]

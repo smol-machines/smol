@@ -34,6 +34,40 @@ By default a session can reach only its harness's model provider and package
 registry. Add hosts with `--allow-host` (repeatable) or lift the limit with
 `--open-network`.
 
+## As a service
+
+`smol agent serve` exposes the same sessions over HTTP. Turns run inside the
+service, not in the client: a client starts a turn, gets its number, and can
+disconnect — the turn keeps going. Its events are kept, so any client can stream
+them from the start or from where it left off.
+
+```sh
+SMOL_AGENTS_TOKEN=... smol agent serve --listen 127.0.0.1:7777
+
+curl -X POST localhost:7777/v1/agents -H "Authorization: Bearer $T" \
+  -d '{"name":"fixer","harness":"claude-code"}'
+curl -X POST localhost:7777/v1/agents/fixer/turns -H "Authorization: Bearer $T" \
+  -d '{"prompt":"make the tests pass","env":{"ANTHROPIC_API_KEY":"..."}}'   # -> {"turn":0}
+curl -N localhost:7777/v1/agents/fixer/turns/0/events -H "Authorization: Bearer $T"   # SSE
+curl -N "localhost:7777/v1/agents/fixer/turns/0/events?after=41" ...          # resume after event 41
+```
+
+| Route | |
+|---|---|
+| `POST /v1/agents` | start a session (`name`, `harness`, `image`, `program`, `cloud`, `allowHosts`, `openNetwork`, `checkpoints`, `pauseBetweenTurns`, `cpus`, `memoryMib`) |
+| `GET /v1/agents`, `GET /v1/agents/{name}` | sessions; the latter includes `runningTurn` |
+| `POST /v1/agents/{name}/turns` | start a turn (`prompt`, `env`) → `202 {"turn": n}`; `409` while one runs |
+| `GET /v1/agents/{name}/turns/{n}/events?after=K` | the turn's events as SSE (`event` per agent event, `id` = its number, then `done`) |
+| `POST /v1/agents/{name}/rewind` / `fork` / `pause` / `resume`, `DELETE /v1/agents/{name}` | as the CLI |
+
+The service refuses to listen beyond loopback without a token. Two things to know
+before sharing one:
+
+- It runs sessions with **its own** smol cloud credentials (for `"cloud": true`),
+  so everyone holding the token uses that account. Run one per user or team.
+- A turn's `env` (typically the model API key) travels in the request body. Keep
+  the service on loopback or behind TLS.
+
 ## From code
 
 The sessions are the Rust SDK's `smolmachines::agent` module; `smol agent` is a
