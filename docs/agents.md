@@ -1,7 +1,7 @@
 # Agents
 
-`smol agent` runs an agent — Claude Code, or any program — in its own machine as
-a session of turns. Each turn runs the agent headless and streams what it does;
+`smol agent` runs an agent — Claude Code, Codex, OpenCode, or any program — in its
+own machine as a session of turns. Each turn runs the agent headless and streams what it does;
 the machine keeps its files between turns, and a checkpoint after every turn lets
 you rewind the session or fork it.
 
@@ -10,7 +10,7 @@ memory and its files to the same moment. Nothing about the session depends on
 where it runs: the same commands drive the local engine or smol cloud (`--cloud`).
 
 ```sh
-export ANTHROPIC_API_KEY=...          # read at each turn, never stored
+export ANTHROPIC_API_KEY=...          # stays on this host; the machine sees a placeholder
 smol agent start fixer                 # machine + Claude Code, network limited to the provider
 smol agent send fixer "clone github.com/acme/api into /workspace and make the tests pass"
 smol agent send fixer "now add a test for the edge case you found"
@@ -26,6 +26,8 @@ smol agent rm fixer
 | Harness | Runs | Needs |
 |---|---|---|
 | `claude-code` (default) | `claude -p` with streaming JSON; each turn resumes the previous conversation | `ANTHROPIC_API_KEY` |
+| `codex` | `codex exec --json`; each turn resumes the previous thread (`--model` optional) | `OPENAI_API_KEY` |
+| `opencode` | `opencode run --format json` with `--model provider/model`; each turn continues the previous session | the provider's key: `ANTHROPIC_API_KEY` for `anthropic/*`, `OPENAI_API_KEY` for `openai/*`, none for OpenCode's own `opencode/*` models |
 | `command` | any program, with the prompt appended as its last argument (`--program "sh -c"`, `--image`) | — |
 
 ## Network
@@ -45,7 +47,7 @@ them from the start or from where it left off.
 SMOL_AGENTS_TOKEN=... smol agent serve --listen 127.0.0.1:7777
 
 curl -X POST localhost:7777/v1/agents -H "Authorization: Bearer $T" \
-  -d '{"name":"fixer","harness":"claude-code"}'
+  -d '{"name":"fixer","harness":"claude-code"}'   # or "codex", or "opencode" with "model"
 curl -X POST localhost:7777/v1/agents/fixer/turns -H "Authorization: Bearer $T" \
   -d '{"prompt":"make the tests pass","env":{"ANTHROPIC_API_KEY":"..."}}'   # -> {"turn":0}
 curl -N localhost:7777/v1/agents/fixer/turns/0/events -H "Authorization: Bearer $T"   # SSE

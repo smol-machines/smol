@@ -525,7 +525,12 @@ impl MachineBuilder {
     /// placeholder, and the engine substitutes the real value — read from the
     /// same variable in the environment the machine starts from — only on
     /// requests to `hosts`. Local target only.
-    pub fn credential<I, H>(mut self, name: impl Into<String>, env_var: impl Into<String>, hosts: I) -> Self
+    pub fn credential<I, H>(
+        mut self,
+        name: impl Into<String>,
+        env_var: impl Into<String>,
+        hosts: I,
+    ) -> Self
     where
         I: IntoIterator<Item = H>,
         H: Into<String>,

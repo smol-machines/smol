@@ -17,6 +17,11 @@ pub struct AgentCmd {
 enum HarnessKind {
     /// Anthropic's Claude Code (needs ANTHROPIC_API_KEY)
     ClaudeCode,
+    /// OpenAI's Codex CLI (needs OPENAI_API_KEY)
+    Codex,
+    /// OpenCode with any provider (`--model provider/model`)
+    #[value(name = "opencode")]
+    OpenCode,
     /// Any program: the prompt is appended as its last argument
     Command,
 }
@@ -36,6 +41,10 @@ enum AgentSubcommand {
         /// Program for the `command` harness (the prompt is appended), e.g. "sh -c"
         #[arg(long = "program", default_value = "sh -c")]
         program: String,
+        /// Model: optional for codex; `provider/model` for opencode, e.g.
+        /// anthropic/claude-sonnet-4-5 or openai/gpt-5
+        #[arg(long)]
+        model: Option<String>,
         /// Run the session on smol cloud instead of the local engine
         #[arg(long)]
         cloud: bool,
@@ -119,6 +128,7 @@ impl AgentCmd {
                 harness,
                 image,
                 program,
+                model,
                 cloud,
                 allow_hosts,
                 open_network,
@@ -129,6 +139,13 @@ impl AgentCmd {
             } => {
                 let harness = match harness {
                     HarnessKind::ClaudeCode => Harness::ClaudeCode,
+                    HarnessKind::Codex => Harness::Codex { model },
+                    HarnessKind::OpenCode => {
+                        let Some(model) = model else {
+                            bail!("the opencode harness needs --model provider/model");
+                        };
+                        Harness::OpenCode { model }
+                    }
                     HarnessKind::Command => {
                         let program: Vec<String> =
                             program.split_whitespace().map(str::to_string).collect();
@@ -174,14 +191,25 @@ impl AgentCmd {
             AgentSubcommand::Send { name, prompt, json } => {
                 let mut session = Session::open(&name)?;
                 let prompt = prompt.join(" ");
+                let mut last_text = None;
                 let turn = session.send(&prompt, &mut |event| {
                     if json {
                         if let Ok(line) = serde_json::to_string(event) {
                             println!("{line}");
                         }
-                    } else {
-                        print_event(event);
+                        return;
                     }
+                    match event {
+                        // A failure the agent has not already written out.
+                        AgentEvent::Finished {
+                            result: Some(result),
+                            is_error: true,
+                            ..
+                        } if last_text.as_ref() != Some(result) => println!("✗ {result}"),
+                        AgentEvent::Text { text } => last_text = Some(text.clone()),
+                        _ => {}
+                    }
+                    print_event(event);
                 })?;
                 if !json {
                     let cost = turn

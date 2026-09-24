@@ -174,6 +174,8 @@ struct StartRequest {
     #[serde(default)]
     program: Option<Vec<String>>,
     #[serde(default)]
+    model: Option<String>,
+    #[serde(default)]
     cloud: bool,
     #[serde(default)]
     allow_hosts: Vec<String>,
@@ -205,10 +207,22 @@ async fn start_session(
                 .filter(|p| !p.is_empty())
                 .unwrap_or_else(|| vec!["sh".into(), "-c".into()]),
         },
+        "codex" => Harness::Codex {
+            model: req.model.clone(),
+        },
+        "opencode" => Harness::OpenCode {
+            model: req.model.clone().ok_or_else(|| {
+                ApiError(
+                    StatusCode::BAD_REQUEST,
+                    "the opencode harness needs a model, e.g. \"anthropic/claude-sonnet-4-5\""
+                        .into(),
+                )
+            })?,
+        },
         other => {
             return Err(ApiError(
                 StatusCode::BAD_REQUEST,
-                format!("unknown harness '{other}' (claude-code or command)"),
+                format!("unknown harness '{other}' (claude-code, codex, opencode or command)"),
             ))
         }
     };

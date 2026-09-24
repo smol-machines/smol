@@ -49,6 +49,21 @@ pub enum Harness {
     /// Anthropic's Claude Code, run headless (`claude -p`) with streaming JSON
     /// output. Each turn resumes the previous turn's conversation.
     ClaudeCode,
+    /// OpenAI's Codex CLI, run headless (`codex exec --json`). Each turn resumes
+    /// the previous turn's thread.
+    Codex {
+        /// Model to use instead of Codex's default.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        model: Option<String>,
+    },
+    /// OpenCode, run headless (`opencode run --format json`) with any provider it
+    /// supports. Each turn continues the previous turn's session.
+    #[serde(rename = "opencode")]
+    OpenCode {
+        /// `provider/model`, e.g. `anthropic/claude-sonnet-4-5`. The provider
+        /// decides which API key the session needs.
+        model: String,
+    },
     /// Any program: the prompt is appended as its last argument and each line it
     /// prints becomes a text event. Useful for custom agents and for tests.
     Command {
@@ -59,45 +74,84 @@ pub enum Harness {
     },
 }
 
+/// A model provider an agent calls: the key it needs and where it sends it.
+struct Provider {
+    key_env: &'static str,
+    host: &'static str,
+}
+
+const ANTHROPIC: Provider = Provider {
+    key_env: "ANTHROPIC_API_KEY",
+    host: "api.anthropic.com",
+};
+
+const OPENAI: Provider = Provider {
+    key_env: "OPENAI_API_KEY",
+    host: "api.openai.com",
+};
+
+/// The model provider Codex runs with.
+const CODEX_PROVIDER: &str = r#"model_providers.smol={name="OpenAI",base_url="https://api.openai.com/v1",env_key="OPENAI_API_KEY",wire_api="responses",supports_websockets=false}"#;
+
+/// Installs a harness from npm into a machine that has Node.
+const NPM_INSTALL: &str = "npm install -g --no-fund --no-audit --loglevel=error";
+
 impl Harness {
     /// Short name for display and for machine names.
     pub fn name(&self) -> &str {
         match self {
             Harness::ClaudeCode => "claude-code",
+            Harness::Codex { .. } => "codex",
+            Harness::OpenCode { .. } => "opencode",
             Harness::Command { .. } => "command",
         }
     }
 
     fn image(&self) -> &str {
         match self {
-            Harness::ClaudeCode => "node:22-bookworm-slim",
+            Harness::ClaudeCode | Harness::Codex { .. } | Harness::OpenCode { .. } => {
+                "node:22-bookworm-slim"
+            }
             Harness::Command { image, .. } => image,
+        }
+    }
+
+    fn provider(&self) -> Option<Provider> {
+        match self {
+            Harness::ClaudeCode => Some(ANTHROPIC),
+            Harness::Codex { .. } => Some(OPENAI),
+            Harness::OpenCode { model } => match model.split_once('/').map(|(p, _)| p) {
+                Some("anthropic") => Some(ANTHROPIC),
+                Some("openai") => Some(OPENAI),
+                _ => None,
+            },
+            Harness::Command { .. } => None,
         }
     }
 
     /// The environment variable holding the model API key, if the harness uses one.
     pub fn api_key_env(&self) -> Option<&'static str> {
-        match self {
-            Harness::ClaudeCode => Some("ANTHROPIC_API_KEY"),
-            Harness::Command { .. } => None,
-        }
-    }
-
-    /// Hosts the harness needs: its model provider and the package registry it
-    /// installs from.
-    fn allowed_hosts(&self) -> &'static [&'static str] {
-        match self {
-            Harness::ClaudeCode => &["api.anthropic.com", "registry.npmjs.org"],
-            Harness::Command { .. } => &[],
-        }
+        self.provider().map(|p| p.key_env)
     }
 
     /// The model provider the API key is sent to.
     fn provider_host(&self) -> Option<&'static str> {
+        self.provider().map(|p| p.host)
+    }
+
+    /// Hosts the harness needs: its model provider and where it installs from.
+    fn allowed_hosts(&self) -> Vec<&'static str> {
+        let mut hosts: Vec<&'static str> = self.provider_host().into_iter().collect();
         match self {
-            Harness::ClaudeCode => Some("api.anthropic.com"),
-            Harness::Command { .. } => None,
+            Harness::ClaudeCode | Harness::Codex { .. } => hosts.push("registry.npmjs.org"),
+            // OpenCode reads its model catalogue from models.dev, and its own
+            // `opencode/*` models are served by opencode.ai.
+            Harness::OpenCode { .. } => {
+                hosts.extend(["registry.npmjs.org", "models.dev", "opencode.ai"])
+            }
+            Harness::Command { .. } => {}
         }
+        hosts
     }
 
     /// Environment every turn runs with.
@@ -111,61 +165,242 @@ impl Harness {
                 ("DISABLE_ERROR_REPORTING", "1"),
                 ("DISABLE_AUTOUPDATER", "1"),
             ],
-            Harness::Command { .. } => &[],
+            Harness::OpenCode { .. } => &[("OPENCODE_DISABLE_AUTOUPDATE", "1")],
+            Harness::Codex { .. } | Harness::Command { .. } => &[],
         }
     }
 
     /// One-time setup inside a new machine.
-    fn setup_script(&self) -> Option<&'static str> {
-        match self {
-            Harness::ClaudeCode => Some(
+    fn setup_script(&self) -> Option<String> {
+        let install = |bin: &str, package: &str| {
+            format!(
                 "set -e; mkdir -p /workspace; \
-                 command -v claude >/dev/null 2>&1 || \
-                 npm install -g --no-fund --no-audit --loglevel=error @anthropic-ai/claude-code",
-            ),
-            Harness::Command { .. } => Some("mkdir -p /workspace"),
+                 command -v {bin} >/dev/null 2>&1 || {NPM_INSTALL} {package}"
+            )
+        };
+        match self {
+            Harness::ClaudeCode => Some(install("claude", "@anthropic-ai/claude-code")),
+            // Codex verifies TLS against the system roots, which the slim image
+            // lacks; Node carries Mozilla's, so write those out.
+            Harness::Codex { .. } => Some(format!(
+                "{}; test -s /etc/ssl/certs/ca-certificates.crt || {{ mkdir -p /etc/ssl/certs; \
+                 node -e 'process.stdout.write(require(\"tls\").rootCertificates.join(\"\\n\") + \"\\n\")' \
+                 > /etc/ssl/certs/ca-certificates.crt; }}",
+                install("codex", "@openai/codex")
+            )),
+            Harness::OpenCode { .. } => Some(install("opencode", "opencode-ai")),
+            Harness::Command { .. } => Some("mkdir -p /workspace".into()),
         }
     }
 
     /// The command for one turn. `resume` is the harness's own conversation id
     /// from the previous turn.
     fn turn_command(&self, prompt: &str, resume: Option<&str>) -> Vec<String> {
+        let mut cmd: Vec<String> = Vec::new();
+        let mut push = |args: &[&str]| cmd.extend(args.iter().map(|s| s.to_string()));
         match self {
             Harness::ClaudeCode => {
-                let mut cmd: Vec<String> = [
-                    "claude",
-                    "-p",
-                    prompt,
-                    "--output-format",
-                    "stream-json",
-                    "--verbose",
-                    "--dangerously-skip-permissions",
-                ]
-                .iter()
-                .map(|s| s.to_string())
-                .collect();
+                push(&["claude", "-p", prompt, "--output-format", "stream-json"]);
+                push(&["--verbose", "--dangerously-skip-permissions"]);
                 if let Some(id) = resume {
-                    cmd.push("--resume".into());
-                    cmd.push(id.into());
+                    push(&["--resume", id]);
                 }
-                cmd
+            }
+            Harness::Codex { model } => {
+                // Stdin stays closed: given a pipe, Codex waits to read more prompt.
+                push(&["sh", "-c", r#"exec codex "$@" </dev/null"#, "codex", "exec"]);
+                if let Some(id) = resume {
+                    push(&["resume", id]);
+                }
+                push(&["--json", "--skip-git-repo-check"]);
+                push(&["--dangerously-bypass-approvals-and-sandbox"]);
+                // OpenAI's endpoint, keyed by OPENAI_API_KEY, over plain HTTPS:
+                // requests carrying a substituted key cannot be WebSocket upgrades.
+                push(&["-c", CODEX_PROVIDER, "-c", "model_provider=smol"]);
+                if let Some(model) = model {
+                    push(&["--model", model]);
+                }
+                push(&[prompt]);
+            }
+            Harness::OpenCode { model } => {
+                // Like Codex, OpenCode reads a piped stdin into the prompt.
+                push(&["sh", "-c", r#"exec opencode "$@" </dev/null"#, "opencode"]);
+                push(&["run", "--format", "json", "--auto", "-m", model]);
+                if let Some(id) = resume {
+                    push(&["--session", id]);
+                }
+                push(&[prompt]);
             }
             Harness::Command { program, .. } => {
-                let mut cmd = program.clone();
+                cmd.extend(program.iter().cloned());
                 cmd.push(prompt.into());
-                cmd
             }
         }
+        cmd
     }
 
     /// Parse one line of the harness's output into events.
     pub fn parse_line(&self, line: &str) -> Vec<AgentEvent> {
         match self {
             Harness::ClaudeCode => parse_claude_line(line),
+            Harness::Codex { .. } => parse_json_line(line, parse_codex),
+            Harness::OpenCode { .. } => parse_json_line(line, parse_opencode),
             Harness::Command { .. } => vec![AgentEvent::Text {
                 text: line.to_string(),
             }],
         }
+    }
+}
+
+/// Run `parse` on a JSON line; anything else the harness printed becomes stderr.
+fn parse_json_line(line: &str, parse: fn(&Value) -> Option<Vec<AgentEvent>>) -> Vec<AgentEvent> {
+    if line.trim().is_empty() {
+        return Vec::new();
+    }
+    match serde_json::from_str::<Value>(line) {
+        Ok(v) => parse(&v).unwrap_or_else(|| vec![AgentEvent::Other(v)]),
+        Err(_) => vec![AgentEvent::Stderr {
+            line: line.to_string(),
+        }],
+    }
+}
+
+fn str_at<'a>(v: &'a Value, key: &str) -> Option<&'a str> {
+    v.get(key).and_then(Value::as_str)
+}
+
+/// `codex exec --json`: thread/turn lifecycle plus items (messages, commands,
+/// file edits, MCP and web-search calls) as they start and complete.
+fn parse_codex(v: &Value) -> Option<Vec<AgentEvent>> {
+    let item = v.get("item").unwrap_or(&Value::Null);
+    let events = match (str_at(v, "type")?, str_at(item, "type").unwrap_or("")) {
+        ("thread.started", _) => vec![AgentEvent::Started {
+            session_id: str_at(v, "thread_id")?.to_string(),
+        }],
+        ("item.started", "command_execution") => vec![AgentEvent::ToolUse {
+            name: "shell".into(),
+            input: serde_json::json!({ "command": item.get("command") }),
+        }],
+        ("item.completed", "command_execution") => vec![AgentEvent::ToolResult {
+            output: str_at(item, "aggregated_output").unwrap_or("").to_string(),
+            is_error: item
+                .get("exit_code")
+                .and_then(Value::as_i64)
+                .is_some_and(|c| c != 0),
+        }],
+        ("item.completed", "agent_message") => vec![AgentEvent::Text {
+            text: str_at(item, "text")?.to_string(),
+        }],
+        ("item.completed", "file_change") => vec![AgentEvent::ToolUse {
+            name: "file_change".into(),
+            input: serde_json::json!({ "changes": item.get("changes") }),
+        }],
+        ("item.completed", "mcp_tool_call") => {
+            let name = format!(
+                "{}.{}",
+                str_at(item, "server").unwrap_or("mcp"),
+                str_at(item, "tool").unwrap_or("tool")
+            );
+            let failed = item.get("error").is_some_and(|e| !e.is_null());
+            let output = if failed {
+                item.get("error")
+            } else {
+                item.get("result")
+            };
+            vec![
+                AgentEvent::ToolUse {
+                    name,
+                    input: item.get("arguments").cloned().unwrap_or(Value::Null),
+                },
+                AgentEvent::ToolResult {
+                    output: output.map(value_text).unwrap_or_default(),
+                    is_error: failed,
+                },
+            ]
+        }
+        ("item.completed", "web_search") => vec![AgentEvent::ToolUse {
+            name: "web_search".into(),
+            input: serde_json::json!({ "query": item.get("query") }),
+        }],
+        ("turn.completed", _) => vec![AgentEvent::Finished {
+            result: None,
+            is_error: false,
+            cost_usd: None,
+        }],
+        ("turn.failed", _) => vec![AgentEvent::Finished {
+            result: v
+                .pointer("/error/message")
+                .and_then(Value::as_str)
+                .map(String::from),
+            is_error: true,
+            cost_usd: None,
+        }],
+        // Retries and non-fatal errors: diagnostics, not the agent's output.
+        ("error", _) => vec![AgentEvent::Stderr {
+            line: str_at(v, "message").unwrap_or("").to_string(),
+        }],
+        _ => return None,
+    };
+    Some(events)
+}
+
+/// `opencode run --format json`: one line per message part (text, tool call,
+/// step boundary), each carrying the session id.
+fn parse_opencode(v: &Value) -> Option<Vec<AgentEvent>> {
+    let part = v.get("part").unwrap_or(&Value::Null);
+    let events = match str_at(v, "type")? {
+        "step_start" => vec![AgentEvent::Started {
+            session_id: str_at(v, "sessionID")?.to_string(),
+        }],
+        "text" => vec![AgentEvent::Text {
+            text: str_at(part, "text")?.to_string(),
+        }],
+        "tool_use" => {
+            let state = part.get("state").unwrap_or(&Value::Null);
+            let failed = str_at(state, "status") == Some("error");
+            let output = if failed {
+                state.get("error")
+            } else {
+                state.get("output")
+            };
+            vec![
+                AgentEvent::ToolUse {
+                    name: str_at(part, "tool").unwrap_or("tool").to_string(),
+                    input: state.get("input").cloned().unwrap_or(Value::Null),
+                },
+                AgentEvent::ToolResult {
+                    output: output.map(value_text).unwrap_or_default(),
+                    is_error: failed,
+                },
+            ]
+        }
+        // A step that ends for any reason but calling tools ends the turn.
+        "step_finish" if str_at(part, "reason") != Some("tool-calls") => {
+            vec![AgentEvent::Finished {
+                result: None,
+                is_error: false,
+                cost_usd: None,
+            }]
+        }
+        "error" => vec![AgentEvent::Finished {
+            result: v
+                .pointer("/error/data/message")
+                .or_else(|| v.pointer("/error/name"))
+                .and_then(Value::as_str)
+                .map(String::from),
+            is_error: true,
+            cost_usd: None,
+        }],
+        _ => return None,
+    };
+    Some(events)
+}
+
+/// A JSON value as display text: strings as themselves, anything else as JSON.
+fn value_text(v: &Value) -> String {
+    match v {
+        Value::String(s) => s.clone(),
+        other => other.to_string(),
     }
 }
 
@@ -489,15 +724,16 @@ impl Session {
             .label("smol.agent", &options.name)
             .label("smol.harness", options.harness.name());
         if key_outside_machine {
-            if let (Some(key_env), Some(host)) =
-                (options.harness.api_key_env(), options.harness.provider_host())
-            {
+            if let (Some(key_env), Some(host)) = (
+                options.harness.api_key_env(),
+                options.harness.provider_host(),
+            ) {
                 builder = builder.credential("model", key_env, [host]);
             }
         }
         if !options.open_network {
             for host in options.harness.allowed_hosts() {
-                builder = builder.allow_host(*host);
+                builder = builder.allow_host(host);
             }
             for host in &options.extra_hosts {
                 builder = builder.allow_host(host);
@@ -515,7 +751,7 @@ impl Session {
             }
         }
         if let Some(script) = options.harness.setup_script() {
-            let out = machine.exec(["sh", "-c", script])?;
+            let out = machine.exec(["sh", "-c", script.as_str()])?;
             if !out.success() {
                 let _ = machine.delete();
                 return Err(Error::new(
@@ -943,6 +1179,178 @@ mod tests {
     // Every event must encode: the CLI's --json output and the service's event
     // files are written this way, and a variant that fails to serialize would
     // silently vanish from both.
+    #[test]
+    fn codex_json_becomes_agent_events() {
+        let h = Harness::Codex { model: None };
+        let lines = [
+            r#"{"type":"thread.started","thread_id":"01a0d4f4-6279"}"#,
+            r#"{"type":"turn.started"}"#,
+            r#"{"type":"item.started","item":{"id":"item_1","type":"command_execution","command":"ls","aggregated_output":"","exit_code":null,"status":"in_progress"}}"#,
+            r#"{"type":"item.completed","item":{"id":"item_1","type":"command_execution","command":"ls","aggregated_output":"a.txt\n","exit_code":0,"status":"completed"}}"#,
+            r#"{"type":"item.completed","item":{"id":"item_2","type":"agent_message","text":"done"}}"#,
+            r#"{"type":"turn.completed","usage":{"input_tokens":10,"cached_input_tokens":0,"output_tokens":2}}"#,
+        ];
+        let events: Vec<AgentEvent> = lines.iter().flat_map(|l| h.parse_line(l)).collect();
+        assert_eq!(
+            events[0],
+            AgentEvent::Started {
+                session_id: "01a0d4f4-6279".into()
+            }
+        );
+        assert!(matches!(events[1], AgentEvent::Other(_)));
+        assert!(
+            matches!(&events[2], AgentEvent::ToolUse { name, input } if name == "shell" && input["command"] == "ls")
+        );
+        assert_eq!(
+            events[3],
+            AgentEvent::ToolResult {
+                output: "a.txt\n".into(),
+                is_error: false
+            }
+        );
+        assert_eq!(
+            events[4],
+            AgentEvent::Text {
+                text: "done".into()
+            }
+        );
+        assert!(matches!(
+            events[5],
+            AgentEvent::Finished {
+                is_error: false,
+                ..
+            }
+        ));
+
+        // Captured from a real run with an invalid key.
+        let failed = h.parse_line(
+            r#"{"type":"turn.failed","error":{"message":"unexpected status 401 Unauthorized: Incorrect API key provided"}}"#,
+        );
+        assert!(
+            matches!(&failed[0], AgentEvent::Finished { is_error: true, result: Some(r), .. } if r.contains("401"))
+        );
+        let retry = h.parse_line(r#"{"type":"error","message":"Reconnecting... 2/5"}"#);
+        assert!(matches!(&retry[0], AgentEvent::Stderr { .. }));
+    }
+
+    #[test]
+    fn codex_turns_resume_the_previous_thread() {
+        let h = Harness::Codex {
+            model: Some("gpt-5".into()),
+        };
+        let cmd = h.turn_command("next", Some("t-1"));
+        let exec = cmd.iter().position(|a| a == "exec").unwrap();
+        assert_eq!(&cmd[exec..exec + 3], &["exec", "resume", "t-1"]);
+        assert!(cmd.iter().any(|a| a.contains("supports_websockets=false")));
+        assert!(cmd.contains(&"--json".to_string()));
+        assert!(cmd.windows(2).any(|w| w == ["--model", "gpt-5"]));
+        assert_eq!(cmd.last().unwrap(), "next");
+        assert!(!h
+            .turn_command("first", None)
+            .contains(&"resume".to_string()));
+    }
+
+    #[test]
+    fn opencode_json_becomes_agent_events() {
+        let h = Harness::OpenCode {
+            model: "opencode/big-pickle".into(),
+        };
+        // Captured from a real `opencode run --format json` turn.
+        let lines = [
+            r#"{"type":"step_start","timestamp":1,"sessionID":"ses_f2b0","part":{"type":"step-start"}}"#,
+            r#"{"type":"tool_use","timestamp":2,"sessionID":"ses_f2b0","part":{"type":"tool","tool":"bash","callID":"c1","state":{"status":"completed","input":{"command":"echo hi"},"output":"hi\n","metadata":{"exit":0}}}}"#,
+            r#"{"type":"step_finish","timestamp":3,"sessionID":"ses_f2b0","part":{"type":"step-finish","reason":"tool-calls","cost":0}}"#,
+            r#"{"type":"step_start","timestamp":4,"sessionID":"ses_f2b0","part":{"type":"step-start"}}"#,
+            r#"{"type":"text","timestamp":5,"sessionID":"ses_f2b0","part":{"type":"text","text":"done"}}"#,
+            r#"{"type":"step_finish","timestamp":6,"sessionID":"ses_f2b0","part":{"type":"step-finish","reason":"stop","cost":0}}"#,
+        ];
+        let events: Vec<AgentEvent> = lines.iter().flat_map(|l| h.parse_line(l)).collect();
+        assert_eq!(
+            events[0],
+            AgentEvent::Started {
+                session_id: "ses_f2b0".into()
+            }
+        );
+        assert!(
+            matches!(&events[1], AgentEvent::ToolUse { name, input } if name == "bash" && input["command"] == "echo hi")
+        );
+        assert_eq!(
+            events[2],
+            AgentEvent::ToolResult {
+                output: "hi\n".into(),
+                is_error: false
+            }
+        );
+        // A step that stops to call tools does not end the turn.
+        assert!(matches!(events[3], AgentEvent::Other(_)));
+        assert!(matches!(events[4], AgentEvent::Started { .. }));
+        assert_eq!(
+            events[5],
+            AgentEvent::Text {
+                text: "done".into()
+            }
+        );
+        assert!(matches!(
+            events[6],
+            AgentEvent::Finished {
+                is_error: false,
+                ..
+            }
+        ));
+        assert_eq!(events.len(), 7);
+
+        let failed = h.parse_line(
+            r#"{"type":"error","sessionID":"ses_f2b0","error":{"name":"APIError","data":{"message":"Incorrect API key provided","statusCode":401}}}"#,
+        );
+        assert!(
+            matches!(&failed[0], AgentEvent::Finished { is_error: true, result: Some(r), .. } if r == "Incorrect API key provided")
+        );
+    }
+
+    #[test]
+    fn opencode_provider_decides_the_key() {
+        let h = |model: &str| Harness::OpenCode {
+            model: model.into(),
+        };
+        assert_eq!(
+            h("anthropic/claude-sonnet-4-5").api_key_env(),
+            Some("ANTHROPIC_API_KEY")
+        );
+        assert_eq!(h("openai/gpt-5").api_key_env(), Some("OPENAI_API_KEY"));
+        assert_eq!(h("opencode/big-pickle").api_key_env(), None);
+        assert!(h("openai/gpt-5")
+            .allowed_hosts()
+            .contains(&"api.openai.com"));
+        let cmd = h("openai/gpt-5").turn_command("go", Some("ses_1"));
+        assert!(cmd.windows(2).any(|w| w == ["--session", "ses_1"]));
+        assert!(cmd.windows(2).any(|w| w == ["-m", "openai/gpt-5"]));
+        assert_eq!(
+            Harness::Codex { model: None }.api_key_env(),
+            Some("OPENAI_API_KEY")
+        );
+    }
+
+    #[test]
+    fn harnesses_round_trip_through_records() {
+        for h in [
+            Harness::ClaudeCode,
+            Harness::Codex { model: None },
+            Harness::OpenCode {
+                model: "openai/gpt-5".into(),
+            },
+        ] {
+            let json = serde_json::to_string(&h).unwrap();
+            assert_eq!(serde_json::from_str::<Harness>(&json).unwrap(), h);
+        }
+        assert_eq!(
+            serde_json::to_value(Harness::OpenCode {
+                model: "x/y".into()
+            })
+            .unwrap()["kind"],
+            "opencode"
+        );
+    }
+
     #[test]
     fn every_event_serializes_with_its_type() {
         let events = [
