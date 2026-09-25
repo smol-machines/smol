@@ -58,7 +58,7 @@ fn restart_machine(
     StartCmd {
         name: Some(name.to_string()),
         cloud: false,
-        local: false,
+        local: true,
         forkable: false,
         egress_interceptor: interceptor,
         egress_interceptor_token: token
@@ -71,7 +71,7 @@ fn stop_machine(name: &str) {
     let _ = StopCmd {
         name: Some(name.to_string()),
         cloud: false,
-        local: false,
+        local: true,
     }
     .run();
 }
