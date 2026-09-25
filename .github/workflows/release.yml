@@ -225,14 +225,11 @@ jobs:
       # self-contained on a Mac without those formulae. Source must exist here.
       - name: Install GPU dylibs to vendor (macOS)
         if: runner.os == 'macOS'
-        # virglrenderer left homebrew-core and now lives in the libkrun/krun tap;
-        # tap it and install from there (NO_INSTALL_FROM_API uses the tapped
-        # formula directly, past the untrusted-tap API guard).
+        # The engine's libkrun.dylib loads libepoxy and virglrenderer from its own
+        # lib dir (@loader_path), and the engine release ships both, so nothing
+        # comes from Homebrew's virglrenderer (the libkrun/krun tap removed it).
         run: |
           brew install libepoxy
-          brew tap libkrun/krun
-          brew trust libkrun/krun
-          brew install libkrun/krun/virglrenderer
       - name: Bundle native libs + boot helper next to the addon
         env:
           SMOLVM_LIB_DIR: ${{ matrix.engine_lib }}
@@ -404,14 +401,11 @@ jobs:
       # Mac without those formulae. The vendor source must exist on THIS runner.
       - name: Install GPU dylibs to vendor (macOS)
         if: runner.os == 'macOS'
-        # virglrenderer left homebrew-core and now lives in the libkrun/krun tap;
-        # tap it and install from there (NO_INSTALL_FROM_API uses the tapped
-        # formula directly, past the untrusted-tap API guard).
+        # The engine's libkrun.dylib loads libepoxy and virglrenderer from its own
+        # lib dir (@loader_path), and the engine release ships both, so nothing
+        # comes from Homebrew's virglrenderer (the libkrun/krun tap removed it).
         run: |
           brew install libepoxy
-          brew tap libkrun/krun
-          brew trust libkrun/krun
-          brew install libkrun/krun/virglrenderer
       - name: Stage native libs + boot helper into the wheel
         working-directory: sdk/python
         env:
