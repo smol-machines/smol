@@ -350,7 +350,8 @@ impl StartCmd {
     }
 
     fn start_default(&self) -> anyhow::Result<()> {
-        let manager = AgentManager::new_default()?;
+        // Open for launch so a never-started default machine gets its disks.
+        let manager = AgentManager::new_default_with_sizes(None, None)?;
 
         if manager.try_connect_existing().is_some() {
             println!("Machine 'default' already running");
