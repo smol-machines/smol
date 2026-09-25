@@ -30,7 +30,7 @@ Global behavior:
 | Command | Description |
 |---------|-------------|
 | `smol machine create <name> --image <ref>` | Create a **persistent** machine (does not run a command). Use `--from <path.smolmachine>` to create from a packed artifact (uses its layers, no pull). Restrict egress with `--allow-cidr`/`--allow-host`/`--outbound-localhost-only` (imply `--net`). |
-| `smol machine start <name>` / `smol machine stop <name>` | Start / stop a persistent machine. Add `--branchable` to `start` to make it a branch source (`--forkable` remains an alias). |
+| `smol machine start <name>` / `smol machine stop <name>` | Start / stop a persistent machine. Add `--branchable` to `start` to make it a branch source (`--forkable` remains an alias). For trusted local egress interception, set `SMOLVM_INTERCEPTOR_TOKEN` and pass `--egress-interceptor 127.0.0.1:PORT` on each start. |
 | `smol machine ls` | List machines, local **and** cloud (`--json`; `--local`/`--cloud` to scope). Alias: `list`. |
 | `smol machine status <name>` | Show one machine's status (`--json`). |
 | `smol machine rm <name>` | Delete a machine (`--force` to skip the confirmation prompt). Alias: `delete`. |
@@ -45,8 +45,8 @@ Global behavior:
 | `smol machine restore --checkpoint <point-or-file> --name <machine>` | Restore a stored directory or portable checkpoint as a running branch source. |
 | `smol machine images --name <name>` | List a machine's cached images and storage usage (`--json`). |
 | `smol machine prune --name <name>` | Reclaim a machine's disk: free unreferenced layers, or `--all` to purge the cache (`--dry-run` to preview; `--all` requires the machine stopped). |
-| `smol machine update --name <name> …` | Modify a **stopped** machine: add/remove volumes/ports/env, set `--cpus`/`--mem`/`--workdir`, toggle `--net`/`--gpu`, expand `--storage`/`--overlay` (expand-only). |
-| `smol machine monitor --name <name>` | Supervise a machine in the foreground with health checks (`--health-cmd`, `--interval`, `--health-retries`) and a restart policy (`--restart never\|always\|on-failure\|unless-stopped`). |
+| `smol machine update --name <name> …` | Modify a **stopped** machine: add/remove volumes/ports/env, set `--cpus`/`--mem`/`--workdir`, toggle `--net`/`--gpu`, expand `--storage`/`--overlay` (expand-only). Use `--no-egress-interceptor` to explicitly clear a prior interceptor requirement. |
+| `smol machine monitor --name <name>` | Supervise a machine in the foreground with health checks (`--health-cmd`, `--interval`, `--health-retries`) and a restart policy (`--restart never\|always\|on-failure\|unless-stopped`). Pass the same interceptor address and token environment variable to rebind it on automatic restart. |
 | `smol machine data-dir --name <name>` | Print the machine's on-disk data directory (scripting/debugging). |
 
 ## Smolfile (declarative) — `smol file …`

@@ -32,6 +32,7 @@ import type {
   ForkOptions,
   ImageInfo,
   MachineConfig,
+  StartOptions,
   MachineUsageReport,
   ShareLink,
   PortableCheckpointInfo,
@@ -278,9 +279,10 @@ export class Machine {
   /** Resume saved execution in this machine. */
   resume(): Promise<void> { return this.transport.resume(); }
 
-  /** Boot a stopped machine with its disk state, not its previous RAM. */
-  start(): Promise<void> {
-    return this.transport.start();
+  /** Boot a stopped machine with its disk state, not its previous RAM.
+   *  The local handle reuses its interceptor binding or accepts a fresh one. */
+  start(options: StartOptions = {}): Promise<void> {
+    return this.transport.start(options.egressInterceptor);
   }
 
   /** Stop the machine and delete its storage. On the cloud target, pass

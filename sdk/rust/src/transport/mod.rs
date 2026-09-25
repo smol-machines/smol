@@ -85,6 +85,12 @@ pub(crate) trait Transport: Send + Sync + std::fmt::Debug {
     fn wait_until_ready(&self, options: ReadyOptions) -> Result<()>;
 
     fn start(&self) -> Result<()>;
+    fn start_with_interceptor(&self, _binding: &crate::EgressInterceptor) -> Result<()> {
+        Err(crate::Error::new(
+            crate::ErrorKind::NotSupported,
+            "egress interception is local-only",
+        ))
+    }
     fn start_branchable(&self) -> Result<()>;
     fn stop(&self) -> Result<()>;
     fn pause(&self) -> Result<()>;

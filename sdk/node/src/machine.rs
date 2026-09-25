@@ -16,6 +16,21 @@ fn join_error(err: tokio::task::JoinError) -> napi::Error {
     napi::Error::from_reason(format!("Task join error: {}", err))
 }
 
+fn parse_interceptor(
+    address: Option<String>,
+    token: Option<String>,
+) -> napi::Result<Option<smolvm_protocol::InterceptEndpoint>> {
+    match (address, token) {
+        (None, None) => Ok(None),
+        (Some(address), Some(token)) => smolvm::embedded::interceptor_endpoint(&address, &token)
+            .map(Some)
+            .into_napi(),
+        _ => Err(napi::Error::from_reason(
+            "egress interceptor requires both address and token",
+        )),
+    }
+}
+
 #[napi]
 pub struct NapiMachine {
     name: String,
@@ -130,10 +145,15 @@ impl NapiMachine {
     /// (start-or-reconnect). Lets a persisted machine be re-opened in a new
     /// process — backs the SDK's local `Machine.connect()`.
     #[napi(factory)]
-    pub fn connect(name: String) -> napi::Result<Self> {
+    pub fn connect(
+        name: String,
+        interceptor_address: Option<String>,
+        interceptor_token: Option<String>,
+    ) -> napi::Result<Self> {
+        let interceptor = parse_interceptor(interceptor_address, interceptor_token)?;
         runtime()
             .into_napi()?
-            .connect_or_start_machine(&name)
+            .connect_or_start_machine_with_interceptor(&name, interceptor)
             .into_napi()?;
         Ok(Self { name })
     }
@@ -244,13 +264,20 @@ impl NapiMachine {
     /// Start the machine VM. Boots via fork + libkrun, waits for agent ready,
     /// then connects the vsock client.
     #[napi]
-    pub async fn start(&self) -> napi::Result<()> {
+    pub async fn start(
+        &self,
+        interceptor_address: Option<String>,
+        interceptor_token: Option<String>,
+    ) -> napi::Result<()> {
+        let interceptor = parse_interceptor(interceptor_address, interceptor_token)?;
         let runtime = runtime().into_napi()?;
         let name = self.name.clone();
-        tokio::task::spawn_blocking(move || runtime.start_machine(&name))
-            .await
-            .map_err(join_error)?
-            .into_napi()
+        tokio::task::spawn_blocking(move || {
+            runtime.start_machine_with_interceptor(&name, interceptor)
+        })
+        .await
+        .map_err(join_error)?
+        .into_napi()
     }
 
     /// Start this machine as a forkable fork base (memfd-backed guest RAM +

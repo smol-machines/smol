@@ -17,7 +17,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use super::{unsupported, ReadyOptions, Transport};
-use crate::config::Port;
+use crate::config::{EgressInterceptor, Port};
 use crate::connect::Target;
 use crate::error::{Error, ErrorKind, Result};
 use crate::exec::{ExecEvent, ExecOptions, ExecResult, ExecStream};
@@ -226,6 +226,7 @@ pub(crate) struct LocalTransport {
     /// Ports this SDK published for the machine. The CLI reports only a count,
     /// so a machine the SDK did not create cannot be asked for its mapping.
     ports: Vec<Port>,
+    interceptor: std::sync::Mutex<Option<EgressInterceptor>>,
 }
 
 impl LocalTransport {
@@ -234,6 +235,7 @@ impl LocalTransport {
             name: name.into(),
             cli: resolve_cli()?,
             ports: Vec::new(),
+            interceptor: std::sync::Mutex::new(None),
         })
     }
 
@@ -244,8 +246,25 @@ impl LocalTransport {
         })
     }
 
+    pub(crate) fn set_interceptor(&mut self, binding: EgressInterceptor) -> Result<()> {
+        *self
+            .interceptor
+            .get_mut()
+            .map_err(|_| Error::new(ErrorKind::Other, "interceptor lock poisoned"))? =
+            Some(binding);
+        Ok(())
+    }
+
     /// Run a CLI command and hand back its exit code and streams.
     fn cli(&self, args: &[&str]) -> Result<(i32, Vec<u8>, Vec<u8>)> {
+        self.cli_with_token(args, None)
+    }
+
+    fn cli_with_token(
+        &self,
+        args: &[&str],
+        token: Option<&str>,
+    ) -> Result<(i32, Vec<u8>, Vec<u8>)> {
         let mut command = Command::new(&self.cli);
         command
             .args(args)
@@ -253,6 +272,9 @@ impl LocalTransport {
             // See assets.rs: this variable makes the engine tie the VM's life
             // to its parent, and every CLI call here is short-lived.
             .env_remove("SMOLVM_BOOT_BINARY");
+        if let Some(token) = token {
+            command.env("SMOLVM_INTERCEPTOR_TOKEN", token);
+        }
         let output = retry_text_busy(|| command.output()).map_err(|e| {
             Error::new(ErrorKind::Other, format!("run {}: {e}", self.cli.display()))
         })?;
@@ -266,6 +288,14 @@ impl LocalTransport {
     /// Run a CLI command that is expected to succeed.
     fn run(&self, args: &[&str]) -> Result<Vec<u8>> {
         let (code, stdout, stderr) = self.cli(args)?;
+        if code == 0 {
+            return Ok(stdout);
+        }
+        Err(cli_error(args, &stderr, &stdout))
+    }
+
+    fn run_with_token(&self, args: &[&str], token: Option<&str>) -> Result<Vec<u8>> {
+        let (code, stdout, stderr) = self.cli_with_token(args, token)?;
         if code == 0 {
             return Ok(stdout);
         }
@@ -399,11 +429,63 @@ impl Transport for LocalTransport {
     }
 
     fn start(&self) -> Result<()> {
-        self.run(&["machine", "start", "--name", &self.name])
-            .map(|_| ())
+        let binding = self
+            .interceptor
+            .lock()
+            .map_err(|_| Error::new(ErrorKind::Other, "interceptor lock poisoned"))?
+            .clone();
+        match binding {
+            Some(binding) => self
+                .run_with_token(
+                    &[
+                        "machine",
+                        "start",
+                        "--name",
+                        &self.name,
+                        "--egress-interceptor",
+                        &binding.address.to_string(),
+                    ],
+                    Some(&binding.token),
+                )
+                .map(|_| ()),
+            None => self
+                .run(&["machine", "start", "--name", &self.name])
+                .map(|_| ()),
+        }
+    }
+
+    fn start_with_interceptor(&self, binding: &EgressInterceptor) -> Result<()> {
+        self.run_with_token(
+            &[
+                "machine",
+                "start",
+                "--name",
+                &self.name,
+                "--egress-interceptor",
+                &binding.address.to_string(),
+            ],
+            Some(&binding.token),
+        )?;
+        *self
+            .interceptor
+            .lock()
+            .map_err(|_| Error::new(ErrorKind::Other, "interceptor lock poisoned"))? =
+            Some(binding.clone());
+        Ok(())
     }
 
     fn start_branchable(&self) -> Result<()> {
+        if self
+            .interceptor
+            .lock()
+            .map_err(|_| Error::new(ErrorKind::Other, "interceptor lock poisoned"))?
+            .is_some()
+        {
+            return Err(Error::new(
+                ErrorKind::NotSupported,
+                "egress interception cannot be combined with branchable machines",
+            ));
+        }
         self.run(&["machine", "start", "--name", &self.name, "--branchable"])
             .map(|_| ())
     }
@@ -949,7 +1031,18 @@ mod io_tests {
             name: "test".into(),
             cli: path,
             ports: vec![],
+            interceptor: std::sync::Mutex::new(None),
         }
+    }
+
+    #[test]
+    fn interceptor_token_is_passed_in_environment_only() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut transport = cli(dir.path(), "test \"$5\" = --egress-interceptor\ntest \"$6\" = 127.0.0.1:9000\ntest \"$SMOLVM_INTERCEPTOR_TOKEN\" = abc");
+        let binding = EgressInterceptor::new("127.0.0.1:9000".parse().unwrap(), "abc");
+        transport.set_interceptor(binding.clone()).unwrap();
+        transport.start().unwrap();
+        assert!(!format!("{binding:?}").contains("abc"));
     }
 
     #[test]

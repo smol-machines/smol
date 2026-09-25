@@ -55,6 +55,8 @@ export type {
   ImageInfo,
   ExecEvent,
   ConnectOptions,
+  EgressInterceptor,
+  StartOptions,
   WaitReadyOptions,
   PortEndpoint,
 } from './types';

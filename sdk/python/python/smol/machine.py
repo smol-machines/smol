@@ -28,6 +28,7 @@ from .types import (
     ConnectOptions,
     ExecOptions,
     ExecResult,
+    EgressInterceptor,
     ImageInfo,
     MachineConfig,
     MachineUsageReport,
@@ -252,9 +253,10 @@ class Machine:
         """Stop the machine."""
         self._t.stop()
 
-    def start(self) -> None:
-        """Boot a stopped machine with its disk state, not its previous RAM."""
-        self._t.start()
+    def start(self, egress_interceptor: Optional[EgressInterceptor] = None) -> None:
+        """Boot a stopped machine with its disk state, not its previous RAM.
+        The local handle reuses its interceptor binding or accepts a fresh one."""
+        self._t.start(egress_interceptor)
 
     def pause(self) -> None:
         """Save RAM and disk durably, then stop at that execution boundary."""

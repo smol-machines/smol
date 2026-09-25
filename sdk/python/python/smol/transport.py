@@ -29,6 +29,7 @@ from urllib.parse import quote
 from .errors import InvalidConfigError, NotSupportedError, SmolError, wrap_native_error
 from .types import (
     ConnectOptions,
+    EgressInterceptor,
     ExecOptions,
     ExecResult,
     ImageInfo,
@@ -128,7 +129,7 @@ class Transport(Protocol):
     def pause(self) -> None: ...
     def resume(self) -> None: ...
     def sync(self) -> None: ...
-    def start(self) -> None: ...
+    def start(self, interceptor: Optional[EgressInterceptor] = None) -> None: ...
     def delete(self) -> None: ...
     def delete_with_usage(self) -> MachineUsageReport: ...
     def usage(self) -> MachineUsageReport: ...
@@ -316,8 +317,9 @@ def _register_local(t: "LocalTransport") -> None:
 
 
 class LocalTransport:
-    def __init__(self, inner: Any, *, cleanup_on_exit: bool = True) -> None:
+    def __init__(self, inner: Any, *, cleanup_on_exit: bool = True, interceptor: Optional[EgressInterceptor] = None) -> None:
         self._inner = inner
+        self._interceptor = interceptor
         self._cleanup_on_exit = cleanup_on_exit
         if cleanup_on_exit:
             _register_local(self)
@@ -491,9 +493,15 @@ class LocalTransport:
             _live_local.add(self)
         self.wait_until_ready()
 
-    def start(self) -> None:
+    def start(self, interceptor: Optional[EgressInterceptor] = None) -> None:
         try:
-            self._inner.start()
+            binding = interceptor or self._interceptor
+            if binding is None:
+                self._inner.start()
+            else:
+                self._inner.start(binding.address, binding.token)
+            if interceptor is not None:
+                self._interceptor = interceptor
         except Exception as e:  # noqa: BLE001
             raise wrap_native_error(e) from e
         if self._cleanup_on_exit:
@@ -894,7 +902,9 @@ class CloudTransport:
         _cloud_fetch(self._base, self._key, "POST", f"/v1/machines/{self._id}/resume", timeout=CLOUD_START_TIMEOUT_S)
         _wait_for_ready(self._base, self._key, self._id)
 
-    def start(self) -> None:
+    def start(self, interceptor: Optional[EgressInterceptor] = None) -> None:
+        if interceptor is not None:
+            raise NotSupportedError("egress_interceptor is local-only")
         # Resume a stopped machine, then wait for its agent so the returned handle
         # is usable (the control plane returns as soon as it's `started`).
         _cloud_fetch(
@@ -1433,6 +1443,8 @@ def make_transport(config: MachineConfig, conn: Optional[ConnectOptions] = None)
     use_cloud = conn.target == "cloud" or (conn.target != "local" and bool(explicit_key))
 
     if use_cloud:
+        if config.egress_interceptor is not None or conn.egress_interceptor is not None:
+            raise NotSupportedError("egress_interceptor is local-only")
         # Cloud is settled: NOW the CLI's stored login may supply the
         # credential and endpoint, which is the reuse `smol auth login`
         # promises.
@@ -1548,18 +1560,24 @@ def make_transport(config: MachineConfig, conn: Optional[ConnectOptions] = None)
 
     # Local embedded engine. Image machines launch their default workload before
     # create returns, with env/workdir applied just like the cloud target.
+    binding = config.egress_interceptor or conn.egress_interceptor
+    if binding is not None and config.forkable:
+        raise InvalidConfigError("egress_interceptor cannot be combined with branchable machines")
     native = _load_native()
     name = config.name or _generate_name()
     transport: Optional[LocalTransport] = None
     try:
         inner = native.Machine(_native_config(name, config))
-        transport = LocalTransport(inner)
+        transport = LocalTransport(inner, interceptor=binding)
         # A forkable golden boots with memfd-backed guest RAM + a control socket
         # so it can be cloned with Machine.fork (local live-RAM fork).
         if config.forkable:
             inner.start_forkable()
         else:
-            inner.start()
+            if binding is None:
+                inner.start()
+            else:
+                inner.start(binding.address, binding.token)
         if config.wait_for_ports:
             transport.wait_until_ready(config.ready_timeout_seconds)
         else:
@@ -1613,9 +1631,12 @@ def connect_transport(machine_id: str, conn: Optional[ConnectOptions] = None) ->
             # Connecting borrows an existing machine. The caller may still
             # stop/delete it explicitly, but interpreter shutdown must not stop
             # a durable checkpoint owned by another process or controller.
-            transport = LocalTransport(
-                native.Machine.connect(machine_id), cleanup_on_exit=False
+            binding = conn.egress_interceptor
+            inner = (
+                native.Machine.connect(machine_id, binding.address, binding.token)
+                if binding else native.Machine.connect(machine_id)
             )
+            transport = LocalTransport(inner, cleanup_on_exit=False, interceptor=binding)
             # A frozen checkpoint is intentionally not agent-ready; it remains
             # connectable so callers can fork its retained snapshot.
             if transport.state() != "frozen":
@@ -1623,6 +1644,8 @@ def connect_transport(machine_id: str, conn: Optional[ConnectOptions] = None) ->
             return transport
         except Exception as e:  # noqa: BLE001
             raise wrap_native_error(e) from e
+    if conn.egress_interceptor is not None:
+        raise NotSupportedError("egress_interceptor is local-only")
     # As in make_transport: the CLI-login fallback applies only once the cloud
     # target is already selected.
     cli_key, cli_url = _cli_session()

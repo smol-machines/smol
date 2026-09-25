@@ -2,6 +2,7 @@
 
 use smol_cloud::blocking::Client;
 
+use crate::config::EgressInterceptor;
 use crate::error::Result;
 
 /// Where a machine runs.
@@ -32,6 +33,8 @@ impl std::fmt::Display for Target {
 /// break outright once that key expired.
 #[derive(Debug, Clone, Default)]
 pub struct ConnectOptions {
+    /// Local interceptor binding required to start a stopped protected machine.
+    pub egress_interceptor: Option<EgressInterceptor>,
     /// Force a target. `None` decides from the credential.
     pub target: Option<Target>,
     /// Cloud base URL. Falls back to `SMOL_CLOUD_URL`, then the CLI session's
@@ -82,6 +85,12 @@ impl ConnectOptions {
     /// Use this API key.
     pub fn api_key(mut self, api_key: impl Into<String>) -> Self {
         self.api_key = Some(api_key.into());
+        self
+    }
+
+    /// Bind a trusted host egress service when reconnecting to a local machine.
+    pub fn egress_interceptor(mut self, binding: EgressInterceptor) -> Self {
+        self.egress_interceptor = Some(binding);
         self
     }
 
