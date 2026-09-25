@@ -27,11 +27,64 @@ from smol.transport import (  # noqa: E402
 )
 from smol.types import (  # noqa: E402
     ConnectOptions,
+    EgressInterceptor,
     ExecResult,
     MachineConfig,
     MountSpec,
     ResourceSpec,
 )
+
+
+def test_local_interceptor_forwarded_on_create_reconnect_and_restart():
+    binding = EgressInterceptor("127.0.0.1:9000", "a5" * 32)
+    calls = []
+
+    class FakeMachine:
+        def __init__(self, config):
+            self.name = config["name"]
+
+        def start(self, address=None, token=None):
+            calls.append(("start", address, token))
+
+        def state(self):
+            return "frozen"
+
+        @staticmethod
+        def connect(name, address=None, token=None):
+            calls.append(("connect", name, address, token))
+            return FakeMachine({"name": name})
+
+    with mock.patch.object(transport_module, "_load_native", return_value=SimpleNamespace(Machine=FakeMachine)), \
+         mock.patch.object(transport_module.LocalTransport, "wait_until_ready"):
+        local = transport_module.make_transport(
+            MachineConfig(name="intercepted", network=True, egress_interceptor=binding),
+            ConnectOptions(target="local"),
+        )
+        local.start()
+        transport_module.connect_transport(
+            "intercepted", ConnectOptions(target="local", egress_interceptor=binding)
+        )
+
+    assert calls == [
+        ("start", binding.address, binding.token),
+        ("start", binding.address, binding.token),
+        ("connect", "intercepted", binding.address, binding.token),
+    ]
+    assert binding.token not in repr(binding)
+    assert binding.token not in repr(MachineConfig(egress_interceptor=binding))
+
+
+def test_cloud_rejects_local_interceptor_before_network_call():
+    binding = EgressInterceptor("127.0.0.1:9000", "a5" * 32)
+    try:
+        transport_module.make_transport(
+            MachineConfig(image="alpine", egress_interceptor=binding),
+            ConnectOptions(target="cloud", api_key="test"),
+        )
+    except Exception as error:
+        assert "local-only" in str(error)
+    else:
+        raise AssertionError("cloud create accepted a local interceptor")
 
 
 def test_wrap_parses_bracketed_code():

@@ -45,6 +45,10 @@ pub struct UpdateCmd {
     #[arg(long)]
     pub no_net: bool,
 
+    /// Remove the required external interceptor binding from a stopped machine.
+    #[arg(long)]
+    pub no_egress_interceptor: bool,
+
     /// Add/replace environment variable (KEY=VALUE)
     #[arg(short = 'e', long = "env", value_name = "KEY=VALUE")]
     pub env: Vec<String>,
@@ -178,6 +182,10 @@ impl UpdateCmd {
         }
 
         db.update_vm(&self.name, |r| {
+            if self.no_egress_interceptor && r.external_interceptor_required {
+                r.external_interceptor_required = false;
+                changes.push("  external egress interceptor: disabled".into());
+            }
             if let Some(s) = self.storage {
                 r.storage_gb = Some(s);
             }

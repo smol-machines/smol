@@ -32,6 +32,7 @@ from typing import Any, AsyncIterator, Optional
 from .machine import Machine
 from .types import (
     ConnectOptions,
+    EgressInterceptor,
     ExecOptions,
     ExecResult,
     ImageInfo,
@@ -229,10 +230,10 @@ class AsyncMachine:
         """Resume saved execution in this machine."""
         await asyncio.to_thread(self._m.resume)
 
-    async def start(self) -> None:
+    async def start(self, egress_interceptor: Optional[EgressInterceptor] = None) -> None:
         """Start (resume) a stopped machine, waiting until its agent is ready. The
         counterpart to :meth:`stop`; disk state is preserved across the cycle."""
-        await asyncio.to_thread(self._m.start)
+        await asyncio.to_thread(self._m.start, egress_interceptor)
 
     async def delete(self, include_usage: bool = False) -> Optional[MachineUsageReport]:
         """Stop the machine and delete its storage. On the cloud target, pass

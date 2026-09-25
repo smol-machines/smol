@@ -3,7 +3,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use crate::config::{MachineBuilder, MachineConfig, Port};
+use crate::config::{EgressInterceptor, MachineBuilder, MachineConfig, Port};
 use crate::connect::{ConnectOptions, Target};
 use crate::error::{Error, ErrorKind, Result};
 use crate::exec::{ExecOptions, ExecResult, ExecStream};
@@ -352,17 +352,35 @@ impl Machine {
         match connect.target() {
             Target::Local => {
                 let name = config.name.clone();
+                let interceptor = config
+                    .egress_interceptor
+                    .clone()
+                    .or_else(|| connect.egress_interceptor.clone());
+                if interceptor.is_some() && config.branchable {
+                    return Err(Error::new(
+                        ErrorKind::Config,
+                        "egress interceptor cannot be combined with branchable machines",
+                    ));
+                }
                 // Validate the config before looking for the CLI: a bad config
                 // is a bad config whether or not an engine is installed, and
                 // reporting "no smolvm on PATH" for it sends the caller to fix
                 // the wrong thing.
                 let (args, ports) = config.into_local_args()?;
                 let cli = crate::transport::local::resolve_cli()?;
-                Ok(Self::from_transport(Box::new(
-                    crate::transport::local::create(&cli, args, &name, ports)?,
-                )))
+                let mut transport = crate::transport::local::create(&cli, args, &name, ports)?;
+                if let Some(binding) = interceptor {
+                    transport.set_interceptor(binding)?;
+                }
+                Ok(Self::from_transport(Box::new(transport)))
             }
             Target::Cloud => {
+                if connect.egress_interceptor.is_some() {
+                    return Err(Error::new(
+                        ErrorKind::NotSupported,
+                        "egress interception is local-only",
+                    ));
+                }
                 let branchable = config.branchable;
                 let wait_for_ports = config.wait_for_ports.unwrap_or(true);
                 let request = config.into_cloud_request()?;
@@ -390,7 +408,10 @@ impl Machine {
         let name = name.into();
         match connect.target() {
             Target::Local => {
-                let transport = LocalTransport::new(&name)?;
+                let mut transport = LocalTransport::new(&name)?;
+                if let Some(binding) = connect.egress_interceptor.clone() {
+                    transport.set_interceptor(binding)?;
+                }
                 // Connecting borrows a machine: start it if it is not already up.
                 if !transport.is_running() {
                     transport.start()?;
@@ -398,6 +419,12 @@ impl Machine {
                 Ok(Self::from_transport(Box::new(transport)))
             }
             Target::Cloud => {
+                if connect.egress_interceptor.is_some() {
+                    return Err(Error::new(
+                        ErrorKind::NotSupported,
+                        "egress interception is local-only",
+                    ));
+                }
                 let client = connect.client()?;
                 Ok(Self::from_transport(Box::new(cloud::connect(
                     &client, &name,
@@ -556,6 +583,12 @@ impl Machine {
     /// Boot the machine and wait for the guest agent to answer.
     pub fn start(&self) -> Result<()> {
         self.transport.start()
+    }
+
+    /// Start a local machine with a trusted host egress interceptor.
+    /// The handle reuses this binding on its later starts.
+    pub fn start_with_interceptor(&self, binding: &EgressInterceptor) -> Result<()> {
+        self.transport.start_with_interceptor(binding)
     }
 
     /// Boot the machine as a branch source, with cloneable guest RAM, so

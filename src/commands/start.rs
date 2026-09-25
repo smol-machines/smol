@@ -1,6 +1,6 @@
 //! smol machine start — start a machine.
 
-use clap::Args;
+use clap::{builder::TypedValueParser, Args};
 use smolvm::agent::AgentManager;
 use smolvm::config::RecordState;
 use smolvm::db::SmolvmDb;
@@ -24,6 +24,20 @@ pub struct StartCmd {
     /// expose a control socket so the machine can be branched later.
     #[arg(long = "branchable", visible_alias = "forkable")]
     pub forkable: bool,
+
+    /// Route outbound TCP through a host interceptor on this launch.
+    /// Set SMOLVM_INTERCEPTOR_TOKEN to 64 hex digits.
+    #[arg(long, value_name = "ADDR")]
+    pub egress_interceptor: Option<std::net::SocketAddr>,
+
+    #[arg(
+        long,
+        env = "SMOLVM_INTERCEPTOR_TOKEN",
+        hide = true,
+        hide_env_values = true,
+        value_parser = clap::builder::StringValueParser::new().map(smolvm::secrets::Secret::new)
+    )]
+    pub egress_interceptor_token: Option<smolvm::secrets::Secret>,
 }
 
 impl StartCmd {
@@ -35,6 +49,10 @@ impl StartCmd {
         let target = Target::from_flags(self.local, self.cloud)?;
         let (location, handle) = resolve::route(self.name.as_deref(), target)?;
         if location == Location::Cloud {
+            anyhow::ensure!(
+                self.egress_interceptor.is_none(),
+                "--egress-interceptor is only supported for local machines"
+            );
             self.name = Some(handle);
             return self.run_cloud();
         }
@@ -47,6 +65,10 @@ impl StartCmd {
             Some(r) => r,
             None => {
                 if name == "default" {
+                    anyhow::ensure!(
+                        self.egress_interceptor.is_none(),
+                        "--egress-interceptor requires a named machine record"
+                    );
                     // Start a bare default VM
                     return self.start_default();
                 }
@@ -62,6 +84,30 @@ impl StartCmd {
         if record.actual_state() == RecordState::Running {
             println!("Machine '{}' already running", name);
             return Ok(());
+        }
+
+        let interceptor = self
+            .egress_interceptor
+            .map(|addr| {
+                smolvm::embedded::interceptor_endpoint(
+                    &addr.to_string(),
+                    self.egress_interceptor_token
+                        .as_ref()
+                        .ok_or_else(|| {
+                            smolvm::Error::config(
+                                "egress interceptor",
+                                "set SMOLVM_INTERCEPTOR_TOKEN to 64 random hex digits",
+                            )
+                        })?
+                        .expose(),
+                )
+            })
+            .transpose()?;
+        if interceptor.is_some() {
+            anyhow::ensure!(
+                !self.forkable && !record.forkable_on_start(),
+                "external interception does not support branch launches"
+            );
         }
 
         let mounts = record.host_mounts();
@@ -89,6 +135,7 @@ impl StartCmd {
         println!("Starting machine '{}'...", name);
 
         let mut features = smolvm::agent::LaunchFeatures {
+            external_interceptor: interceptor,
             ssh_agent_socket: if record.ssh_agent {
                 Some(std::path::PathBuf::from(
                     std::env::var("SSH_AUTH_SOCK")
