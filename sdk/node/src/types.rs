@@ -52,6 +52,19 @@ pub struct MachineConfig {
     pub forkable: Option<bool>,
 }
 
+/// Whether this host can run local machines, from the engine's own checks.
+#[napi(object)]
+#[derive(Debug, Clone)]
+pub struct HostAvailability {
+    /// True when a local machine can boot here.
+    pub available: bool,
+    /// The `error.code` a failing `create()` would report (e.g.
+    /// `KVM_UNAVAILABLE`, `HYPERVISOR_UNAVAILABLE`); unset when available.
+    pub code: Option<String>,
+    /// Human-readable cause and remedy; unset when available.
+    pub reason: Option<String>,
+}
+
 /// A host directory mount specification.
 #[napi(object)]
 #[derive(Debug, Clone)]
