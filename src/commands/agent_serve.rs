@@ -28,7 +28,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use anyhow::{bail, Result};
+use anyhow::{bail, Context, Result};
 use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::sse::{Event, KeepAlive, Sse};
@@ -40,6 +40,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 use smolmachines::agent::{sessions_dir, Harness, Session, SessionOptions};
 use smolmachines::ConnectOptions;
+use tokio::io::{AsyncReadExt, AsyncSeekExt};
 
 #[derive(Args, Debug)]
 pub struct AgentServeCmd {
@@ -161,6 +162,10 @@ fn events_path(name: &str, turn: usize) -> ApiResult<PathBuf> {
 
 fn done_path(name: &str, turn: usize) -> ApiResult<PathBuf> {
     Ok(events_path(name, turn)?.with_extension("done"))
+}
+
+fn request_path(name: &str, turn: usize) -> ApiResult<PathBuf> {
+    Ok(events_path(name, turn)?.with_extension("request.json"))
 }
 
 #[derive(Deserialize)]
@@ -299,15 +304,28 @@ async fn start_turn(
             format!("session '{name}' already has a turn running"),
         ));
     }
-    let events = events_path(&name, turn)?;
-    let done = done_path(&name, turn)?;
-    if let Some(parent) = events.parent() {
-        std::fs::create_dir_all(parent)
+    let prepared = (|| -> ApiResult<_> {
+        let events = events_path(&name, turn)?;
+        let done = done_path(&name, turn)?;
+        let request = request_path(&name, turn)?;
+        if let Some(parent) = events.parent() {
+            std::fs::create_dir_all(parent)
+                .map_err(|e| ApiError(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        }
+        let _ = std::fs::remove_file(&done);
+        std::fs::write(&request, serde_json::to_vec(&req.prompt).unwrap())
             .map_err(|e| ApiError(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-    }
-    let _ = std::fs::remove_file(&done);
-    let file = std::fs::File::create(&events)
-        .map_err(|e| ApiError(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        let file = std::fs::File::create(&events)
+            .map_err(|e| ApiError(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        Ok((file, done, request))
+    })();
+    let (file, done, request) = match prepared {
+        Ok(value) => value,
+        Err(error) => {
+            state.busy.lock().unwrap().remove(&name);
+            return Err(error);
+        }
+    };
 
     // The turn runs on its own thread and owns the session until it ends. The
     // caller only learns the turn number; the events file is the interface.
@@ -319,20 +337,29 @@ async fn start_turn(
         let outcome = {
             let _held = lock.lock().unwrap();
             let mut out = std::io::BufWriter::new(file);
-            let result = Session::open(&name).and_then(|mut session| {
-                session.send_with_env(&prompt, &env, &mut |event| {
+            let result = Session::open(&name).map(|mut session| {
+                let result = session.send_with_env(&prompt, &env, &mut |event| {
                     if let Ok(line) = serde_json::to_string(event) {
                         let _ = writeln!(out, "{line}");
                         let _ = out.flush();
                     }
-                })
+                });
+                match result {
+                    Ok(turn) => json!({ "ok": true, "turn": turn }),
+                    Err(error) => json!({
+                        "ok": false,
+                        "error": error.to_string(),
+                        "turn": session.record().turns.last(),
+                    }),
+                }
             });
             match result {
-                Ok(turn) => json!({ "ok": true, "turn": turn }),
+                Ok(outcome) => outcome,
                 Err(e) => json!({ "ok": false, "error": e.to_string() }),
             }
         };
         let _ = std::fs::write(&done, outcome.to_string());
+        let _ = std::fs::remove_file(&request);
         st.busy.lock().unwrap().remove(&name);
     });
     Ok((StatusCode::ACCEPTED, Json(json!({ "turn": turn }))))
@@ -364,14 +391,18 @@ async fn turn_events(
     struct Cursor {
         events: PathBuf,
         done: PathBuf,
-        next: usize,
+        offset: u64,
+        index: usize,
+        after: Option<usize>,
         finished: bool,
         pending: std::collections::VecDeque<Event>,
     }
     let start = Cursor {
         events,
         done,
-        next: q.after.map(|a| a + 1).unwrap_or(0),
+        offset: 0,
+        index: 0,
+        after: q.after,
         finished: false,
         pending: Default::default(),
     };
@@ -386,13 +417,31 @@ async fn turn_events(
             // Check `done` BEFORE reading, so the last events written before the
             // turn finished are always drained before the stream ends.
             let finished = c.done.exists();
-            let text = tokio::fs::read_to_string(&c.events)
-                .await
-                .unwrap_or_default();
-            for (i, line) in text.lines().enumerate().skip(c.next) {
-                c.pending
-                    .push_back(Event::default().id(i.to_string()).event("event").data(line));
-                c.next = i + 1;
+            if let Ok(mut file) = tokio::fs::File::open(&c.events).await {
+                let _ = file.seek(std::io::SeekFrom::Start(c.offset)).await;
+                let mut unread = Vec::new();
+                if file.read_to_end(&mut unread).await.is_ok() {
+                    let complete = unread
+                        .iter()
+                        .rposition(|byte| *byte == b'\n')
+                        .map(|at| at + 1)
+                        .unwrap_or(0);
+                    if let Ok(text) = std::str::from_utf8(&unread[..complete]) {
+                        for line in text.lines() {
+                            let id = c.index;
+                            c.index += 1;
+                            if c.after.is_none_or(|after| id > after) {
+                                c.pending.push_back(
+                                    Event::default()
+                                        .id(id.to_string())
+                                        .event("event")
+                                        .data(line),
+                                );
+                            }
+                        }
+                        c.offset += complete as u64;
+                    }
+                }
             }
             if finished {
                 let outcome = tokio::fs::read_to_string(&c.done).await.unwrap_or_default();
@@ -413,6 +462,60 @@ fn ensure_idle(state: &AppState, name: &str) -> ApiResult<()> {
             StatusCode::CONFLICT,
             format!("session '{name}' has a turn running"),
         ));
+    }
+    Ok(())
+}
+
+/// Close turns whose worker vanished with a previous service process. A
+/// request is journaled before its 202 response, so its index and prompt can
+/// be retained even though its in-memory worker is gone.
+fn recover_interrupted_turns() -> Result<()> {
+    let root = sessions_dir()?;
+    for record in Session::list()? {
+        let events_dir = root.join(&record.name).join("events");
+        let Ok(entries) = std::fs::read_dir(&events_dir) else {
+            continue;
+        };
+        let mut indices = entries
+            .filter_map(|entry| {
+                let entry = entry.ok()?;
+                let name = entry.file_name();
+                let name = name.to_str()?;
+                name.strip_prefix("turn-")?
+                    .strip_suffix(".jsonl")?
+                    .parse::<usize>()
+                    .ok()
+            })
+            .collect::<Vec<_>>();
+        indices.sort_unstable();
+        for index in indices {
+            let done = done_path(&record.name, index).map_err(|e| anyhow::anyhow!(e.1))?;
+            if done.exists() {
+                continue;
+            }
+            let request = request_path(&record.name, index).map_err(|e| anyhow::anyhow!(e.1))?;
+            let prompt = std::fs::read_to_string(&request)
+                .ok()
+                .and_then(|text| serde_json::from_str::<String>(&text).ok())
+                .unwrap_or_default();
+            let mut session = Session::open(&record.name)?;
+            let outcome = if let Some(turn) = session.record().turns.get(index) {
+                json!({ "ok": true, "turn": turn })
+            } else {
+                if session.record().turns.len() != index {
+                    bail!("session '{}' has a gap before turn {index}", record.name);
+                }
+                if let Ok(machine) = session.machine() {
+                    let _ = machine.stop();
+                }
+                let reason = "agent service stopped before this turn finished";
+                let turn = session.record_failed_turn(index, &prompt, reason)?;
+                json!({ "ok": false, "error": reason, "turn": turn })
+            };
+            std::fs::write(&done, outcome.to_string())
+                .with_context(|| format!("close interrupted turn {index} of '{}'", record.name))?;
+            let _ = std::fs::remove_file(&request);
+        }
     }
     Ok(())
 }
@@ -531,6 +634,7 @@ impl AgentServeCmd {
         if !addr.ip().is_loopback() && token.is_none() {
             bail!("refusing to listen on {addr} without --token (or SMOL_AGENTS_TOKEN)");
         }
+        recover_interrupted_turns()?;
         let rt = tokio::runtime::Runtime::new()?;
         rt.block_on(async move {
             let listener = tokio::net::TcpListener::bind(addr).await?;

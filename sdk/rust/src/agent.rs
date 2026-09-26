@@ -966,6 +966,56 @@ impl Session {
         env: &[(String, String)],
         on_event: &mut dyn FnMut(&AgentEvent),
     ) -> Result<TurnRecord> {
+        let index = self.record.turns.len();
+        match self.run_turn(prompt, env, on_event) {
+            Ok(turn) => Ok(turn),
+            Err(error) => {
+                // Even an infrastructure failure consumed an accepted turn.
+                // Persist it so the next request cannot reuse its index or log.
+                if self.record.turns.len() == index {
+                    self.record_failed_turn(index, prompt, &error.to_string())?;
+                } else {
+                    self.save()?;
+                }
+                Err(error)
+            }
+        }
+    }
+
+    /// Record an accepted turn that was interrupted before it could finish.
+    pub fn record_failed_turn(
+        &mut self,
+        index: usize,
+        prompt: &str,
+        reason: &str,
+    ) -> Result<TurnRecord> {
+        if self.record.turns.len() != index {
+            return Err(Error::new(ErrorKind::Conflict, "turn index changed"));
+        }
+        let turn = TurnRecord {
+            index,
+            prompt: prompt.to_string(),
+            result: Some(reason.to_string()),
+            is_error: true,
+            cost_usd: None,
+            harness_session: self
+                .record
+                .turns
+                .last()
+                .and_then(|t| t.harness_session.clone()),
+            checkpoint: None,
+        };
+        self.record.turns.push(turn.clone());
+        self.save()?;
+        Ok(turn)
+    }
+
+    fn run_turn(
+        &mut self,
+        prompt: &str,
+        env: &[(String, String)],
+        on_event: &mut dyn FnMut(&AgentEvent),
+    ) -> Result<TurnRecord> {
         let machine = self.machine()?;
         self.ensure_running(&machine)?;
         let harness = self.record.harness.clone();
@@ -1166,26 +1216,64 @@ impl Session {
     /// Start a new, independent session `name` from the state right after `turn`.
     pub fn fork(&self, turn: usize, name: &str) -> Result<Session> {
         valid_name(name)?;
-        if self.dir.join(format!("{name}.json")).exists() {
+        if self.dir.join(format!("{name}.json")).exists() || self.dir.join(name).exists() {
             return Err(Error::new(
                 ErrorKind::Config,
                 format!("a session named '{name}' already exists"),
             ));
         }
         let checkpoint = self.turn_checkpoint(turn)?;
-        let machine = format!("agent-{name}");
-        self.restore(&checkpoint, &machine)?;
+        let machine_name = format!("agent-{name}");
+        let restored = self.restore(&checkpoint, &machine_name)?;
         let mut record = self.record.clone();
         record.name = name.to_string();
-        record.machine = machine;
+        record.machine = machine_name;
         record.generation = 0;
         record.turns.truncate(turn + 1);
+        if let Err(error) = self.retain_fork_history(&mut record) {
+            let _ = restored.delete();
+            let _ = std::fs::remove_dir_all(self.dir.join(name));
+            return Err(error);
+        }
         let session = Session {
             record,
             dir: self.dir.clone(),
         };
-        session.save()?;
+        if let Err(error) = session.save() {
+            let _ = restored.delete();
+            let _ = std::fs::remove_dir_all(self.dir.join(name));
+            return Err(error);
+        }
         Ok(session)
+    }
+
+    fn retain_fork_history(&self, fork: &mut SessionRecord) -> Result<()> {
+        let source_events = self.dir.join(&self.record.name).join("events");
+        let fork_dir = self.dir.join(&fork.name);
+        std::fs::create_dir(&fork_dir).map_err(|e| io_err("create fork history", e))?;
+        let fork_events = fork_dir.join("events");
+        for turn in &mut fork.turns {
+            if let Some(CheckpointRef::Local { path }) = &turn.checkpoint {
+                let retained =
+                    fork_dir.join(format!("inherited-turn-{}.smolcheckpoint", turn.index));
+                std::fs::hard_link(path, &retained)
+                    .map_err(|e| io_err("retain fork checkpoint", e))?;
+                turn.checkpoint = Some(CheckpointRef::Local { path: retained });
+            }
+            for extension in ["jsonl", "done"] {
+                let name = format!("turn-{}.{}", turn.index, extension);
+                let source = source_events.join(&name);
+                if source.exists() {
+                    std::fs::create_dir_all(&fork_events)
+                        .map_err(|e| io_err("create fork events", e))?;
+                    // Parent rewinds can reuse a turn number and truncate its
+                    // event file, so a fork needs its own copy of the log.
+                    std::fs::copy(&source, fork_events.join(&name))
+                        .map_err(|e| io_err("retain fork events", e))?;
+                }
+            }
+        }
+        Ok(())
     }
 
     /// Pause the machine; the next [`send`](Self::send) resumes it.
@@ -1202,7 +1290,11 @@ impl Session {
     /// Delete the machine, the local checkpoints and the record.
     pub fn delete(self) -> Result<()> {
         if let Ok(machine) = self.machine() {
-            machine.delete()?;
+            if let Err(error) = machine.delete() {
+                if error.kind() != ErrorKind::NotFound {
+                    return Err(error);
+                }
+            }
         }
         let _ = std::fs::remove_dir_all(self.dir.join(&self.record.name));
         std::fs::remove_file(self.dir.join(format!("{}.json", self.record.name)))
@@ -1213,6 +1305,92 @@ impl Session {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn file_only_session(dir: &Path, name: &str) -> Session {
+        Session {
+            record: SessionRecord {
+                name: name.into(),
+                harness: Harness::Command {
+                    image: "alpine:3.20".into(),
+                    program: vec!["sh".into(), "-c".into()],
+                },
+                target: "local".into(),
+                machine: format!("agent-{name}"),
+                generation: 0,
+                extra_hosts: Vec::new(),
+                open_network: false,
+                checkpoint_turns: true,
+                pause_between_turns: false,
+                key_outside_machine: false,
+                turns: Vec::new(),
+            },
+            dir: dir.into(),
+        }
+    }
+
+    #[test]
+    fn failed_turn_is_persisted_before_the_next_index_is_used() {
+        let root = tempfile::tempdir().unwrap();
+        let mut session = file_only_session(root.path(), "source");
+        let turn = session
+            .record_failed_turn(0, "first", "machine disappeared")
+            .unwrap();
+        assert_eq!(turn.index, 0);
+        assert!(turn.is_error);
+        assert!(session.record_failed_turn(0, "second", "again").is_err());
+        assert_eq!(
+            session
+                .record_failed_turn(1, "second", "again")
+                .unwrap()
+                .index,
+            1
+        );
+        let persisted: SessionRecord =
+            serde_json::from_slice(&std::fs::read(root.path().join("source.json")).unwrap())
+                .unwrap();
+        assert_eq!(
+            persisted.turns.iter().map(|t| t.index).collect::<Vec<_>>(),
+            vec![0, 1]
+        );
+    }
+
+    #[test]
+    fn fork_keeps_checkpoints_and_events_after_source_removal() {
+        let root = tempfile::tempdir().unwrap();
+        let mut source = file_only_session(root.path(), "source");
+        let source_dir = root.path().join("source");
+        std::fs::create_dir_all(source_dir.join("events")).unwrap();
+        let checkpoint = source_dir.join("turn-0.smolcheckpoint");
+        std::fs::write(&checkpoint, b"checkpoint").unwrap();
+        std::fs::write(source_dir.join("events/turn-0.jsonl"), b"event\n").unwrap();
+        std::fs::write(source_dir.join("events/turn-0.done"), b"done").unwrap();
+        source.record.turns.push(TurnRecord {
+            index: 0,
+            prompt: "first".into(),
+            result: Some("done".into()),
+            is_error: false,
+            cost_usd: None,
+            harness_session: None,
+            checkpoint: Some(CheckpointRef::Local { path: checkpoint }),
+        });
+        let mut fork = source.record.clone();
+        fork.name = "fork".into();
+        source.retain_fork_history(&mut fork).unwrap();
+        std::fs::write(source_dir.join("events/turn-0.jsonl"), b"replacement\n").unwrap();
+        std::fs::remove_dir_all(source_dir).unwrap();
+        let Some(CheckpointRef::Local { path }) = &fork.turns[0].checkpoint else {
+            panic!("fork lost its checkpoint");
+        };
+        assert_eq!(std::fs::read(path).unwrap(), b"checkpoint");
+        assert_eq!(
+            std::fs::read(root.path().join("fork/events/turn-0.jsonl")).unwrap(),
+            b"event\n"
+        );
+        assert_eq!(
+            std::fs::read(root.path().join("fork/events/turn-0.done")).unwrap(),
+            b"done"
+        );
+    }
 
     #[test]
     fn claude_stream_json_becomes_agent_events() {
