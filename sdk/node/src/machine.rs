@@ -59,6 +59,39 @@ impl ExecStream {
 
 #[napi]
 impl NapiMachine {
+    /// Probe whether this host can run local machines, without booting one.
+    ///
+    /// Runs the same checks a local `create()` fails on — `/dev/kvm` access on
+    /// Linux, and a locatable libkrun on every platform — and reports the same
+    /// error code, so a caller can pick a sandbox up front instead of paying
+    /// for a failed boot. Never throws.
+    #[napi]
+    pub fn check_host() -> HostAvailability {
+        let unavailable = |err: smolvm::Error| {
+            let (code, reason) = crate::error::code_and_message(&err);
+            HostAvailability {
+                available: false,
+                code: Some(code.to_string()),
+                reason: Some(reason),
+            }
+        };
+        #[cfg(target_os = "linux")]
+        if let Err(err) = smolvm::platform::linux::check_kvm_available() {
+            return unavailable(err);
+        }
+        match smolvm::vm::backend::LibkrunBackend::new() {
+            Ok(backend) if smolvm::vm::VmBackend::is_available(&backend) => HostAvailability {
+                available: true,
+                code: None,
+                reason: None,
+            },
+            Ok(_) => unavailable(smolvm::Error::HypervisorUnavailable(
+                "libkrun was not found; reinstall the SDK or set SMOLVM_LIB_DIR".into(),
+            )),
+            Err(err) => unavailable(err),
+        }
+    }
+
     /// Create a new machine. Does not start the VM yet — call `start()`.
     #[napi(constructor)]
     pub fn new(config: MachineConfig) -> napi::Result<Self> {

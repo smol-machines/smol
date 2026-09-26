@@ -141,6 +141,13 @@ export interface NapiMachineCtor {
   restoreCheckpoint(name: string, artifact: string): NapiMachine;
   exportCheckpoint(source: string, output: string): number;
   pruneCheckpointStore(store: string): number;
+  checkHost(): NativeHostAvailability;
+}
+
+export interface NativeHostAvailability {
+  available: boolean;
+  code?: string | undefined;
+  reason?: string | undefined;
 }
 
 import { wireBundledAssets, type RuntimeAssets } from "./assets";

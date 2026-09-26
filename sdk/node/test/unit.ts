@@ -8,6 +8,7 @@ import { wrapNativeError, SmolError } from '../errors';
 import { adapterSha256, RolloutClient } from '../rollout';
 import { cliConfigApiKey, encodePath, resolveNetwork, selectsCloud, toNativeConfig } from '../transport';
 import { wireDefaultHardening } from '../assets';
+import { Machine } from '../machine';
 
 let passed = 0;
 let failed = 0;
@@ -62,6 +63,16 @@ check('escapes ? and # (would otherwise truncate the URL)', () => {
 });
 check('escapes % so double-encoding is unambiguous', () => {
   assert.strictEqual(encodePath('/a/100%done'), '/a/100%25done');
+});
+
+// --- localAvailability: a cheap, never-throwing host probe ---
+check('localAvailability never throws and is well-formed', () => {
+  const result = Machine.localAvailability();
+  assert.strictEqual(typeof result.available, 'boolean');
+  if (!result.available) {
+    assert.ok(result.code.length > 0, 'an unavailable result carries a code');
+    assert.ok(result.reason.length > 0, 'an unavailable result carries a reason');
+  }
 });
 
 // --- toNativeConfig: scoped egress and the workload user reach the engine ---
