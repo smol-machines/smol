@@ -15,9 +15,10 @@ pub const COMMAND_FAILED: &str = "COMMAND_FAILED";
 pub const KVM_UNAVAILABLE: &str = "KVM_UNAVAILABLE";
 pub const SMOLVM_ERROR: &str = "SMOLVM_ERROR";
 
-/// Convert a smolvm::Error into a napi::Error with an appropriate error code.
-pub fn to_napi_error(err: SmolvmError) -> napi::Error {
-    let (code, msg) = match &err {
+/// The JavaScript `error.code` and message for an engine error. Shared by
+/// [`to_napi_error`] and the host probe, so both report the same codes.
+pub fn code_and_message(err: &SmolvmError) -> (&'static str, String) {
+    match err {
         SmolvmError::VmNotFound { name } => (NOT_FOUND, format!("VM not found: {}", name)),
 
         SmolvmError::InvalidState { expected, actual } => (
@@ -88,8 +89,12 @@ pub fn to_napi_error(err: SmolvmError) -> napi::Error {
         ),
 
         _ => (SMOLVM_ERROR, err.to_string()),
-    };
+    }
+}
 
+/// Convert a smolvm::Error into a napi::Error with an appropriate error code.
+pub fn to_napi_error(err: SmolvmError) -> napi::Error {
+    let (code, msg) = code_and_message(&err);
     napi::Error::new(Status::GenericFailure, format!("[{}] {}", code, msg))
 }
 

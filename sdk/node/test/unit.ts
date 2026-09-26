@@ -4,10 +4,12 @@ import assert from 'node:assert';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { spawnSync } from 'node:child_process';
 import { wrapNativeError, SmolError } from '../errors';
 import { adapterSha256, RolloutClient } from '../rollout';
 import { cliConfigApiKey, encodePath, resolveNetwork, selectsCloud, toNativeConfig } from '../transport';
 import { wireDefaultHardening } from '../assets';
+import { Machine } from '../machine';
 
 let passed = 0;
 let failed = 0;
@@ -62,6 +64,38 @@ check('escapes ? and # (would otherwise truncate the URL)', () => {
 });
 check('escapes % so double-encoding is unambiguous', () => {
   assert.strictEqual(encodePath('/a/100%done'), '/a/100%25done');
+});
+
+// --- localAvailability: a cheap, never-throwing host probe ---
+check('localAvailability never throws and is well-formed', () => {
+  const result = Machine.localAvailability();
+  assert.strictEqual(typeof result.available, 'boolean');
+  if (!result.available) {
+    assert.ok(result.code.length > 0, 'an unavailable result carries a code');
+    assert.ok(result.reason.length > 0, 'an unavailable result carries a reason');
+  }
+});
+
+// --- toNativeConfig: scoped egress and the workload user reach the engine ---
+// Both were documented as enforced locally but never forwarded, so a machine
+// with only `allowHosts` booted with no network at all and `user` ran as the
+// image default. Mirrors the Python SDK's test_native_config_forwards_scoped_egress.
+check('allowCidrs/allowHosts forward to the native config', () => {
+  const nc = toNativeConfig('m', {
+    resources: { allowCidrs: ['10.0.0.0/8'], allowHosts: ['api.example.com'] },
+  });
+  assert.deepStrictEqual(nc.resources?.allowedCidrs, ['10.0.0.0/8']);
+  assert.deepStrictEqual(nc.resources?.allowedHosts, ['api.example.com']);
+});
+check('an allowlist alone does not force unrestricted network', () => {
+  // The engine derives scoped networking from a non-empty list; setting
+  // `network: true` here would request open egress instead.
+  const nc = toNativeConfig('m', { resources: { allowHosts: ['api.example.com'] } });
+  assert.strictEqual(nc.resources?.network, undefined);
+});
+check('user forwards to the native config', () => {
+  assert.strictEqual(toNativeConfig('m', { user: '1000:1000' }).user, '1000:1000');
+  assert.strictEqual(toNativeConfig('m', {}).user, undefined);
 });
 
 // --- toNativeConfig: GPU resources map to the native (snake→camel) field ---
@@ -238,6 +272,26 @@ check('selectsCloud: an explicit local target beats every credential', () => {
 });
 check('selectsCloud: an explicit cloud target needs no credential to select', () => {
   withCloudToken(undefined, () => assert.strictEqual(selectsCloud({ target: 'cloud' }), true));
+});
+
+// --- importing the SDK has no side effects on the process environment ---
+// An app that imports the SDK only for the cloud (or not at all yet) must not
+// have SMOLVM_* / seccomp variables injected into its env and every child it
+// spawns. Checked in a fresh process, since this file already imported it.
+check('importing the SDK leaves process.env untouched', () => {
+  if (!process.versions.bun) return; // the child imports TypeScript directly
+  const script =
+    "const snap = () => JSON.stringify(Object.entries({ ...process.env }).sort());" +
+    "const before = snap();" +
+    `require(${JSON.stringify(join(__dirname, '..', 'index.ts'))});` +
+    "process.stdout.write(before === snap() ? 'SAME' : 'CHANGED');";
+  // Start the child without SMOLVM_* so an import that sets them is visible
+  // (this process may already have them from its own import).
+  const env = Object.fromEntries(
+    Object.entries(process.env).filter(([key]) => !key.startsWith('SMOLVM_')),
+  );
+  const out = spawnSync(process.execPath, ['-e', script], { encoding: 'utf8', env });
+  assert.strictEqual(out.stdout, 'SAME', out.stderr);
 });
 
 // --- wireDefaultHardening: confine the spawned VMM unless told otherwise ---
