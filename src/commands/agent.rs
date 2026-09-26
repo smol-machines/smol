@@ -97,10 +97,11 @@ enum AgentSubcommand {
         turn: usize,
     },
     /// Start a new session from the state right after a turn
-    Fork {
-        /// Session to fork
+    #[command(alias = "fork")]
+    Branch {
+        /// Session to branch
         name: String,
-        /// Turn number to fork from
+        /// Turn number to branch from
         turn: usize,
         /// Name of the new session
         new_name: String,
@@ -285,16 +286,16 @@ impl AgentCmd {
                 );
                 Ok(())
             }
-            AgentSubcommand::Fork {
+            AgentSubcommand::Branch {
                 name,
                 turn,
                 new_name,
             } => {
                 let session = Session::open(&name)?;
-                let fork = session.fork(turn, &new_name)?;
+                let branch = session.branch(turn, &new_name)?;
                 println!(
-                    "Forked '{name}' at turn {turn} into '{new_name}' (machine {})",
-                    fork.record().machine
+                    "Branched '{name}' at turn {turn} into '{new_name}' (machine {})",
+                    branch.record().machine
                 );
                 Ok(())
             }

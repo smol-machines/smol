@@ -1214,7 +1214,7 @@ impl Session {
     }
 
     /// Start a new, independent session `name` from the state right after `turn`.
-    pub fn fork(&self, turn: usize, name: &str) -> Result<Session> {
+    pub fn branch(&self, turn: usize, name: &str) -> Result<Session> {
         valid_name(name)?;
         if self.dir.join(format!("{name}.json")).exists() || self.dir.join(name).exists() {
             return Err(Error::new(
@@ -1245,6 +1245,11 @@ impl Session {
             return Err(error);
         }
         Ok(session)
+    }
+
+    /// Compatibility alias for [`Self::branch`].
+    pub fn fork(&self, turn: usize, name: &str) -> Result<Session> {
+        self.branch(turn, name)
     }
 
     fn retain_fork_history(&self, fork: &mut SessionRecord) -> Result<()> {
