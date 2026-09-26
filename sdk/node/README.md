@@ -136,6 +136,28 @@ vLLM's unrestricted adapter loader.
 
 ## Usage
 
+### Managed agents on smol cloud
+
+`AgentSession` runs Claude Code, Codex, OpenCode, or a custom program in a persistent cloud machine. Setup runs in the background; wait for `ready` before sending a turn. The application still stages its repository in `/workspace` through the machine API.
+
+```ts
+import { AgentSession } from 'smolmachines';
+
+const agent = await AgentSession.create(
+  { name: 'fixer', harness: 'claude-code', credential: 'anthropic' },
+  { target: 'cloud' },
+);
+while ((await agent.info()).status === 'starting') {
+  await new Promise((resolve) => setTimeout(resolve, 2000));
+}
+const turn = await agent.send('Fix the failing tests', { idempotencyKey: 'task-123' });
+for await (const event of agent.events(turn)) console.log(event);
+```
+
+Call `info()` to check setup and turn status, `cancel()` to stop a running turn, and `rewind()` or `fork()` after a checkpointed turn. `AgentSession` is cloud-only; the `Machine` API below works locally or on cloud.
+
+### Machines
+
 ```ts
 import { Machine } from 'smolmachines';
 

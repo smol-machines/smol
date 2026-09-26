@@ -18,6 +18,8 @@
  */
 
 export { Machine, Episode } from './machine';
+export { AgentSession } from './agent';
+export type { CreateAgentOptions, AgentInfo, AgentSummary, AgentPage, AgentTurn, SendTurnOptions, AgentStreamEvent } from './agent';
 export { RolloutClient, RolloutError, adapterSha256 } from './rollout';
 export type {
   BuildRolloutJobOptions,

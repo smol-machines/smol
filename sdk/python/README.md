@@ -306,6 +306,29 @@ existing.wait_until_ready()
 
 ## API
 
+### Managed agents on smol cloud
+
+`AgentSession` runs a harness in a persistent cloud machine, records turn events, and supports rewind and fork after checkpointed turns. Setup runs in the background; check `info()["status"] == "ready"` before sending. The application still stages its repository in `/workspace` through the machine API.
+
+```python
+import time
+from smol import AgentSession, ConnectOptions
+
+agent = AgentSession.create(
+    "fixer", harness="claude-code", credential="anthropic",
+    conn=ConnectOptions(target="cloud"),
+)
+while agent.info()["status"] == "starting":
+    time.sleep(2)
+turn = agent.send("Fix the failing tests", idempotency_key="task-123")
+for event in agent.events(turn):
+    print(event)
+```
+
+Use `cancel()`, `rewind()`, `fork()`, `pause()`, `resume()`, and `delete()` for the session lifecycle. `AgentSession` is cloud-only.
+
+### Machines
+
 `machine.pause()` saves execution durably and stops the VM; `machine.resume()`
 restores its processes, RAM and disks under the same identity. Use a branchable
 machine. Unlike stop/start, resume does not boot a fresh guest. Local saves need

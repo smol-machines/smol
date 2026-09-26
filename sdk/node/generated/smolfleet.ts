@@ -84,6 +84,198 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/account/attribution": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["account_attribution"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/account/plan": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["account_plan_change"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/account/plans": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["account_plans_list"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/agents": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["agent_list"];
+        put?: never;
+        post: operations["agent_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/agents/{name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["agent_get"];
+        put?: never;
+        post?: never;
+        delete: operations["agent_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/agents/{name}/fork": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["agent_fork"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/agents/{name}/pause": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["agent_pause"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/agents/{name}/resume": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["agent_resume"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/agents/{name}/rewind": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["agent_rewind"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/agents/{name}/turns": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["agent_turn_send"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/agents/{name}/turns/{turn}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["agent_turn_cancel"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/agents/{name}/turns/{turn}/events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["agent_turn_events"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/apikeys": {
         parameters: {
             query?: never;
@@ -171,7 +363,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        get: operations["portable_checkpoint_get"];
         put?: never;
         post?: never;
         delete: operations["portable_checkpoint_delete"];
@@ -207,6 +399,38 @@ export interface paths {
         put?: never;
         post: operations["portable_checkpoint_restore"];
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/credentials": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["credential_list"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/credentials/{name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put: operations["credential_set"];
+        post?: never;
+        delete: operations["credential_delete"];
         options?: never;
         head?: never;
         patch?: never;
@@ -452,6 +676,38 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/machines/{id}/exec/interactive": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["machine_exec_interactive"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/machines/{id}/exec/stream": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["machine_exec_stream"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/machines/{id}/export": {
         parameters: {
             query?: never;
@@ -516,6 +772,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/machines/{id}/lineage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["machine_lineage"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/machines/{id}/logs": {
         parameters: {
             query?: never;
@@ -526,6 +798,38 @@ export interface paths {
         get: operations["machine_logs"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/machines/{id}/pause": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["machine_pause"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/machines/{id}/resume": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["machine_resume"];
         delete?: never;
         options?: never;
         head?: never;
@@ -644,6 +948,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/machines/{id}/tunnel/{port}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["machine_tunnel"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/machines/{id}/usage": {
         parameters: {
             query?: never;
@@ -708,6 +1028,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/nodes/{id}/cordon": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["node_cordon"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/nodes/{id}/credential": {
         parameters: {
             query?: never;
@@ -750,6 +1086,22 @@ export interface paths {
         get?: never;
         put?: never;
         post: operations["node_heartbeat"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/nodes/{id}/uncordon": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["node_uncordon"];
         delete?: never;
         options?: never;
         head?: never;
@@ -804,6 +1156,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/plans/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch: operations["plan_update"];
+        trace?: never;
+    };
     "/v1/pools": {
         parameters: {
             query?: never;
@@ -844,6 +1212,22 @@ export interface paths {
             cookie?: never;
         };
         get: operations["pricing_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/status/machines": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["machine_stats_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1006,6 +1390,11 @@ export interface components {
             budgetRemainingMicros?: number | null;
             /** Format: int32 */
             effectiveMaxCpus: number;
+            /**
+             * Format: int64
+             * @description Largest disk (GB) one machine may request on this account.
+             */
+            effectiveMaxDiskGb: number;
             /** Format: int32 */
             effectiveMaxMachines: number;
             /** Format: int64 */
@@ -1031,6 +1420,83 @@ export interface components {
             prepaidCreditMicros?: number;
             status: string;
             tenantId: string;
+        };
+        /** @description Start a new session `name` from the state right after `turn`. */
+        AgentForkRequest: {
+            name: string;
+            /** Format: int64 */
+            turn: number;
+        };
+        /** @description A managed agent session. */
+        AgentInfo: {
+            createdAt: string;
+            error?: string | null;
+            harness: string;
+            /** @description The machine the session currently runs on (it changes on rewind). */
+            machineId?: string | null;
+            model?: string | null;
+            name: string;
+            /**
+             * Format: int64
+             * @description The turn in progress, if any.
+             */
+            runningTurn?: number | null;
+            /**
+             * @description `starting` during setup, `turning` during a turn, `cancelling`,
+             *     `rewinding`, `forking`, `pausing`, `resuming`, `ready`, `deleting`, or
+             *     `failed`; stale work may read as `interrupted`.
+             */
+            status: string;
+            turns: components["schemas"]["AgentTurnInfo"][];
+        };
+        AgentListPage: {
+            items: components["schemas"]["AgentSummary"][];
+            nextCursor?: string | null;
+        };
+        /** @description Return a session to the state right after `turn`. */
+        AgentRewindRequest: {
+            /** Format: int64 */
+            turn: number;
+        };
+        /**
+         * @description A session entry for the paginated list. Turn history is fetched from the
+         *     session detail rather than repeated for every session in the account.
+         */
+        AgentSummary: {
+            createdAt: string;
+            error?: string | null;
+            harness: string;
+            machineId?: string | null;
+            model?: string | null;
+            name: string;
+            /** Format: int64 */
+            runningTurn?: number | null;
+            status: string;
+        };
+        /** @description A turn that was accepted and is running. */
+        AgentTurnAccepted: {
+            /** Format: int64 */
+            turn: number;
+        };
+        /** @description One turn of a managed agent session. */
+        AgentTurnInfo: {
+            /** @description Whether the session can be rewound or forked to this turn. */
+            checkpointed: boolean;
+            /**
+             * Format: double
+             * @description What the turn cost at the model provider, when the harness reports it.
+             */
+            costUsd?: number | null;
+            finishedAt?: string | null;
+            /** Format: int64 */
+            index: number;
+            isError: boolean;
+            prompt: string;
+            /** @description The agent's final answer, or why the turn failed. */
+            result?: string | null;
+            startedAt: string;
+            /** @description `preparing`, `running`, `cancelling`, `cancelled`, `done`, `failed`, or `interrupted`. */
+            status: string;
         };
         ApiKeyCreated: {
             id: string;
@@ -1070,12 +1536,39 @@ export interface components {
              */
             thresholdMicros: number;
         };
+        /** @description The plan a tenant is on, and the ones it may move to itself. */
+        AvailablePlansResponse: {
+            /**
+             * @description Every self-serve plan, cheapest first. Includes the current plan when
+             *     that is itself self-serve, so a client can render the whole ladder.
+             */
+            available: components["schemas"]["PlanInfo"][];
+            current?: null | components["schemas"]["PlanInfo"];
+        };
+        /**
+         * @description Ask to move this tenant onto a different plan. Only plans whose
+         *     `self_serve` flag is set may be chosen; operator tiers are assigned by an
+         *     admin.
+         */
+        ChangePlanRequest: {
+            /** @description Plan id to move onto, e.g. `plan-startup-paid`. */
+            planId: string;
+        };
         /**
          * @description User-visible state of a live-RAM checkpoint.
          * @enum {string}
          */
         CheckpointState: "mutable" | "freezing" | "frozen";
         ClusterHealth: {
+            /**
+             * Format: int32
+             * @description Version of the public control-plane contract.
+             */
+            apiVersion?: number;
+            /** @description Source revision injected by the release pipeline, when available. */
+            buildSha?: string | null;
+            /** @description Stable feature identifiers clients and deployment checks can gate on. */
+            capabilities?: string[];
             clusterId: string;
             /** Format: int32 */
             groupsTotal: number;
@@ -1150,6 +1643,58 @@ export interface components {
              */
             volumeDiscountMicros?: number;
         };
+        /**
+         * @description Start a managed agent session: a harness (Claude Code, Codex, OpenCode, or
+         *     any program) in its own machine, driven as a sequence of turns.
+         */
+        CreateAgentRequest: {
+            /**
+             * @description Hosts the agent may reach beyond its model provider and package registry.
+             *     The `command` harness has neither, so callers must name hosts or
+             *     explicitly opt into unrestricted outbound access.
+             */
+            allowHosts?: string[];
+            /**
+             * @description `amd64` or `arm64`. A session with checkpoints runs on amd64 unless
+             *     pinned here.
+             */
+            arch?: string | null;
+            /**
+             * @description Checkpoint after every turn so the session can be rewound or forked
+             *     (default true).
+             */
+            checkpoints?: boolean | null;
+            /**
+             * Format: int32
+             * @description vCPUs (default 2).
+             */
+            cpus?: number | null;
+            /**
+             * @description A stored credential holding the model API key. The session's machine then
+             *     never holds the key: the agent sees a placeholder and the node
+             *     substitutes the key on requests to the provider, so turns need no key in
+             *     their `env`. Its variable must be the one the harness reads (e.g.
+             *     `ANTHROPIC_API_KEY`) and its hosts must include the provider's.
+             */
+            credential?: string | null;
+            /** @description `claude-code` (default), `codex`, `opencode`, or `command`. */
+            harness?: string | null;
+            /** @description Image for the `command` harness. */
+            image?: string | null;
+            /**
+             * Format: int32
+             * @description Memory in MiB (default 2048).
+             */
+            memoryMb?: number | null;
+            /** @description Model: optional for `codex`, required as `provider/model` for `opencode`. */
+            model?: string | null;
+            /** @description Session name, unique within the account. */
+            name: string;
+            /** @description Allow all outbound traffic instead of the host allow-list. */
+            openNetwork?: boolean;
+            /** @description Program for the `command` harness; the prompt is appended. */
+            program?: string[];
+        };
         CreateApiKeyRequest: {
             description?: string | null;
             /** Format: int64 */
@@ -1177,6 +1722,13 @@ export interface components {
              *     = use the source's own entrypoint, preserving prior behavior.
              */
             command?: string[];
+            /**
+             * @description Names of stored credentials this machine binds. Each gives the guest a
+             *     placeholder in the credential's variable; the node substitutes the value
+             *     only on HTTPS requests to the credential's hosts, so the machine never
+             *     holds it.
+             */
+            credentials?: string[];
             env?: {
                 [key: string]: string;
             };
@@ -1222,6 +1774,11 @@ export interface components {
             maxConcurrentMachines?: number;
             /** Format: int32 */
             maxCpus?: number;
+            /**
+             * Format: int64
+             * @description Largest disk (GB) one machine may request; omitted = platform maximum.
+             */
+            maxDiskGb?: number | null;
             /** Format: int64 */
             maxEgressGb?: number | null;
             /** Format: int32 */
@@ -1275,6 +1832,14 @@ export interface components {
             node?: string | null;
             /** Format: int64 */
             sizeGb: number;
+        };
+        /** @description A stored credential, without its value. */
+        CredentialInfo: {
+            createdAt: string;
+            envVar: string;
+            hosts: string[];
+            name: string;
+            updatedAt: string;
         };
         DeployRequest: {
             coLocateWith?: string | null;
@@ -1346,6 +1911,8 @@ export interface components {
          *     operation is transactional: if any child fails, every child is rolled back.
          */
         ForkBatchRequest: {
+            /** @description Let every child become another branch source. */
+            branchable?: boolean;
             /**
              * Format: int32
              * @description Number of children to branch (1..=`MAX_FORK_BATCH`). Ignored when `names` is
@@ -1454,6 +2021,8 @@ export interface components {
             language: string;
             /** Format: int64 */
             timeoutSeconds?: number | null;
+            /** @description Run as this user (image user name or `uid[:gid]`), overriding the image's USER. */
+            user?: string | null;
         };
         MachineCommandRequest: {
             /**
@@ -1467,9 +2036,24 @@ export interface components {
                 [key: string]: string;
             };
             stdin?: string | null;
+            /**
+             * @description Stream stdout and stderr as Server-Sent Events instead of buffering the
+             *     whole run into one JSON body. The response is then `text/event-stream`,
+             *     not `MachineExecResponse`: frames are `event: stdout|stderr|error|exit`
+             *     with `data:` lines, and the terminal `exit` frame carries
+             *     `{"exitCode": N}`. Streamed output is not capped, so this is the right
+             *     path for long-running or high-volume commands.
+             */
             stream?: boolean;
             /** Format: int64 */
             timeoutSeconds?: number | null;
+            /**
+             * @description Run as this user: a name from the image or a numeric `uid[:gid]`,
+             *     overriding the image's USER. Forwarded to the machine's runtime; an
+             *     older runtime that cannot honour it rejects the request rather than
+             *     running the command as the wrong account.
+             */
+            user?: string | null;
         };
         MachineExecResponse: {
             /** Format: int64 */
@@ -1499,6 +2083,13 @@ export interface components {
              */
             stdoutB64?: string;
             stdoutTruncated?: boolean;
+            /**
+             * @description The user the command was run as, echoed back when the request set one.
+             *     A client that asked for a user and does not see it here is talking to a
+             *     control plane that predates the field and dropped it — which the
+             *     client must treat as an error, never as "ran as the default account".
+             */
+            user?: string | null;
         };
         MachineInfo: {
             /**
@@ -1564,8 +2155,14 @@ export interface components {
              */
             ready?: boolean;
             /**
-             * @description When the machine first became [`Self::ready`] (RFC3339), or `null` if not
-             *     yet ready. Monotonic: once set it isn't cleared until a stop/restart.
+             * @description When a probe first observed this machine serving (RFC3339), or `null`.
+             *
+             *     This is a readiness gate, not a boot timestamp: it is stamped when the
+             *     published port accepts a connection (or, for a machine with no published
+             *     ports, when its guest agent answers), and it is cleared on every stop so
+             *     a restart must re-prove itself. A short-lived machine may finish its
+             *     whole life as `null` here without anything being wrong. Use `createdAt`
+             *     if you want when the machine came into existence.
              */
             readyAt?: string | null;
             resources: components["schemas"]["MachineResources"];
@@ -1589,6 +2186,15 @@ export interface components {
              */
             url?: string | null;
             workdir?: string | null;
+        };
+        /**
+         * @description One complete live branch lineage, suitable for rendering as a tree. Parent
+         *     relationships remain on each machine so clients do not have to infer them
+         *     from names or creation order.
+         */
+        MachineLineage: {
+            machines: components["schemas"]["MachineInfo"][];
+            rootMachineId: string;
         };
         MachineMountSpec: {
             /** @description Mount path inside the VM. */
@@ -1810,6 +2416,11 @@ export interface components {
             maxConcurrentMachines: number;
             /** Format: int32 */
             maxCpus: number;
+            /**
+             * Format: int64
+             * @description Largest disk (GB) one machine may request; `null` = platform maximum.
+             */
+            maxDiskGb?: number | null;
             /** Format: int64 */
             maxEgressGb?: number | null;
             /** Format: int32 */
@@ -1842,6 +2453,11 @@ export interface components {
             rateExecMicros: number;
             /** Format: int64 */
             rateMemoryGbHourMicros: number;
+            /**
+             * @description Whether a tenant may switch itself onto this plan. Operator-only tiers
+             *     are false and never appear in the self-serve list.
+             */
+            selfServe?: boolean;
         };
         PoolConfig: {
             /** Format: int32 */
@@ -1871,7 +2487,7 @@ export interface components {
             /** Format: int32 */
             targetSize: number;
         };
-        /** @description Durable live-state artifact stored by SmolCloud. */
+        /** @description Portable live-state capture; only `available` denotes a completed upload. */
         PortableCheckpointInfo: {
             arch: string;
             createdAt: string;
@@ -1881,7 +2497,27 @@ export interface components {
             machineId: string;
             /** Format: int64 */
             sizeBytes: number;
+            /** @description `creating`, `available`, `failed`, or `deleting`. */
             status: string;
+        };
+        /**
+         * @description The lifetime count of machine starts on the platform, served UNAUTHENTICATED
+         *     at `GET /v1/status/machines` for the marketing site. Counted from the audit
+         *     trail, so it is a real number and only ever grows. Operator-owned accounts
+         *     (demos, QA) are left out via the `public_stats.exclude_tenants` server
+         *     setting, so the figure means "machines our customers launched".
+         */
+        PublicMachineStats: {
+            /**
+             * Format: int64
+             * @description Machines started by customers since `since`. `null` when the count could
+             *     not be computed — the site hides the figure rather than show a zero.
+             */
+            machinesStarted?: number | null;
+            /** @description The first day the count covers (`YYYY-MM-DD`), when known. */
+            since?: string | null;
+            /** @description When the figure was last computed (RFC 3339). */
+            updatedAt: string;
         };
         /**
          * @description The published rate card, served UNAUTHENTICATED at `GET /v1/pricing`. Read
@@ -1916,7 +2552,10 @@ export interface components {
             egressGbMicros: number;
             /**
              * Format: int64
-             * @description Recurring monthly free credit applied to each period's bill.
+             * @description Deprecated alias of [`Self::signup_credit_micros`], kept so clients written
+             *     against the old contract keep parsing. It once meant a recurring monthly
+             *     allowance; that allowance no longer exists, so the value is the same
+             *     one-time grant. Read `signup_credit_micros` instead.
              */
             freeCreditMicros: number;
             /**
@@ -1924,6 +2563,13 @@ export interface components {
              * @description Active resident-memory (RSS) GB-hour.
              */
             memoryGbHourMicros: number;
+            /**
+             * Format: int64
+             * @description One-time credit granted when an account is created, in micros. It is paid
+             *     into the account's prepaid balance and drawn down like any other credit —
+             *     it does NOT reset monthly and is not a per-period discount.
+             */
+            signupCreditMicros: number;
             /** @description Graduated volume-discount bands, low bound → high. */
             volumeTiers: components["schemas"]["VolumeTier"][];
         };
@@ -1958,6 +2604,65 @@ export interface components {
             /** Format: int32 */
             count: number;
         };
+        /** @description Send a prompt to a managed agent session. */
+        SendAgentTurnRequest: {
+            /**
+             * @description Environment for this turn only — typically the model API key. Never
+             *     stored.
+             */
+            env?: {
+                [key: string]: string;
+            };
+            prompt: string;
+            /**
+             * Format: int64
+             * @description Longest the turn may run (default 1800 s).
+             */
+            timeoutSeconds?: number | null;
+        };
+        /**
+         * @description Store a credential for credential substitution. The value is write-only:
+         *     it is sealed at rest and never returned.
+         */
+        SetCredentialRequest: {
+            /**
+             * @description The environment variable a machine that binds this credential sees —
+             *     holding a placeholder, never the value.
+             */
+            envVar: string;
+            /** @description The only hosts the value is ever sent to (HTTPS requests only). */
+            hosts: string[];
+            value: string;
+        };
+        /**
+         * @description First-touch marketing attribution, reported once by the console right after a
+         *     new account's first login. Every field is optional and untrusted: the control
+         *     plane keeps an allowlisted, length-capped, query-stripped copy and ignores the
+         *     rest. Stored at most once per tenant and only for recently created tenants.
+         */
+        SignupAttribution: {
+            /** @description When the visitor first landed (RFC 3339), which can precede signup by days. */
+            firstSeenAt?: string | null;
+            /** @description The first path on this site the visitor landed on. */
+            landingPath?: string | null;
+            /**
+             * @description The external page that sent the visitor, as scheme://host/path — the
+             *     query string and fragment are dropped before storage.
+             */
+            referrer?: string | null;
+            utmCampaign?: string | null;
+            utmContent?: string | null;
+            utmMedium?: string | null;
+            utmSource?: string | null;
+            utmTerm?: string | null;
+        };
+        /**
+         * @description Whether a reported attribution was stored. `false` is not an error: the tenant
+         *     already has one, is not a new account, or the report carried nothing usable.
+         */
+        SignupAttributionResponse: {
+            recorded: boolean;
+        };
         /**
          * @description A tenant (customer account). Quota override fields are `None` when inherited
          *     from the plan. See docs/product-backend-layer.md.
@@ -1968,6 +2673,11 @@ export interface components {
             id: string;
             /** Format: int32 */
             maxCpus?: number | null;
+            /**
+             * Format: int64
+             * @description Per-tenant override of the plan's per-machine disk ceiling (GB).
+             */
+            maxDiskGb?: number | null;
             /** Format: int32 */
             maxGroups?: number | null;
             /** Format: int64 */
@@ -1976,6 +2686,7 @@ export interface components {
             maxSandboxPools?: number | null;
             name: string;
             planId?: string | null;
+            signupAttribution?: null | components["schemas"]["SignupAttribution"];
             status: string;
             updatedAt?: string | null;
         };
@@ -2026,6 +2737,23 @@ export interface components {
              */
             thresholdMicros?: number | null;
         };
+        /**
+         * @description `PATCH /v1/plans/{id}`: change a plan's limits in place. Every field is
+         *     optional; only the given ones change. Takes effect on the next machine
+         *     create for every tenant on the plan.
+         */
+        UpdatePlanRequest: {
+            /** Format: int32 */
+            maxConcurrentMachines?: number | null;
+            /** Format: int32 */
+            maxCpus?: number | null;
+            /** Format: int64 */
+            maxDiskGb?: number | null;
+            /** Format: int32 */
+            maxMachines?: number | null;
+            /** Format: int64 */
+            maxMemoryMb?: number | null;
+        };
         /** @description Partial update — only present fields change. */
         UpdateTenantRequest: {
             externalBillingId?: string | null;
@@ -2036,6 +2764,17 @@ export interface components {
              *     unchanged (still falls back to the plan). Admin-only.
              */
             freeCreditMicros?: number | null;
+            /**
+             * Format: int32
+             * @description Per-machine size overrides for this tenant (each `null` = leave as is).
+             *     They sit above the plan's ceilings, for a deal that needs bigger machines
+             *     without a new plan.
+             */
+            maxCpus?: number | null;
+            /** Format: int64 */
+            maxDiskGb?: number | null;
+            /** Format: int64 */
+            maxMemoryMb?: number | null;
             planId?: string | null;
             status?: string | null;
         };
@@ -2230,6 +2969,398 @@ export interface operations {
             };
         };
     };
+    account_attribution: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SignupAttribution"];
+            };
+        };
+        responses: {
+            /** @description Whether the attribution was stored. False when the tenant already has one, is not a new account, or the report held nothing usable. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SignupAttributionResponse"];
+                };
+            };
+        };
+    };
+    account_plan_change: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ChangePlanRequest"];
+            };
+        };
+        responses: {
+            /** @description The plan now in effect */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlanInfo"];
+                };
+            };
+            /** @description The plan's monthly fee has no saved card to bill, or the card was declined */
+            402: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Current usage exceeds the target plan's limits */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description That plan is not self-serve */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Paid plans are not enabled on this deployment */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    account_plans_list: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Plans this tenant may switch to itself */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AvailablePlansResponse"];
+                };
+            };
+        };
+    };
+    agent_list: {
+        parameters: {
+            query?: {
+                /** @description Last session name from the previous page */
+                after?: string;
+                /** @description Page size, 1-100 (default 20) */
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Paginated agent session summaries */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentListPage"];
+                };
+            };
+        };
+    };
+    agent_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateAgentRequest"];
+            };
+        };
+        responses: {
+            /** @description Session created; its machine and harness are set up in the background (status `starting`, then `ready` or `failed`) */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentInfo"];
+                };
+            };
+            /** @description A session with that name exists */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    agent_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Session name */
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Session with its turns */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentInfo"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    agent_delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Session name */
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Session, machine and unshared checkpoints deleted */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    agent_fork: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Session name */
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AgentForkRequest"];
+            };
+        };
+        responses: {
+            /** @description New session from the state right after the turn */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentInfo"];
+                };
+            };
+        };
+    };
+    agent_pause: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Session name */
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Paused; the next turn resumes it */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    agent_resume: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Session name */
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Resumed */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    agent_rewind: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Session name */
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AgentRewindRequest"];
+            };
+        };
+        responses: {
+            /** @description Session restored to the state right after the turn */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentInfo"];
+                };
+            };
+        };
+    };
+    agent_turn_send: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Retry the same turn without running it twice; a different request using the same key conflicts */
+                "Idempotency-Key"?: string | null;
+            };
+            path: {
+                /** @description Session name */
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SendAgentTurnRequest"];
+            };
+        };
+        responses: {
+            /** @description Turn started; it runs whether or not a client stays connected */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentTurnAccepted"];
+                };
+            };
+            /** @description A turn is already running, or the session is not ready */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    agent_turn_cancel: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Session name */
+                name: string;
+                /** @description Running turn number */
+                turn: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Turn cancelled and its machine stopped; the next turn restarts it */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Turn is not running */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    agent_turn_events: {
+        parameters: {
+            query?: {
+                /** @description Replay only events numbered above this */
+                after?: number;
+            };
+            header?: never;
+            path: {
+                /** @description Session name */
+                name: string;
+                /** @description Turn number */
+                turn: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description text/event-stream: an `event` per agent event (`id` = its number), then `done` with the finished turn */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     apikey_list: {
         parameters: {
             query?: never;
@@ -2377,6 +3508,36 @@ export interface operations {
             };
         };
     };
+    portable_checkpoint_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Portable checkpoint id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Capture status */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PortableCheckpointInfo"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     portable_checkpoint_delete: {
         parameters: {
             query?: never;
@@ -2431,6 +3592,13 @@ export interface operations {
                 };
                 content?: never;
             };
+            /** @description Checkpoint is not available */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
         };
     };
     portable_checkpoint_restore: {
@@ -2460,6 +3628,88 @@ export interface operations {
             };
             /** @description Checkpoint is not available */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    credential_list: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Stored credentials, without their values */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CredentialInfo"][];
+                };
+            };
+        };
+    };
+    credential_set: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Credential name */
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SetCredentialRequest"];
+            };
+        };
+        responses: {
+            /** @description Stored; machines bound to it use the new value from their next boot */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CredentialInfo"];
+                };
+            };
+            /** @description Invalid name, variable, hosts or value */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    credential_delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Credential name */
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Deleted */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Not found */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -2782,7 +4032,7 @@ export interface operations {
         };
         responses: {
             /** @description Child created */
-            200: {
+            201: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -2809,7 +4059,7 @@ export interface operations {
         };
         responses: {
             /** @description Children created */
-            200: {
+            201: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -2844,7 +4094,10 @@ export interface operations {
     };
     portable_checkpoint_create: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Defaults to true. False accepts a background capture; poll checkpoint status before restore. */
+                wait?: boolean;
+            };
             header?: never;
             path: {
                 /** @description Running forkable machine id */
@@ -2856,6 +4109,15 @@ export interface operations {
         responses: {
             /** @description Portable checkpoint captured */
             201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PortableCheckpointInfo"];
+                };
+            };
+            /** @description Capture accepted, not yet durable */
+            202: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -2961,13 +4223,69 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Command result */
+            /** @description Command result. Buffered JSON by default; with `stream: true` in the body the response is an SSE stream of `event: stdout|stderr|error|exit` frames instead, terminated by `exit` carrying `{"exitCode": N}`. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
                     "application/json": components["schemas"]["MachineExecResponse"];
+                    "text/event-stream": string;
+                };
+            };
+        };
+    };
+    machine_exec_interactive: {
+        parameters: {
+            query?: {
+                /** @description Program to run (default: the image shell) */
+                command?: string;
+                /** @description Initial terminal width */
+                cols?: number;
+                /** @description Initial terminal height */
+                rows?: number;
+            };
+            header?: never;
+            path: {
+                /** @description Machine id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Switching to a PTY WebSocket. Binary frames carry terminal bytes in both directions; JSON text frames carry resize and exit control. Browsers cannot set an Authorization header on a WebSocket, so this route also accepts `?access_token=`. */
+            101: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    machine_exec_stream: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Machine id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MachineCommandRequest"];
+            };
+        };
+        responses: {
+            /** @description Command output as Server-Sent Events, written as it is produced and never truncated. Frames are `event: stdout|stderr|error|exit` with `data:` lines; the terminal `exit` frame carries `{"exitCode": N}`. Identical to `POST /v1/machines/{id}/exec` with `stream: true` — a dedicated path for clients that route by URL rather than by request body. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/event-stream": string;
                 };
             };
         };
@@ -3062,7 +4380,7 @@ export interface operations {
         };
         responses: {
             /** @description Clone created */
-            200: {
+            201: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -3089,12 +4407,35 @@ export interface operations {
         };
         responses: {
             /** @description Clones created */
-            200: {
+            201: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
                     "application/json": components["schemas"]["ForkBatchResponse"];
+                };
+            };
+        };
+    };
+    machine_lineage: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Machine id in the lineage */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Complete branch lineage */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MachineLineage"];
                 };
             };
         };
@@ -3119,6 +4460,66 @@ export interface operations {
                 content: {
                     "text/plain": string;
                 };
+            };
+        };
+    };
+    machine_pause: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Machine id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Execution saved durably and machine paused */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MachineInfo"];
+                };
+            };
+            /** @description Machine cannot be paused in its current state */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    machine_resume: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Machine id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Saved execution resumed */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MachineInfo"];
+                };
+            };
+            /** @description No durable saved execution is ready */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };
@@ -3312,6 +4713,50 @@ export interface operations {
             };
         };
     };
+    machine_tunnel: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Tenant-owned running machine id */
+                id: string;
+                /** @description Published guest TCP port */
+                port: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Binary WebSocket frames carry raw TCP bytes; requires machine:exec scope */
+            101: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Missing machine:exec scope */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Machine or published port not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Machine is not running */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     machine_usage: {
         parameters: {
             query?: never;
@@ -3399,6 +4844,27 @@ export interface operations {
             };
         };
     };
+    node_cordon: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Node id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No new placements land on the node; what runs on it is untouched */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     node_credential_revoke: {
         parameters: {
             query?: never;
@@ -3454,6 +4920,27 @@ export interface operations {
         requestBody?: never;
         responses: {
             /** @description Heartbeat accepted */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    node_uncordon: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Node id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Operator cordon lifted */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -3545,6 +5032,40 @@ export interface operations {
             };
         };
     };
+    plan_update: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Plan id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdatePlanRequest"];
+            };
+        };
+        responses: {
+            /** @description Plan updated; applies from the next machine create */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlanInfo"];
+                };
+            };
+            /** @description Plan not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     pool_list: {
         parameters: {
             query?: never;
@@ -3628,6 +5149,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PublicPricing"];
+                };
+            };
+        };
+    };
+    machine_stats_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Lifetime count of machines started by customers */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PublicMachineStats"];
                 };
             };
         };

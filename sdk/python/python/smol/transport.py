@@ -1164,8 +1164,11 @@ def _cloud_fetch(
     raw_body: Optional[bytes] = None,
     accept: str = "json",
     timeout: float = CLOUD_TIMEOUT_S,
+    extra_headers: Optional[dict[str, str]] = None,
 ) -> Any:
     headers = {"authorization": f"Bearer {api_key}"}
+    if extra_headers:
+        headers.update(extra_headers)
     data: Optional[bytes] = None
     if json_body is not None:
         headers["content-type"] = "application/json"
@@ -1190,7 +1193,7 @@ def _cloud_fetch(
             text = e.read().decode(errors="replace")
         except Exception:  # noqa: BLE001
             pass
-        code = "NOT_FOUND" if e.code == 404 else "UNAUTHORIZED" if e.code == 401 else "SMOLVM_ERROR"
+        code = "NOT_FOUND" if e.code == 404 else "UNAUTHORIZED" if e.code in (401, 403) else "CONFLICT" if e.code == 409 else "SMOLVM_ERROR"
         # Surface the server's `x-request-id` correlation id — the error body is
         # visible to callers but the response headers aren't, so without this the
         # id is invisible and support can't correlate the failed call.

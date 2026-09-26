@@ -11,6 +11,6 @@
     "rootDir": ".",
     "outDir": "dist"
   },
-  "include": ["index.ts", "types.ts", "errors.ts", "machine.ts", "native.ts", "rollout.ts"],
+  "include": ["index.ts", "types.ts", "errors.ts", "machine.ts", "native.ts", "rollout.ts", "agent.ts"],
   "exclude": ["node_modules", "dist", "examples"]
 }
