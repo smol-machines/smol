@@ -28,6 +28,7 @@ import type {
   ConnectOptions,
   ExecEvent,
   ExecOptions,
+  EgressInterceptor,
   AssignOptions,
   ForkBatchOptions,
   ForkOptions,
@@ -113,7 +114,7 @@ export interface Transport {
   stop(): Promise<void>;
   pause(): Promise<void>;
   resume(): Promise<void>;
-  start(): Promise<void>;
+  start(interceptor?: EgressInterceptor): Promise<void>;
   delete(): Promise<void>;
   /** Cloud only: delete and return the settled usage + cost in one call. */
   deleteWithUsage(): Promise<MachineUsageReport>;
@@ -324,6 +325,7 @@ class LocalTransport implements Transport {
   constructor(
     private readonly inner: NapiInstance,
     private readonly cleanupOnExit = true,
+    private interceptor?: EgressInterceptor,
   ) {
     if (cleanupOnExit) {
       liveLocal.add(this);
@@ -506,9 +508,12 @@ class LocalTransport implements Transport {
     await this.waitUntilReady();
   }
 
-  async start(): Promise<void> {
+  async start(interceptor?: EgressInterceptor): Promise<void> {
     try {
-      await this.inner.start();
+      const binding = interceptor ?? this.interceptor;
+      if (binding) await this.inner.start(binding.address, binding.token);
+      else await this.inner.start();
+      if (interceptor) this.interceptor = interceptor;
     } catch (e) {
       throw wrapNativeError(e);
     }
@@ -1159,7 +1164,8 @@ class CloudTransport implements Transport {
     await waitForReady(this.conn, this.id);
   }
 
-  async start(): Promise<void> {
+  async start(interceptor?: EgressInterceptor): Promise<void> {
+    if (interceptor) throw new NotSupportedError("egressInterceptor is local-only.");
     // Resume a stopped machine, then wait for its agent so the handle is usable.
     await cloudFetch(this.conn, "POST", `/v1/machines/${this.id}/start`, {
       timeoutMs: CLOUD_START_TIMEOUT_MS,
@@ -1496,6 +1502,7 @@ export async function makeTransport(
   const useCloud = selectsCloud(conn);
 
   if (useCloud) {
+    if (config.egressInterceptor || conn.egressInterceptor) throw new NotSupportedError("egressInterceptor is local-only.");
     // Cloud is settled: NOW the CLI's stored login may supply the credential
     // and endpoint, which is the reuse `smol auth login` promises.
     const { apiKey: cliKey, endpoint: cliUrl } = cliSession(conn.target);
@@ -1629,16 +1636,21 @@ export async function makeTransport(
   // Local embedded engine. Image machines launch their default workload before
   // create resolves, with env/workdir applied just like the cloud target.
   const name = config.name ?? generateName();
+  const interceptor = config.egressInterceptor ?? conn.egressInterceptor;
+  if (interceptor && resolveBranchable(config)) {
+    throw new InvalidConfigError("egressInterceptor cannot be combined with branchable machines.");
+  }
   let transport: LocalTransport | undefined;
   try {
     const inner = new (getNapiMachine())(toNativeConfig(name, config));
-    transport = new LocalTransport(inner);
+    transport = new LocalTransport(inner, true, interceptor);
     // A forkable golden boots with memfd-backed guest RAM + a control socket so
     // it can be cloned with Machine.fork (local live-RAM fork).
     if (resolveBranchable(config)) {
       await inner.startForkable();
     } else {
-      await inner.start();
+      if (interceptor) await inner.start(interceptor.address, interceptor.token);
+      else await inner.start();
     }
     await transport.waitUntilReady();
     return transport;
@@ -1672,8 +1684,11 @@ export async function connectTransport(
       // Connecting borrows an existing machine. A signal in this client must
       // not stop a durable checkpoint owned by another process/controller.
       const transport = new LocalTransport(
-        getNapiMachine().connect(id),
+        conn.egressInterceptor
+          ? getNapiMachine().connect(id, conn.egressInterceptor.address, conn.egressInterceptor.token)
+          : getNapiMachine().connect(id),
         false,
+        conn.egressInterceptor,
       );
       // A frozen checkpoint is intentionally not agent-ready; it remains
       // connectable so callers can fork its retained snapshot.
@@ -1685,6 +1700,7 @@ export async function connectTransport(
       throw wrapNativeError(e);
     }
   }
+  if (conn.egressInterceptor) throw new NotSupportedError("egressInterceptor is local-only.");
   // As in makeTransport: the CLI-login fallback applies only once the cloud
   // target is already selected.
   const { apiKey: cliKey, endpoint: cliUrl } = cliSession(conn.target);

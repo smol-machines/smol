@@ -35,6 +35,21 @@ const COMMAND_FAILED: &str = "COMMAND_FAILED";
 const KVM_UNAVAILABLE: &str = "KVM_UNAVAILABLE";
 const SMOLVM_ERROR: &str = "SMOLVM_ERROR";
 
+fn parse_interceptor(
+    address: Option<String>,
+    token: Option<String>,
+) -> PyResult<Option<smolvm_protocol::InterceptEndpoint>> {
+    match (address, token) {
+        (None, None) => Ok(None),
+        (Some(address), Some(token)) => smolvm::embedded::interceptor_endpoint(&address, &token)
+            .map(Some)
+            .map_err(err),
+        _ => Err(PyRuntimeError::new_err(
+            "[CONFIG_ERROR] egress interceptor requires both address and token",
+        )),
+    }
+}
+
 /// Map an engine `smolvm::error::Error` to a `"[CODE] message"` PyErr, mirroring
 /// smol-node's `to_napi_error` so both SDKs surface identical error codes. The
 /// Python `wrap_native_error` parses the prefix back into a typed `SmolError`.
@@ -459,9 +474,16 @@ impl Machine {
     /// (start-or-reconnect). Re-opens a persisted machine in a new process —
     /// backs the SDK's local `Machine.connect()`.
     #[staticmethod]
-    fn connect(py: Python<'_>, name: String) -> PyResult<Self> {
+    #[pyo3(signature = (name, interceptor_address=None, interceptor_token=None))]
+    fn connect(
+        py: Python<'_>,
+        name: String,
+        interceptor_address: Option<String>,
+        interceptor_token: Option<String>,
+    ) -> PyResult<Self> {
+        let interceptor = parse_interceptor(interceptor_address, interceptor_token)?;
         let runtime = runtime().map_err(err)?;
-        py.allow_threads(|| runtime.connect_or_start_machine(&name))
+        py.allow_threads(|| runtime.connect_or_start_machine_with_interceptor(&name, interceptor))
             .map_err(err)?;
         Ok(Self { name })
     }
@@ -516,9 +538,16 @@ impl Machine {
             .map_err(err)
     }
 
-    fn start(&self, py: Python<'_>) -> PyResult<()> {
+    #[pyo3(signature = (interceptor_address=None, interceptor_token=None))]
+    fn start(
+        &self,
+        py: Python<'_>,
+        interceptor_address: Option<String>,
+        interceptor_token: Option<String>,
+    ) -> PyResult<()> {
+        let interceptor = parse_interceptor(interceptor_address, interceptor_token)?;
         let runtime = runtime().map_err(err)?;
-        py.allow_threads(|| runtime.start_machine(&self.name))
+        py.allow_threads(|| runtime.start_machine_with_interceptor(&self.name, interceptor))
             .map_err(err)
     }
 

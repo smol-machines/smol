@@ -138,7 +138,8 @@ impl PackCreateCmd {
         );
 
         println!("Starting agent VM...");
-        let manager = AgentManager::for_vm(&pack_vm_name)?;
+        // Open for launch: the pack helper VM is new, so its disks are created here.
+        let manager = AgentManager::for_vm_with_sizes(&pack_vm_name, None, None)?;
         manager.start_with_config(
             Vec::new(),
             VmResources {

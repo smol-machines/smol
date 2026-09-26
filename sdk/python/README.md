@@ -39,6 +39,15 @@ with Machine.create(MachineConfig(resources=ResourceSpec(cpus=2, memory_mb=1024,
     m.write_file("/tmp/in.txt", "hi")
     print(m.read_file("/tmp/in.txt").decode())
 
+# Local intercepted egress: supply a trusted loopback service and its token.
+import os
+from smol import EgressInterceptor
+binding = EgressInterceptor("127.0.0.1:9000", os.environ["SMOLVM_INTERCEPTOR_TOKEN"])
+with Machine.create(MachineConfig(network=True, egress_interceptor=binding)) as m:
+    pass
+# A new process must supply the binding again when connecting to a stopped machine:
+# Machine.connect("my-persistent-machine", ConnectOptions(target="local", egress_interceptor=binding))
+
 # Branch a prepared machine: a CoW clone of its RAM and disks, typically under
 # 200ms, so a warm environment is reused instead of rebuilt. Pass network=True
 # whenever an image has to be pulled.

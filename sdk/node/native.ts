@@ -94,7 +94,7 @@ export interface NapiMachine {
   state(): string;
   hostPort(guestPort: number): number | null;
   guestPorts(): number[];
-  start(): Promise<void>;
+  start(interceptorAddress?: string, interceptorToken?: string): Promise<void>;
   startForkable(): Promise<void>;
   checkpoint(output: string, store?: string): Promise<NativeCheckpointResult>;
   fork(
@@ -134,7 +134,7 @@ export interface NapiMachine {
 
 export interface NapiMachineCtor {
   new (config: NativeMachineConfig): NapiMachine;
-  connect(name: string): NapiMachine;
+  connect(name: string, interceptorAddress?: string, interceptorToken?: string): NapiMachine;
   restoreCheckpoint(name: string, artifact: string): NapiMachine;
   exportCheckpoint(source: string, output: string): number;
   pruneCheckpointStore(store: string): number;

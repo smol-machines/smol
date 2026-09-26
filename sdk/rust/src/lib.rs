@@ -132,7 +132,9 @@ mod transport;
 mod tunnel;
 
 pub use assets::{configure_runtime_assets, RuntimeAssets};
-pub use config::{Credential, MachineBuilder, MachineConfig, Mount, Port, Resources};
+pub use config::{
+    Credential, EgressInterceptor, MachineBuilder, MachineConfig, Mount, Port, Resources,
+};
 pub use connect::{ConnectOptions, Target};
 pub use error::{Error, ErrorKind, Result};
 pub use exec::{ExecEvent, ExecOptions, ExecResult, ExecStream};

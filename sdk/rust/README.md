@@ -26,6 +26,25 @@ println!("{}", result.stdout_utf8());
 machine.delete()?;
 ```
 
+For a trusted local egress interceptor, pass its loopback address and token on
+each launch. The SDK sends the token in the CLI child's environment, not its
+command line, and keeps the binding on the current handle for later starts.
+After reconnecting from another process, supply it again through
+`ConnectOptions::egress_interceptor`.
+
+```rust,no_run
+# use smolmachines::{EgressInterceptor, Machine};
+# fn main() -> smolmachines::Result<()> {
+let binding = EgressInterceptor::new(
+    "127.0.0.1:9000".parse().unwrap(),
+    std::env::var("SMOLVM_INTERCEPTOR_TOKEN").unwrap(),
+);
+let machine = Machine::builder("protected").network(true).create()?;
+machine.start_with_interceptor(&binding)?;
+# Ok(())
+# }
+```
+
 ## TCP tunnels
 
 Use `machine.tunnel(22)?` to reach a published port through a scoped loopback

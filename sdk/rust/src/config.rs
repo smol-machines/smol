@@ -18,6 +18,34 @@ pub struct Credential {
     pub hosts: Vec<String>,
 }
 
+/// Trusted loopback egress service for one local machine launch.
+#[derive(Clone, PartialEq, Eq)]
+pub struct EgressInterceptor {
+    /// Host loopback listener.
+    pub address: std::net::SocketAddr,
+    /// 64 hexadecimal digits. This is passed to the CLI through its environment.
+    pub token: String,
+}
+
+impl std::fmt::Debug for EgressInterceptor {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("EgressInterceptor")
+            .field("address", &self.address)
+            .field("token", &"<redacted>")
+            .finish()
+    }
+}
+
+impl EgressInterceptor {
+    /// Supply the host service address and its shared token.
+    pub fn new(address: std::net::SocketAddr, token: impl Into<String>) -> Self {
+        Self {
+            address,
+            token: token.into(),
+        }
+    }
+}
+
 /// A directory exposed inside the guest.
 ///
 /// A local `source` is bind-mounted from the host. An `s3://` source is fetched
@@ -115,6 +143,8 @@ pub struct Resources {
 /// Everything needed to create a machine.
 #[derive(Debug, Clone, Default)]
 pub struct MachineConfig {
+    /// Local trusted egress binding, reused by this handle on later starts.
+    pub egress_interceptor: Option<EgressInterceptor>,
     /// Cloud creation waits for published services by default. Set false to
     /// wait only for guest exec, then install or start the service yourself.
     /// Local creation remains stopped until `start()`.
@@ -188,6 +218,12 @@ impl MachineConfig {
     /// local machine is described in the same flags a person would type. That
     /// is what keeps this crate publishable.
     pub(crate) fn into_local_args(self) -> Result<(Vec<String>, Vec<Port>)> {
+        if self.egress_interceptor.is_some() && self.branchable {
+            return Err(Error::new(
+                ErrorKind::Config,
+                "egress interceptor cannot be combined with branchable machines",
+            ));
+        }
         if let Some(arch) = &self.arch {
             let host = canonical_arch(std::env::consts::ARCH);
             if canonical_arch(arch) != host {
@@ -305,6 +341,13 @@ impl MachineConfig {
     /// to have.
     pub(crate) fn into_cloud_request(self) -> Result<smol_cloud::types::CreateMachine> {
         use smol_cloud::types as wire;
+
+        if self.egress_interceptor.is_some() {
+            return Err(Error::new(
+                ErrorKind::NotSupported,
+                "egress interception is local-only",
+            ));
+        }
 
         let image = self.image.ok_or_else(|| {
             Error::new(
@@ -457,6 +500,12 @@ impl MachineBuilder {
     /// Give the guest outbound networking.
     pub fn network(mut self, network: bool) -> Self {
         self.config.resources.network = Some(network);
+        self
+    }
+
+    /// Route local outbound TCP through a trusted host service on each start.
+    pub fn egress_interceptor(mut self, binding: EgressInterceptor) -> Self {
+        self.config.egress_interceptor = Some(binding);
         self
     }
 

@@ -134,6 +134,8 @@ export interface AssignOptions {
 
 /** Configuration for creating a machine. */
 export interface MachineConfig {
+  /** Trusted host egress interceptor for local machines. Supply it again after reconnect. */
+  egressInterceptor?: EgressInterceptor;
   /** Machine name (auto-generated if omitted). */
   name?: string;
   /** Base image. Required for the cloud target; optional for local (where you
@@ -329,10 +331,24 @@ export interface PortableCheckpointInfo {
 
 /** Selects and configures the backend. Local (embedded) is the default. */
 export interface ConnectOptions {
+  /** Binding for a stopped local machine that requires intercepted egress. */
+  egressInterceptor?: EgressInterceptor;
   /** 'local' = embedded engine (default). 'cloud' = smolfleet remote. */
   target?: "local" | "cloud";
   /** Cloud base URL (cloud target only). */
   baseUrl?: string;
   /** Cloud API key, `smk_…` (cloud target only). */
   apiKey?: string;
+}
+
+/** Per-launch trusted host service. Keep the token out of logs and persistent config. */
+export interface EgressInterceptor {
+  /** Loopback socket address, for example `127.0.0.1:9000`. */
+  address: string;
+  /** 64 hexadecimal digits from the interceptor service. */
+  token: string;
+}
+
+export interface StartOptions {
+  egressInterceptor?: EgressInterceptor;
 }
