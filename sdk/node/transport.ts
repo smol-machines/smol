@@ -260,6 +260,7 @@ export function toNativeConfig(
       config.env &&
       Object.entries(config.env).map(([key, value]) => ({ key, value })),
     workdir: config.workdir,
+    user: config.user,
     persistent: config.persistent,
     forkable: resolveBranchable(config),
     mounts: config.mounts?.map((m) => ({
@@ -278,6 +279,10 @@ export function toNativeConfig(
             cpus: config.resources?.cpus,
             memoryMib: config.resources?.memoryMb,
             network: resolveNetwork(config),
+            // Either list enables scoped networking on its own; the engine
+            // enforces both (CIDRs directly, hostnames via its DNS filter).
+            allowedCidrs: config.resources?.allowCidrs,
+            allowedHosts: config.resources?.allowHosts,
             storageGib: config.resources?.storageGb,
             overlayGib: config.resources?.overlayGb,
             gpu: config.resources?.gpu,
@@ -1487,6 +1492,9 @@ export async function makeTransport(
 
   if (useCloud) {
     if (config.egressInterceptor || conn.egressInterceptor) throw new NotSupportedError("egressInterceptor is local-only.");
+    // The cloud create API has no workload user; refuse rather than silently
+    // run the workload as the image's default user.
+    if (config.user !== undefined) throw new NotSupportedError("user is local-only.");
     // Cloud is settled: NOW the CLI's stored login may supply the credential
     // and endpoint, which is the reuse `smol auth login` promises.
     const { apiKey: cliKey, endpoint: cliUrl } = cliSession(conn.target);

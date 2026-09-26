@@ -111,6 +111,13 @@ impl NapiMachine {
             .as_ref()
             .map(|r| r.to_vm_resources())
             .unwrap_or_default();
+        // Hostname rules live on the spec, not in VmResources: the engine
+        // persists them separately and its DNS filter enforces them at runtime.
+        let allowed_hosts = config
+            .resources
+            .as_ref()
+            .and_then(|r| r.allowed_hosts.clone())
+            .unwrap_or_default();
 
         let env = config
             .env
@@ -130,6 +137,7 @@ impl NapiMachine {
             forkable: config.forkable.unwrap_or(false),
             runtime_managed: false,
             remote_volumes,
+            allowed_hosts,
             ..Default::default()
         };
 

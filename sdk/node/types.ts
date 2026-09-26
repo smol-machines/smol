@@ -176,7 +176,8 @@ export interface MachineConfig {
   workdir?: string;
   /** Run the workload as this user: a name from the image or a numeric
    *  `uid[:gid]`. Overrides the image's USER, so a workload can match the
-   *  owner of a mounted host directory. */
+   *  owner of a mounted host directory. Local target only; the cloud target
+   *  rejects it with `NotSupportedError`. */
   user?: string;
 }
 
