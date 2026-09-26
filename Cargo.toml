@@ -29,6 +29,10 @@ path = "src/main.rs"
 # The smolfleet /v1 wire contract, shared with the Rust SDK so the two clients
 # of one control plane cannot drift.
 smol-cloud = { path = "crates/smol-cloud" }
+# The SDK's open-source agent sessions back `smol agent`.
+smolmachines = { path = "sdk/rust" }
+# HTTP for `smol agent serve` (the same axum line as the engine's own server).
+axum = "0.8"
 # smolvm engine — VM lifecycle, agent protocol, config
 smolvm = { path = ".." }
 smolvm-pack = { path = "../crates/smolvm-pack" }

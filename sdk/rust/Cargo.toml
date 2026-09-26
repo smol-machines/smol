@@ -23,6 +23,7 @@ categories = ["virtualization", "api-bindings"]
 # control plane cannot drift. Blocking, because the whole SDK is: the caller
 # owns the choice of runtime.
 smol-cloud = { path = "../../crates/smol-cloud", version = "1.19.0", features = ["blocking"] }
+serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 # Fetching an engine on first local use, so `cargo add` is all a caller needs.
 reqwest = { version = "0.12", default-features = false, features = [

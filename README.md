@@ -173,6 +173,17 @@ smol machine ls --cloud
 See **[docs/cli.md](docs/cli.md)** for the full command reference, and run
 `smol <command> --help` for flags.
 
+## Agents
+
+`smol agent` runs Claude Code, Codex, OpenCode, or any agent program, in its own
+machine as a session of turns — with a checkpoint per turn, so you can rewind the
+session or fork it, locally or on smol cloud. See [docs/agents.md](docs/agents.md).
+
+```sh
+smol agent start fixer && smol agent send fixer "make the tests pass"
+smol agent rewind fixer 0
+```
+
 ## Fused policy rollouts
 
 On a CUDA rollout node, `smol rollout` declaratively registers a loopback vLLM
