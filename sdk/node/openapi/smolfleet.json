@@ -3521,7 +3521,7 @@
         "properties": {
           "checkpointed": {
             "type": "boolean",
-            "description": "Whether the session can be rewound or forked to this turn."
+            "description": "Whether the session can be rewound or branched to this turn."
           },
           "costUsd": {
             "type": [
@@ -3892,7 +3892,7 @@
               "boolean",
               "null"
             ],
-            "description": "Checkpoint after every turn so the session can be rewound or forked\n(default true)."
+            "description": "Checkpoint after every turn so the session can be rewound or branched\n(default true)."
           },
           "cpus": {
             "type": [

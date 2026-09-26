@@ -1496,7 +1496,7 @@ export interface components {
         };
         /** @description One turn of a managed agent session. */
         AgentTurnInfo: {
-            /** @description Whether the session can be rewound or forked to this turn. */
+            /** @description Whether the session can be rewound or branched to this turn. */
             checkpointed: boolean;
             /**
              * Format: double
@@ -1676,7 +1676,7 @@ export interface components {
              */
             arch?: string | null;
             /**
-             * @description Checkpoint after every turn so the session can be rewound or forked
+             * @description Checkpoint after every turn so the session can be rewound or branched
              *     (default true).
              */
             checkpoints?: boolean | null;
