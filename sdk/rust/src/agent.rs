@@ -8,7 +8,7 @@
 //! After each turn the session can checkpoint the machine. Because the harness
 //! stores its conversation inside the machine, restoring a checkpoint rewinds the
 //! agent's *memory and its world together*: [`Session::rewind`] returns to the
-//! state after an earlier turn, and [`Session::fork`] starts an independent
+//! state after an earlier turn, and [`Session::branch`] starts an independent
 //! session from one.
 //!
 //! The same code drives a local engine or smol cloud; the session only records
@@ -538,7 +538,7 @@ pub struct SessionOptions {
     pub extra_hosts: Vec<String>,
     /// Allow all outbound traffic instead of the host allow-list.
     pub open_network: bool,
-    /// Checkpoint the machine after every turn, making rewind and fork possible.
+    /// Checkpoint the machine after every turn, making rewind and branch possible.
     pub checkpoint_turns: bool,
     /// Pause the machine between turns so an idle agent holds no CPU.
     pub pause_between_turns: bool,

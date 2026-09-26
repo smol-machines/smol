@@ -1,6 +1,6 @@
 //! `smol agent`: run an agent harness (Claude Code, or any program) in its own
 //! machine as a session of turns, with a checkpoint per turn so the session can
-//! be rewound or forked. Built on the SDK's `smolmachines::agent`.
+//! be rewound or branched. Built on the SDK's `smolmachines::agent`.
 
 use anyhow::{bail, Result};
 use clap::{Args, Subcommand, ValueEnum};
@@ -54,7 +54,7 @@ enum AgentSubcommand {
         /// Allow all outbound traffic instead of the host allow-list
         #[arg(long)]
         open_network: bool,
-        /// Do not checkpoint after each turn (disables rewind and fork)
+        /// Do not checkpoint after each turn (disables rewind and branch)
         #[arg(long)]
         no_checkpoints: bool,
         /// Pause the machine between turns so an idle agent holds no CPU
