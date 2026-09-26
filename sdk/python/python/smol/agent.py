@@ -12,6 +12,7 @@ from typing import Any, Iterator, Optional
 from .errors import InvalidConfigError, NotSupportedError, SmolError
 from .machine import Machine
 from .transport import (
+    CLOUD_START_TIMEOUT_S,
     CLOUD_TIMEOUT_S,
     DEFAULT_CLOUD_URL,
     _cli_config_api_key,
@@ -159,20 +160,20 @@ class AgentSession:
             raise SmolError("CONNECTION", f"agent event stream failed: {error.reason}") from error
 
     def cancel(self, turn: int) -> None:
-        _cloud_fetch(self._url, self._key, "POST", _path(self.name) + f"/turns/{turn}/cancel")
+        _cloud_fetch(self._url, self._key, "POST", _path(self.name) + f"/turns/{turn}/cancel", timeout=CLOUD_START_TIMEOUT_S)
 
     def rewind(self, turn: int) -> dict[str, Any]:
-        return _cloud_fetch(self._url, self._key, "POST", _path(self.name) + "/rewind", json_body={"turn": turn})
+        return _cloud_fetch(self._url, self._key, "POST", _path(self.name) + "/rewind", json_body={"turn": turn}, timeout=CLOUD_START_TIMEOUT_S)
 
     def fork(self, turn: int, name: str) -> "AgentSession":
-        info = _cloud_fetch(self._url, self._key, "POST", _path(self.name) + "/fork", json_body={"turn": turn, "name": name})
+        info = _cloud_fetch(self._url, self._key, "POST", _path(self.name) + "/fork", json_body={"turn": turn, "name": name}, timeout=CLOUD_START_TIMEOUT_S)
         return AgentSession(info["name"], self._url, self._key)
 
     def pause(self) -> None:
-        _cloud_fetch(self._url, self._key, "POST", _path(self.name) + "/pause")
+        _cloud_fetch(self._url, self._key, "POST", _path(self.name) + "/pause", timeout=CLOUD_START_TIMEOUT_S)
 
     def resume(self) -> None:
-        _cloud_fetch(self._url, self._key, "POST", _path(self.name) + "/resume")
+        _cloud_fetch(self._url, self._key, "POST", _path(self.name) + "/resume", timeout=CLOUD_START_TIMEOUT_S)
 
     def delete(self) -> None:
-        _cloud_fetch(self._url, self._key, "DELETE", _path(self.name))
+        _cloud_fetch(self._url, self._key, "DELETE", _path(self.name), timeout=CLOUD_START_TIMEOUT_S)

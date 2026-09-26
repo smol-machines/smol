@@ -681,7 +681,7 @@ const CLOUD_TIMEOUT_MS = 30_000;
 // Starting can include a cold image pull. Keep ordinary API calls short, but
 // give this explicitly long-running operation the same bounded window already
 // used by checkpoint restore.
-const CLOUD_START_TIMEOUT_MS = 30 * 60 * 1_000;
+export const CLOUD_START_TIMEOUT_MS = 30 * 60 * 1_000;
 // Grace before falling back to the guest-agent probe for a machine with no
 // published port: give `ready` time to flip first, so the probe stays a last
 // resort and never preempts a machine legitimately about to become ready.

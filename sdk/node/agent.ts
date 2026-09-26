@@ -1,7 +1,7 @@
 /** Managed agent sessions on smol cloud. The repository/workspace is supplied by the caller. */
 import { InvalidConfigError, SmolError } from "./errors";
 import { Machine } from "./machine";
-import { cloudFetch, resolveCloudConnection, type CloudConn } from "./transport";
+import { CLOUD_START_TIMEOUT_MS, cloudFetch, resolveCloudConnection, type CloudConn } from "./transport";
 import type { ConnectOptions } from "./types";
 import type { components } from "./generated/smolfleet";
 
@@ -120,16 +120,16 @@ export class AgentSession {
   }
 
   async cancel(turn: number): Promise<void> {
-    await cloudFetch(this.conn, "POST", `${path(this.name)}/turns/${turn}/cancel`);
+    await cloudFetch(this.conn, "POST", `${path(this.name)}/turns/${turn}/cancel`, { timeoutMs: CLOUD_START_TIMEOUT_MS });
   }
   rewind(turn: number): Promise<AgentInfo> {
-    return cloudFetch<AgentInfo>(this.conn, "POST", `${path(this.name)}/rewind`, { json: { turn } });
+    return cloudFetch<AgentInfo>(this.conn, "POST", `${path(this.name)}/rewind`, { json: { turn }, timeoutMs: CLOUD_START_TIMEOUT_MS });
   }
   async fork(turn: number, name: string): Promise<AgentSession> {
-    const info = await cloudFetch<AgentInfo>(this.conn, "POST", `${path(this.name)}/fork`, { json: { turn, name } });
+    const info = await cloudFetch<AgentInfo>(this.conn, "POST", `${path(this.name)}/fork`, { json: { turn, name }, timeoutMs: CLOUD_START_TIMEOUT_MS });
     return new AgentSession(info.name, this.conn);
   }
-  async pause(): Promise<void> { await cloudFetch(this.conn, "POST", `${path(this.name)}/pause`); }
-  async resume(): Promise<void> { await cloudFetch(this.conn, "POST", `${path(this.name)}/resume`); }
-  async delete(): Promise<void> { await cloudFetch(this.conn, "DELETE", path(this.name)); }
+  async pause(): Promise<void> { await cloudFetch(this.conn, "POST", `${path(this.name)}/pause`, { timeoutMs: CLOUD_START_TIMEOUT_MS }); }
+  async resume(): Promise<void> { await cloudFetch(this.conn, "POST", `${path(this.name)}/resume`, { timeoutMs: CLOUD_START_TIMEOUT_MS }); }
+  async delete(): Promise<void> { await cloudFetch(this.conn, "DELETE", path(this.name), { timeoutMs: CLOUD_START_TIMEOUT_MS }); }
 }
