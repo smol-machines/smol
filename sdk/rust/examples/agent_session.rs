@@ -1,5 +1,5 @@
 //! Drive an agent session end to end with the model-free `command` harness:
-//! two turns, rewind, fork, pause/resume, delete.
+//! two turns, rewind, branch, pause/resume, delete.
 //!
 //!     cargo run --example agent_session
 use smolmachines::agent::{Harness, Session, SessionOptions};
@@ -35,13 +35,13 @@ fn main() -> smolmachines::Result<()> {
     )?;
     println!("turn 1 -> {:?}", t1.result);
 
-    let fork = session.fork(1, "demo-agent-fork")?;
-    let forked = fork
+    let branch = session.branch(1, "demo-agent-branch")?;
+    let branched = branch
         .machine()?
         .exec(["cat", "/workspace/story.txt"])?
         .stdout_utf8()
         .to_string();
-    println!("fork at turn 1 sees: {:?}", forked.trim());
+    println!("branch at turn 1 sees: {:?}", branched.trim());
 
     let t = std::time::Instant::now();
     session.rewind(0)?;
@@ -68,7 +68,7 @@ fn main() -> smolmachines::Result<()> {
     session.resume()?;
     println!("resumed; state {:?}", session.machine()?.state());
 
-    fork.delete()?;
+    branch.delete()?;
     session.delete()?;
     println!("deleted");
     Ok(())

@@ -13,7 +13,7 @@
 //! POST   /v1/agents/{name}/turns             start a turn  -> 202 {"turn": n}
 //! GET    /v1/agents/{name}/turns/{n}/events  the turn's events (SSE, ?after=K)
 //! POST   /v1/agents/{name}/rewind            {"turn": n}
-//! POST   /v1/agents/{name}/fork              {"turn": n, "name": "new"}
+//! POST   /v1/agents/{name}/branch            {"turn": n, "name": "new"}
 //! POST   /v1/agents/{name}/pause | /resume
 //! DELETE /v1/agents/{name}
 //! ```
@@ -545,23 +545,23 @@ async fn rewind(
 }
 
 #[derive(Deserialize)]
-struct ForkRequest {
+struct BranchRequest {
     turn: usize,
     name: String,
 }
 
-async fn fork(
+async fn branch(
     State(state): State<Shared>,
     headers: HeaderMap,
     Path(name): Path<String>,
-    Json(req): Json<ForkRequest>,
+    Json(req): Json<BranchRequest>,
 ) -> ApiResult<(StatusCode, Json<Value>)> {
     authorize(&state, &headers)?;
     let lock = state.session_lock(&name);
     let record = blocking(move || {
         let _held = lock.lock().unwrap();
         Ok(Session::open(&name)?
-            .fork(req.turn, &req.name)?
+            .branch(req.turn, &req.name)?
             .record()
             .clone())
     })
@@ -618,7 +618,8 @@ pub fn router(token: Option<String>) -> Router {
         .route("/v1/agents/{name}/turns", post(start_turn))
         .route("/v1/agents/{name}/turns/{turn}/events", get(turn_events))
         .route("/v1/agents/{name}/rewind", post(rewind))
-        .route("/v1/agents/{name}/fork", post(fork))
+        .route("/v1/agents/{name}/branch", post(branch))
+        .route("/v1/agents/{name}/fork", post(branch))
         .route("/v1/agents/{name}/pause", post(pause))
         .route("/v1/agents/{name}/resume", post(resume))
         .with_state(state)

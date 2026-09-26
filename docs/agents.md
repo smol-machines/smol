@@ -3,7 +3,7 @@
 `smol agent` runs an agent — Claude Code, Codex, OpenCode, or any program — in its
 own machine as a session of turns. Each turn runs the agent headless and streams what it does;
 the machine keeps its files between turns, and a checkpoint after every turn lets
-you rewind the session or fork it.
+you rewind the session or branch it.
 
 The agent's own conversation lives inside the machine, so a rewind returns its
 memory and its files to the same moment. Nothing about the session depends on
@@ -16,10 +16,12 @@ smol agent send fixer "clone github.com/acme/api into /workspace and make the te
 smol agent send fixer "now add a test for the edge case you found"
 smol agent log fixer                   # turns, with their results
 smol agent rewind fixer 0              # back to right after the first turn
-smol agent fork fixer 1 fixer-alt      # an independent session from turn 1
+smol agent branch fixer 1 fixer-alt    # an independent session from turn 1
 smol agent pause fixer                 # an idle agent holds no CPU; the next send resumes it
 smol agent rm fixer
 ```
+
+The former `smol agent fork` command remains an alias for `branch`.
 
 ## Harnesses
 
@@ -70,7 +72,7 @@ curl -N "localhost:7777/v1/agents/fixer/turns/0/events?after=41" ...          # 
 | `GET /v1/agents`, `GET /v1/agents/{name}` | sessions; the latter includes `runningTurn` |
 | `POST /v1/agents/{name}/turns` | start a turn (`prompt`, `env`) → `202 {"turn": n}`; `409` while one runs |
 | `GET /v1/agents/{name}/turns/{n}/events?after=K` | the turn's events as SSE (`event` per agent event, `id` = its number, then `done`) |
-| `POST /v1/agents/{name}/rewind` / `fork` / `pause` / `resume`, `DELETE /v1/agents/{name}` | as the CLI |
+| `POST /v1/agents/{name}/rewind` / `branch` / `pause` / `resume`, `DELETE /v1/agents/{name}` | as the CLI |
 
 The service refuses to listen beyond loopback without a token. Two things to know
 before sharing one:
@@ -107,5 +109,5 @@ session.rewind(0)?;
 - On smol cloud, or with `key_outside_machine` off, the key is passed to each
   turn's process environment instead. It is never written to the machine's
   configuration or the session record, but the agent can read it while it runs.
-- Rewinding or forking restores a checkpoint into a new machine. Pausing such a
+- Rewinding or branching restores a checkpoint into a new machine. Pausing such a
   machine and resuming it needs smolvm with the resume-after-restore fix.
