@@ -162,7 +162,7 @@ const turn = await agent.send('Fix the failing tests', { idempotencyKey: 'task-1
 for await (const event of agent.events(turn)) console.log(event);
 ```
 
-Call `info()` to check setup and turn status, `cancel()` to stop a running turn, and `rewind()` or `fork()` after a checkpointed turn. `AgentSession` is cloud-only; the `Machine` API below works locally or on cloud.
+Call `info()` to check setup and turn status, `cancel()` to stop a running turn, and `rewind()` or `branch()` after a checkpointed turn. `AgentSession` is cloud-only; the `Machine` API below works locally or on cloud.
 
 ### Machines
 

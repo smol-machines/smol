@@ -85,13 +85,18 @@ impl CloudAgentSession {
         Ok(self.client.rewind_agent(&self.name, turn)?)
     }
 
-    /// Fork a new session from a checkpointed turn.
-    pub fn fork(&self, turn: u64, name: &str) -> Result<Self> {
-        let info = self.client.fork_agent(&self.name, turn, name)?;
+    /// Branch a new session from a checkpointed turn.
+    pub fn branch(&self, turn: u64, name: &str) -> Result<Self> {
+        let info = self.client.branch_agent(&self.name, turn, name)?;
         Ok(Self {
             client: self.client.clone(),
             name: info.name,
         })
+    }
+
+    /// Compatibility alias for [`Self::branch`].
+    pub fn fork(&self, turn: u64, name: &str) -> Result<Self> {
+        self.branch(turn, name)
     }
 
     /// Pause an idle session's machine.

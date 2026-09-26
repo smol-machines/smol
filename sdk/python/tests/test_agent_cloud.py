@@ -15,6 +15,8 @@ turn = {"index": 0, "prompt": "fix tests", "status": "done", "isError": False, "
 
 
 class Handler(BaseHTTPRequestHandler):
+    legacy_only = False
+
     def log_message(self, *args):
         pass
 
@@ -42,7 +44,10 @@ class Handler(BaseHTTPRequestHandler):
             self._reply({"id": "mach-1", "name": "fixer-vm"})
         elif self.path == "/v1/agents/fixer/turns":
             self._reply({"turn": 0})
-        elif self.path == "/v1/agents/fixer/fork":
+        elif self.path == "/v1/agents/fixer/branch" and self.legacy_only:
+            self.send_response(404)
+            self.end_headers()
+        elif self.path in ("/v1/agents/fixer/branch", "/v1/agents/fixer/fork"):
             self._reply({**info, "name": "alternative"})
         elif self.path == "/v1/agents" and self.command == "GET":
             self._reply({"items": [info]})
@@ -69,7 +74,12 @@ def test_agent_cloud_contract():
         events = list(session.events(0))
         assert [event["type"] for event in events] == ["event", "done"]
         assert events[0]["id"] == 7
+        assert session.branch(0, "alternative").name == "alternative"
         assert session.fork(0, "alternative").name == "alternative"
+        assert sum(item[1] == "/v1/agents/fixer/branch" for item in seen) == 2
+        Handler.legacy_only = True
+        assert session.branch(0, "alternative").name == "alternative"
+        assert sum(item[1] == "/v1/agents/fixer/fork" for item in seen) == 1
         session.cancel(0)
         session.pause()
         session.resume()
@@ -78,6 +88,7 @@ def test_agent_cloud_contract():
         assert json.loads(seen[0][2])["credential"] == "anthropic"
         assert all(item[1].startswith("/v1/agents") or item[1] == "/v1/machines/mach-1" for item in seen)
     finally:
+        Handler.legacy_only = False
         server.shutdown()
         server.server_close()
         worker.join()

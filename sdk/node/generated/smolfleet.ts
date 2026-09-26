@@ -164,6 +164,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/agents/{name}/branch": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["agent_branch"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/agents/{name}/fork": {
         parameters: {
             query?: never;
@@ -1422,7 +1438,7 @@ export interface components {
             tenantId: string;
         };
         /** @description Start a new session `name` from the state right after `turn`. */
-        AgentForkRequest: {
+        AgentBranchRequest: {
             name: string;
             /** Format: int64 */
             turn: number;
@@ -3172,6 +3188,33 @@ export interface operations {
             };
         };
     };
+    agent_branch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Session name */
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AgentBranchRequest"];
+            };
+        };
+        responses: {
+            /** @description New session from the state right after the turn */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentInfo"];
+                };
+            };
+        };
+    };
     agent_fork: {
         parameters: {
             query?: never;
@@ -3184,11 +3227,11 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["AgentForkRequest"];
+                "application/json": components["schemas"]["AgentBranchRequest"];
             };
         };
         responses: {
-            /** @description New session from the state right after the turn */
+            /** @description Compatibility alias for branch */
             201: {
                 headers: {
                     [name: string]: unknown;

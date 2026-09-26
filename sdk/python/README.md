@@ -317,7 +317,7 @@ existing.wait_until_ready()
 
 ### Managed agents on smol cloud
 
-`AgentSession` runs a harness in a persistent cloud machine, records turn events, and supports rewind and fork after checkpointed turns. Setup runs in the background; check `info()["status"] == "ready"` before sending. The application still stages its repository in `/workspace` through the machine API.
+`AgentSession` runs a harness in a persistent cloud machine, records turn events, and supports rewind and branch after checkpointed turns. Setup runs in the background; check `info()["status"] == "ready"` before sending. The application still stages its repository in `/workspace` through the machine API.
 
 ```python
 import time
@@ -334,7 +334,7 @@ for event in agent.events(turn):
     print(event)
 ```
 
-Use `cancel()`, `rewind()`, `fork()`, `pause()`, `resume()`, and `delete()` for the session lifecycle. `AgentSession` is cloud-only.
+Use `cancel()`, `rewind()`, `branch()`, `pause()`, `resume()`, and `delete()` for the session lifecycle. `AgentSession` is cloud-only.
 
 ### Machines
 

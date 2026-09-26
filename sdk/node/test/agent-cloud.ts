@@ -4,6 +4,7 @@ import type { AddressInfo } from "node:net";
 import { AgentSession } from "../index";
 
 const calls: { method: string; path: string; body: string; key?: string }[] = [];
+let legacyOnly = false;
 const info = { name: "fixer", harness: "claude-code", status: "ready", machineId: "mach-1", turns: [], createdAt: "2026-01-01T00:00:00Z" };
 const turn = { index: 0, prompt: "fix tests", status: "done", isError: false, checkpointed: true, startedAt: "2026-01-01T00:00:00Z" };
 const server = createServer(async (request, response) => {
@@ -19,7 +20,8 @@ const server = createServer(async (request, response) => {
     response.end(`event: done\ndata: ${JSON.stringify(turn)}\n\n`);
   } else if (path === "/v1/machines/mach-1") json({ id: "mach-1", name: "fixer-vm" });
   else if (path === "/v1/agents/fixer/turns") json({ turn: 0 });
-  else if (path === "/v1/agents/fixer/fork") json({ ...info, name: "alternative" });
+  else if (path === "/v1/agents/fixer/branch" && legacyOnly) { response.statusCode = 404; json({ code: "NOT_FOUND", error: "route not found" }); }
+  else if (path === "/v1/agents/fixer/branch" || path === "/v1/agents/fixer/fork") json({ ...info, name: "alternative" });
   else if (path === "/v1/agents") json(request.method === "GET" ? { items: [info] } : info);
   else if (request.method === "DELETE" || path.endsWith("/cancel") || path.endsWith("/pause") || path.endsWith("/resume")) { response.statusCode = 204; response.end(); }
   else json(info);
@@ -38,7 +40,12 @@ server.listen(0, "127.0.0.1", async () => {
     for await (const event of session.events(0)) events.push(event);
     assert.deepEqual(events.map((event) => event.type), ["event", "done"]);
     assert.equal(events[0].type === "event" && events[0].id, 7);
+    assert.equal((await session.branch(0, "alternative")).name, "alternative");
     assert.equal((await session.fork(0, "alternative")).name, "alternative");
+    assert.equal(calls.filter((call) => call.path === "/v1/agents/fixer/branch").length, 2);
+    legacyOnly = true;
+    assert.equal((await session.branch(0, "alternative")).name, "alternative");
+    assert.equal(calls.filter((call) => call.path === "/v1/agents/fixer/fork").length, 1);
     await session.cancel(0);
     await session.pause();
     await session.resume();

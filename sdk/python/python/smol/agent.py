@@ -165,9 +165,19 @@ class AgentSession:
     def rewind(self, turn: int) -> dict[str, Any]:
         return _cloud_fetch(self._url, self._key, "POST", _path(self.name) + "/rewind", json_body={"turn": turn}, timeout=CLOUD_START_TIMEOUT_S)
 
-    def fork(self, turn: int, name: str) -> "AgentSession":
-        info = _cloud_fetch(self._url, self._key, "POST", _path(self.name) + "/fork", json_body={"turn": turn, "name": name}, timeout=CLOUD_START_TIMEOUT_S)
+    def branch(self, turn: int, name: str) -> "AgentSession":
+        body = {"turn": turn, "name": name}
+        try:
+            info = _cloud_fetch(self._url, self._key, "POST", _path(self.name) + "/branch", json_body=body, timeout=CLOUD_START_TIMEOUT_S)
+        except SmolError as error:
+            if error.code != "NOT_FOUND":
+                raise
+            info = _cloud_fetch(self._url, self._key, "POST", _path(self.name) + "/fork", json_body=body, timeout=CLOUD_START_TIMEOUT_S)
         return AgentSession(info["name"], self._url, self._key)
+
+    def fork(self, turn: int, name: str) -> "AgentSession":
+        """Compatibility alias for branch."""
+        return self.branch(turn, name)
 
     def pause(self) -> None:
         _cloud_fetch(self._url, self._key, "POST", _path(self.name) + "/pause", timeout=CLOUD_START_TIMEOUT_S)

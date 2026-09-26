@@ -275,7 +275,26 @@ impl Client {
         )
     }
 
-    /// Fork an independent session from a checkpointed turn.
+    /// Branch an independent session from a checkpointed turn.
+    pub fn branch_agent(&self, name: &str, turn: u64, new_name: &str) -> Result<Agent> {
+        let body = serde_json::json!({"turn":turn,"name":new_name});
+        match self.json(
+            reqwest::Method::POST,
+            &format!("/v1/agents/{}/branch", agent_segment(name)),
+            Body::Json(body.clone()),
+            START_TIMEOUT,
+        ) {
+            Err(error) if error.kind() == ErrorKind::NotFound => self.json(
+                reqwest::Method::POST,
+                &format!("/v1/agents/{}/fork", agent_segment(name)),
+                Body::Json(body),
+                START_TIMEOUT,
+            ),
+            result => result,
+        }
+    }
+
+    /// Compatibility alias for the former agent operation.
     pub fn fork_agent(&self, name: &str, turn: u64, new_name: &str) -> Result<Agent> {
         self.json(
             reqwest::Method::POST,

@@ -125,10 +125,19 @@ export class AgentSession {
   rewind(turn: number): Promise<AgentInfo> {
     return cloudFetch<AgentInfo>(this.conn, "POST", `${path(this.name)}/rewind`, { json: { turn }, timeoutMs: CLOUD_START_TIMEOUT_MS });
   }
-  async fork(turn: number, name: string): Promise<AgentSession> {
-    const info = await cloudFetch<AgentInfo>(this.conn, "POST", `${path(this.name)}/fork`, { json: { turn, name }, timeoutMs: CLOUD_START_TIMEOUT_MS });
+  async branch(turn: number, name: string): Promise<AgentSession> {
+    const options = { json: { turn, name }, timeoutMs: CLOUD_START_TIMEOUT_MS };
+    let info: AgentInfo;
+    try {
+      info = await cloudFetch<AgentInfo>(this.conn, "POST", `${path(this.name)}/branch`, options);
+    } catch (error) {
+      if (!(error instanceof SmolError) || error.code !== "NOT_FOUND") throw error;
+      info = await cloudFetch<AgentInfo>(this.conn, "POST", `${path(this.name)}/fork`, options);
+    }
     return new AgentSession(info.name, this.conn);
   }
+  /** Compatibility alias for branch. */
+  fork(turn: number, name: string): Promise<AgentSession> { return this.branch(turn, name); }
   async pause(): Promise<void> { await cloudFetch(this.conn, "POST", `${path(this.name)}/pause`, { timeoutMs: CLOUD_START_TIMEOUT_MS }); }
   async resume(): Promise<void> { await cloudFetch(this.conn, "POST", `${path(this.name)}/resume`, { timeoutMs: CLOUD_START_TIMEOUT_MS }); }
   async delete(): Promise<void> { await cloudFetch(this.conn, "DELETE", path(this.name), { timeoutMs: CLOUD_START_TIMEOUT_MS }); }

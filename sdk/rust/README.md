@@ -73,7 +73,7 @@ The default still waits for service readiness. Local creation still requires
 
 ### Managed agents on smol cloud
 
-`CloudAgentSession` drives the hosted `/v1/agents` lifecycle, including background turns, replayable events, cancellation, rewind, and fork. This is separate from the local `agent::Session` API.
+`CloudAgentSession` drives the hosted `/v1/agents` lifecycle, including background turns, replayable events, cancellation, rewind, and branch. This is separate from the local `agent::Session` API.
 
 ```rust
 use smolmachines::{cloud_agent::CloudAgentSession, smol_cloud::types::{CreateAgent, SendAgentTurn}, ConnectOptions};
