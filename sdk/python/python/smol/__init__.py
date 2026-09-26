@@ -73,6 +73,7 @@ from .device_handoff import (
     publish_device_adapter,
 )
 from .machine import Episode, Machine
+from .agent import AgentSession
 from .rollout import RolloutClient, RolloutError, adapter_sha256
 from .types import (
     ConnectOptions,
@@ -94,6 +95,7 @@ __version__ = "1.19.0"
 
 __all__ = [
     "Machine",
+    "AgentSession",
     "AsyncMachine",
     "Episode",
     "AsyncEpisode",

@@ -97,6 +97,538 @@
         }
       }
     },
+    "/v1/account/attribution": {
+      "post": {
+        "tags": [
+          "billing"
+        ],
+        "operationId": "account_attribution",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SignupAttribution"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Whether the attribution was stored. False when the tenant already has one, is not a new account, or the report held nothing usable.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SignupAttributionResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/account/plan": {
+      "post": {
+        "tags": [
+          "billing"
+        ],
+        "operationId": "account_plan_change",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChangePlanRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "The plan now in effect",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlanInfo"
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "The plan's monthly fee has no saved card to bill, or the card was declined"
+          },
+          "409": {
+            "description": "Current usage exceeds the target plan's limits"
+          },
+          "422": {
+            "description": "That plan is not self-serve"
+          },
+          "503": {
+            "description": "Paid plans are not enabled on this deployment"
+          }
+        }
+      }
+    },
+    "/v1/account/plans": {
+      "get": {
+        "tags": [
+          "billing"
+        ],
+        "operationId": "account_plans_list",
+        "responses": {
+          "200": {
+            "description": "Plans this tenant may switch to itself",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AvailablePlansResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/agents": {
+      "get": {
+        "tags": [
+          "agents"
+        ],
+        "operationId": "agent_list",
+        "parameters": [
+          {
+            "name": "after",
+            "in": "query",
+            "description": "Last session name from the previous page",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Page size, 1-100 (default 20)",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Paginated agent session summaries",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentListPage"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "agents"
+        ],
+        "operationId": "agent_create",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateAgentRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "Session created; its machine and harness are set up in the background (status `starting`, then `ready` or `failed`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentInfo"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "A session with that name exists"
+          }
+        }
+      }
+    },
+    "/v1/agents/{name}": {
+      "get": {
+        "tags": [
+          "agents"
+        ],
+        "operationId": "agent_get",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "description": "Session name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Session with its turns",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentInfo"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "agents"
+        ],
+        "operationId": "agent_delete",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "description": "Session name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Session, machine and unshared checkpoints deleted"
+          }
+        }
+      }
+    },
+    "/v1/agents/{name}/branch": {
+      "post": {
+        "tags": [
+          "agents"
+        ],
+        "operationId": "agent_branch",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "description": "Session name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AgentBranchRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "New session from the state right after the turn",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentInfo"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/agents/{name}/fork": {
+      "post": {
+        "tags": [
+          "agents"
+        ],
+        "operationId": "agent_fork",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "description": "Session name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AgentBranchRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Compatibility alias for branch",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentInfo"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/agents/{name}/pause": {
+      "post": {
+        "tags": [
+          "agents"
+        ],
+        "operationId": "agent_pause",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "description": "Session name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Paused; the next turn resumes it"
+          }
+        }
+      }
+    },
+    "/v1/agents/{name}/resume": {
+      "post": {
+        "tags": [
+          "agents"
+        ],
+        "operationId": "agent_resume",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "description": "Session name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Resumed"
+          }
+        }
+      }
+    },
+    "/v1/agents/{name}/rewind": {
+      "post": {
+        "tags": [
+          "agents"
+        ],
+        "operationId": "agent_rewind",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "description": "Session name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AgentRewindRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Session restored to the state right after the turn",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentInfo"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/agents/{name}/turns": {
+      "post": {
+        "tags": [
+          "agents"
+        ],
+        "operationId": "agent_turn_send",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "description": "Session name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "Retry the same turn without running it twice; a different request using the same key conflicts",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SendAgentTurnRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "Turn started; it runs whether or not a client stays connected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentTurnAccepted"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "A turn is already running, or the session is not ready"
+          }
+        }
+      }
+    },
+    "/v1/agents/{name}/turns/{turn}/cancel": {
+      "post": {
+        "tags": [
+          "agents"
+        ],
+        "operationId": "agent_turn_cancel",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "description": "Session name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "turn",
+            "in": "path",
+            "description": "Running turn number",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Turn cancelled and its machine stopped; the next turn restarts it"
+          },
+          "409": {
+            "description": "Turn is not running"
+          }
+        }
+      }
+    },
+    "/v1/agents/{name}/turns/{turn}/events": {
+      "get": {
+        "tags": [
+          "agents"
+        ],
+        "operationId": "agent_turn_events",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "description": "Session name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "turn",
+            "in": "path",
+            "description": "Turn number",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "after",
+            "in": "query",
+            "description": "Replay only events numbered above this",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "text/event-stream: an `event` per agent event (`id` = its number), then `done` with the finished turn"
+          }
+        }
+      }
+    },
     "/v1/apikeys": {
       "get": {
         "tags": [
@@ -257,6 +789,38 @@
       }
     },
     "/v1/checkpoints/{id}": {
+      "get": {
+        "tags": [
+          "checkpoints"
+        ],
+        "operationId": "portable_checkpoint_get",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Portable checkpoint id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Capture status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PortableCheckpointInfo"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found"
+          }
+        }
+      },
       "delete": {
         "tags": [
           "checkpoints"
@@ -306,6 +870,9 @@
           },
           "404": {
             "description": "Not found"
+          },
+          "409": {
+            "description": "Checkpoint is not available"
           }
         }
       }
@@ -350,6 +917,98 @@
           },
           "409": {
             "description": "Checkpoint is not available"
+          }
+        }
+      }
+    },
+    "/v1/credentials": {
+      "get": {
+        "tags": [
+          "credentials"
+        ],
+        "operationId": "credential_list",
+        "responses": {
+          "200": {
+            "description": "Stored credentials, without their values",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/CredentialInfo"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/credentials/{name}": {
+      "put": {
+        "tags": [
+          "credentials"
+        ],
+        "operationId": "credential_set",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "description": "Credential name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetCredentialRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Stored; machines bound to it use the new value from their next boot",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CredentialInfo"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid name, variable, hosts or value"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "credentials"
+        ],
+        "operationId": "credential_delete",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "description": "Credential name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted"
+          },
+          "404": {
+            "description": "Not found"
           }
         }
       }
@@ -729,7 +1388,7 @@
           "required": true
         },
         "responses": {
-          "200": {
+          "201": {
             "description": "Child created",
             "content": {
               "application/json": {
@@ -770,7 +1429,7 @@
           "required": true
         },
         "responses": {
-          "200": {
+          "201": {
             "description": "Children created",
             "content": {
               "application/json": {
@@ -830,11 +1489,30 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "wait",
+            "in": "query",
+            "description": "Defaults to true. False accepts a background capture; poll checkpoint status before restore.",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
           }
         ],
         "responses": {
           "201": {
             "description": "Portable checkpoint captured",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PortableCheckpointInfo"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Capture accepted, not yet durable",
             "content": {
               "application/json": {
                 "schema": {
@@ -988,11 +1666,112 @@
         },
         "responses": {
           "200": {
-            "description": "Command result",
+            "description": "Command result. Buffered JSON by default; with `stream: true` in the body the response is an SSE stream of `event: stdout|stderr|error|exit` frames instead, terminated by `exit` carrying `{\"exitCode\": N}`.",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/MachineExecResponse"
+                }
+              },
+              "text/event-stream": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/machines/{id}/exec/interactive": {
+      "get": {
+        "tags": [
+          "machines"
+        ],
+        "operationId": "machine_exec_interactive",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Machine id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "command",
+            "in": "query",
+            "description": "Program to run (default: the image shell)",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "cols",
+            "in": "query",
+            "description": "Initial terminal width",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "rows",
+            "in": "query",
+            "description": "Initial terminal height",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "101": {
+            "description": "Switching to a PTY WebSocket. Binary frames carry terminal bytes in both directions; JSON text frames carry resize and exit control. Browsers cannot set an Authorization header on a WebSocket, so this route also accepts `?access_token=`."
+          }
+        }
+      }
+    },
+    "/v1/machines/{id}/exec/stream": {
+      "post": {
+        "tags": [
+          "machines"
+        ],
+        "operationId": "machine_exec_stream",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Machine id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MachineCommandRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Command output as Server-Sent Events, written as it is produced and never truncated. Frames are `event: stdout|stderr|error|exit` with `data:` lines; the terminal `exit` frame carries `{\"exitCode\": N}`. Identical to `POST /v1/machines/{id}/exec` with `stream: true` — a dedicated path for clients that route by URL rather than by request body.",
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "type": "string"
                 }
               }
             }
@@ -1143,7 +1922,7 @@
           "required": true
         },
         "responses": {
-          "200": {
+          "201": {
             "description": "Clone created",
             "content": {
               "application/json": {
@@ -1184,12 +1963,43 @@
           "required": true
         },
         "responses": {
-          "200": {
+          "201": {
             "description": "Clones created",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ForkBatchResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/machines/{id}/lineage": {
+      "get": {
+        "tags": [
+          "machines"
+        ],
+        "operationId": "machine_lineage",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Machine id in the lineage",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Complete branch lineage",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MachineLineage"
                 }
               }
             }
@@ -1224,6 +2034,74 @@
                 }
               }
             }
+          }
+        }
+      }
+    },
+    "/v1/machines/{id}/pause": {
+      "post": {
+        "tags": [
+          "machines"
+        ],
+        "operationId": "machine_pause",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Machine id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Execution saved durably and machine paused",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MachineInfo"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Machine cannot be paused in its current state"
+          }
+        }
+      }
+    },
+    "/v1/machines/{id}/resume": {
+      "post": {
+        "tags": [
+          "machines"
+        ],
+        "operationId": "machine_resume",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Machine id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Saved execution resumed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MachineInfo"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "No durable saved execution is ready"
           }
         }
       }
@@ -1494,6 +2372,50 @@
         }
       }
     },
+    "/v1/machines/{id}/tunnel/{port}": {
+      "get": {
+        "tags": [
+          "machines"
+        ],
+        "operationId": "machine_tunnel",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Tenant-owned running machine id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "port",
+            "in": "path",
+            "description": "Published guest TCP port",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "101": {
+            "description": "Binary WebSocket frames carry raw TCP bytes; requires machine:exec scope"
+          },
+          "403": {
+            "description": "Missing machine:exec scope"
+          },
+          "404": {
+            "description": "Machine or published port not found"
+          },
+          "503": {
+            "description": "Machine is not running"
+          }
+        }
+      }
+    },
     "/v1/machines/{id}/usage": {
       "get": {
         "tags": [
@@ -1598,6 +2520,30 @@
         }
       }
     },
+    "/v1/nodes/{id}/cordon": {
+      "post": {
+        "tags": [
+          "nodes"
+        ],
+        "operationId": "node_cordon",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Node id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "No new placements land on the node; what runs on it is untouched"
+          }
+        }
+      }
+    },
     "/v1/nodes/{id}/credential": {
       "delete": {
         "tags": [
@@ -1666,6 +2612,30 @@
         "responses": {
           "200": {
             "description": "Heartbeat accepted"
+          }
+        }
+      }
+    },
+    "/v1/nodes/{id}/uncordon": {
+      "post": {
+        "tags": [
+          "nodes"
+        ],
+        "operationId": "node_uncordon",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Node id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Operator cordon lifted"
           }
         }
       }
@@ -1754,6 +2724,50 @@
                 }
               }
             }
+          }
+        }
+      }
+    },
+    "/v1/plans/{id}": {
+      "patch": {
+        "tags": [
+          "plans"
+        ],
+        "operationId": "plan_update",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Plan id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdatePlanRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Plan updated; applies from the next machine create",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlanInfo"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Plan not found"
           }
         }
       }
@@ -1853,6 +2867,26 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/PublicPricing"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/status/machines": {
+      "get": {
+        "tags": [
+          "usage"
+        ],
+        "operationId": "machine_stats_get",
+        "responses": {
+          "200": {
+            "description": "Lifetime count of machines started by customers",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PublicMachineStats"
                 }
               }
             }
@@ -2218,6 +3252,7 @@
           "status",
           "effectiveMaxCpus",
           "effectiveMaxMemoryMb",
+          "effectiveMaxDiskGb",
           "effectiveMaxMachines",
           "periodUsage",
           "periodCost"
@@ -2234,6 +3269,12 @@
           "effectiveMaxCpus": {
             "type": "integer",
             "format": "int32",
+            "minimum": 0
+          },
+          "effectiveMaxDiskGb": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Largest disk (GB) one machine may request on this account.",
             "minimum": 0
           },
           "effectiveMaxMachines": {
@@ -2287,6 +3328,239 @@
           },
           "tenantId": {
             "type": "string"
+          }
+        }
+      },
+      "AgentBranchRequest": {
+        "type": "object",
+        "description": "Start a new session `name` from the state right after `turn`.",
+        "required": [
+          "turn",
+          "name"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "turn": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          }
+        }
+      },
+      "AgentInfo": {
+        "type": "object",
+        "description": "A managed agent session.",
+        "required": [
+          "name",
+          "harness",
+          "status",
+          "turns",
+          "createdAt"
+        ],
+        "properties": {
+          "createdAt": {
+            "type": "string"
+          },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "harness": {
+            "type": "string"
+          },
+          "machineId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The machine the session currently runs on (it changes on rewind)."
+          },
+          "model": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "name": {
+            "type": "string"
+          },
+          "runningTurn": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "The turn in progress, if any.",
+            "minimum": 0
+          },
+          "status": {
+            "type": "string",
+            "description": "`starting` during setup, `turning` during a turn, `cancelling`,\n`rewinding`, `forking`, `pausing`, `resuming`, `ready`, `deleting`, or\n`failed`; stale work may read as `interrupted`."
+          },
+          "turns": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AgentTurnInfo"
+            }
+          }
+        }
+      },
+      "AgentListPage": {
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AgentSummary"
+            }
+          },
+          "nextCursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "AgentRewindRequest": {
+        "type": "object",
+        "description": "Return a session to the state right after `turn`.",
+        "required": [
+          "turn"
+        ],
+        "properties": {
+          "turn": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          }
+        }
+      },
+      "AgentSummary": {
+        "type": "object",
+        "description": "A session entry for the paginated list. Turn history is fetched from the\nsession detail rather than repeated for every session in the account.",
+        "required": [
+          "name",
+          "harness",
+          "status",
+          "createdAt"
+        ],
+        "properties": {
+          "createdAt": {
+            "type": "string"
+          },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "harness": {
+            "type": "string"
+          },
+          "machineId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "model": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "name": {
+            "type": "string"
+          },
+          "runningTurn": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
+          },
+          "status": {
+            "type": "string"
+          }
+        }
+      },
+      "AgentTurnAccepted": {
+        "type": "object",
+        "description": "A turn that was accepted and is running.",
+        "required": [
+          "turn"
+        ],
+        "properties": {
+          "turn": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          }
+        }
+      },
+      "AgentTurnInfo": {
+        "type": "object",
+        "description": "One turn of a managed agent session.",
+        "required": [
+          "index",
+          "prompt",
+          "status",
+          "isError",
+          "checkpointed",
+          "startedAt"
+        ],
+        "properties": {
+          "checkpointed": {
+            "type": "boolean",
+            "description": "Whether the session can be rewound or branched to this turn."
+          },
+          "costUsd": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "What the turn cost at the model provider, when the harness reports it."
+          },
+          "finishedAt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "index": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "isError": {
+            "type": "boolean"
+          },
+          "prompt": {
+            "type": "string"
+          },
+          "result": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The agent's final answer, or why the turn failed."
+          },
+          "startedAt": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "description": "`preparing`, `running`, `cancelling`, `cancelled`, `done`, `failed`, or `interrupted`."
           }
         }
       },
@@ -2384,6 +3658,46 @@
           }
         }
       },
+      "AvailablePlansResponse": {
+        "type": "object",
+        "description": "The plan a tenant is on, and the ones it may move to itself.",
+        "required": [
+          "available"
+        ],
+        "properties": {
+          "available": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PlanInfo"
+            },
+            "description": "Every self-serve plan, cheapest first. Includes the current plan when\nthat is itself self-serve, so a client can render the whole ladder."
+          },
+          "current": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/PlanInfo",
+                "description": "The tenant's current plan, if it has one."
+              }
+            ]
+          }
+        }
+      },
+      "ChangePlanRequest": {
+        "type": "object",
+        "description": "Ask to move this tenant onto a different plan. Only plans whose\n`self_serve` flag is set may be chosen; operator tiers are assigned by an\nadmin.",
+        "required": [
+          "planId"
+        ],
+        "properties": {
+          "planId": {
+            "type": "string",
+            "description": "Plan id to move onto, e.g. `plan-startup-paid`."
+          }
+        }
+      },
       "CheckpointState": {
         "type": "string",
         "description": "User-visible state of a live-RAM checkpoint.",
@@ -2405,6 +3719,26 @@
           "uptimeSecs"
         ],
         "properties": {
+          "apiVersion": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Version of the public control-plane contract.",
+            "minimum": 0
+          },
+          "buildSha": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Source revision injected by the release pipeline, when available."
+          },
+          "capabilities": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Stable feature identifiers clients and deployment checks can gate on."
+          },
           "clusterId": {
             "type": "string"
           },
@@ -2532,6 +3866,97 @@
           }
         }
       },
+      "CreateAgentRequest": {
+        "type": "object",
+        "description": "Start a managed agent session: a harness (Claude Code, Codex, OpenCode, or\nany program) in its own machine, driven as a sequence of turns.",
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "allowHosts": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Hosts the agent may reach beyond its model provider and package registry.\nThe `command` harness has neither, so callers must name hosts or\nexplicitly opt into unrestricted outbound access."
+          },
+          "arch": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "`amd64` or `arm64`. A session with checkpoints runs on amd64 unless\npinned here."
+          },
+          "checkpoints": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Checkpoint after every turn so the session can be rewound or branched\n(default true)."
+          },
+          "cpus": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "vCPUs (default 2).",
+            "minimum": 0
+          },
+          "credential": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "A stored credential holding the model API key. The session's machine then\nnever holds the key: the agent sees a placeholder and the node\nsubstitutes the key on requests to the provider, so turns need no key in\ntheir `env`. Its variable must be the one the harness reads (e.g.\n`ANTHROPIC_API_KEY`) and its hosts must include the provider's."
+          },
+          "harness": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "`claude-code` (default), `codex`, `opencode`, or `command`."
+          },
+          "image": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Image for the `command` harness."
+          },
+          "memoryMb": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "Memory in MiB (default 2048).",
+            "minimum": 0
+          },
+          "model": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Model: optional for `codex`, required as `provider/model` for `opencode`."
+          },
+          "name": {
+            "type": "string",
+            "description": "Session name, unique within the account."
+          },
+          "openNetwork": {
+            "type": "boolean",
+            "description": "Allow all outbound traffic instead of the host allow-list."
+          },
+          "program": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Program for the `command` harness; the prompt is appended."
+          }
+        }
+      },
       "CreateApiKeyRequest": {
         "type": "object",
         "properties": {
@@ -2588,6 +4013,13 @@
               "type": "string"
             },
             "description": "Optional workload command (argv) that overrides the source image's or\n`.smolmachine` artifact's own entrypoint+cmd when the machine starts, so a\ndeploy of an off-the-shelf image can say what to run/serve. Empty (default)\n= use the source's own entrypoint, preserving prior behavior."
+          },
+          "credentials": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Names of stored credentials this machine binds. Each gives the guest a\nplaceholder in the credential's variable; the node substitutes the value\nonly on HTTPS requests to the credential's hosts, so the machine never\nholds it."
           },
           "env": {
             "type": "object",
@@ -2719,6 +4151,15 @@
             "format": "int32",
             "minimum": 0
           },
+          "maxDiskGb": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Largest disk (GB) one machine may request; omitted = platform maximum.",
+            "minimum": 0
+          },
           "maxEgressGb": {
             "type": [
               "integer",
@@ -2848,6 +4289,37 @@
             "type": "integer",
             "format": "int64",
             "minimum": 0
+          }
+        }
+      },
+      "CredentialInfo": {
+        "type": "object",
+        "description": "A stored credential, without its value.",
+        "required": [
+          "name",
+          "envVar",
+          "hosts",
+          "createdAt",
+          "updatedAt"
+        ],
+        "properties": {
+          "createdAt": {
+            "type": "string"
+          },
+          "envVar": {
+            "type": "string"
+          },
+          "hosts": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "name": {
+            "type": "string"
+          },
+          "updatedAt": {
+            "type": "string"
           }
         }
       },
@@ -3051,6 +4523,10 @@
         "type": "object",
         "description": "Request to branch a running source into many children in one call. The\noperation is transactional: if any child fails, every child is rolled back.",
         "properties": {
+          "branchable": {
+            "type": "boolean",
+            "description": "Let every child become another branch source."
+          },
           "count": {
             "type": "integer",
             "format": "int32",
@@ -3340,6 +4816,13 @@
             ],
             "format": "int64",
             "minimum": 0
+          },
+          "user": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Run as this user (image user name or `uid[:gid]`), overriding the image's USER."
           }
         }
       },
@@ -3378,7 +4861,8 @@
             ]
           },
           "stream": {
-            "type": "boolean"
+            "type": "boolean",
+            "description": "Stream stdout and stderr as Server-Sent Events instead of buffering the\nwhole run into one JSON body. The response is then `text/event-stream`,\nnot `MachineExecResponse`: frames are `event: stdout|stderr|error|exit`\nwith `data:` lines, and the terminal `exit` frame carries\n`{\"exitCode\": N}`. Streamed output is not capped, so this is the right\npath for long-running or high-volume commands."
           },
           "timeoutSeconds": {
             "type": [
@@ -3387,6 +4871,13 @@
             ],
             "format": "int64",
             "minimum": 0
+          },
+          "user": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Run as this user: a name from the image or a numeric `uid[:gid]`,\noverriding the image's USER. Forwarded to the machine's runtime; an\nolder runtime that cannot honour it rejects the request rather than\nrunning the command as the wrong account."
           }
         }
       },
@@ -3435,6 +4926,13 @@
           },
           "stdoutTruncated": {
             "type": "boolean"
+          },
+          "user": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The user the command was run as, echoed back when the request set one.\nA client that asked for a user and does not see it here is talking to a\ncontrol plane that predates the field and dropped it — which the\nclient must treat as an error, never as \"ran as the default account\"."
           }
         }
       },
@@ -3582,7 +5080,7 @@
               "string",
               "null"
             ],
-            "description": "When the machine first became [`Self::ready`] (RFC3339), or `null` if not\nyet ready. Monotonic: once set it isn't cleared until a stop/restart."
+            "description": "When a probe first observed this machine serving (RFC3339), or `null`.\n\nThis is a readiness gate, not a boot timestamp: it is stamped when the\npublished port accepts a connection (or, for a machine with no published\nports, when its guest agent answers), and it is cleared on every stop so\na restart must re-prove itself. A short-lived machine may finish its\nwhole life as `null` here without anything being wrong. Use `createdAt`\nif you want when the machine came into existence."
           },
           "resources": {
             "$ref": "#/components/schemas/MachineResources"
@@ -3630,6 +5128,25 @@
               "string",
               "null"
             ]
+          }
+        }
+      },
+      "MachineLineage": {
+        "type": "object",
+        "description": "One complete live branch lineage, suitable for rendering as a tree. Parent\nrelationships remain on each machine so clients do not have to infer them\nfrom names or creation order.",
+        "required": [
+          "rootMachineId",
+          "machines"
+        ],
+        "properties": {
+          "machines": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MachineInfo"
+            }
+          },
+          "rootMachineId": {
+            "type": "string"
           }
         }
       },
@@ -4120,6 +5637,15 @@
             "format": "int32",
             "minimum": 0
           },
+          "maxDiskGb": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Largest disk (GB) one machine may request; `null` = platform maximum.",
+            "minimum": 0
+          },
           "maxEgressGb": {
             "type": [
               "integer",
@@ -4190,6 +5716,10 @@
             "type": "integer",
             "format": "int64",
             "minimum": 0
+          },
+          "selfServe": {
+            "type": "boolean",
+            "description": "Whether a tenant may switch itself onto this plan. Operator-only tiers\nare false and never appear in the self-serve list."
           }
         }
       },
@@ -4273,7 +5803,7 @@
       },
       "PortableCheckpointInfo": {
         "type": "object",
-        "description": "Durable live-state artifact stored by SmolCloud.",
+        "description": "Portable live-state capture; only `available` denotes a completed upload.",
         "required": [
           "id",
           "machineId",
@@ -4306,7 +5836,37 @@
             "minimum": 0
           },
           "status": {
-            "type": "string"
+            "type": "string",
+            "description": "`creating`, `available`, `failed`, or `deleting`."
+          }
+        }
+      },
+      "PublicMachineStats": {
+        "type": "object",
+        "description": "The lifetime count of machine starts on the platform, served UNAUTHENTICATED\nat `GET /v1/status/machines` for the marketing site. Counted from the audit\ntrail, so it is a real number and only ever grows. Operator-owned accounts\n(demos, QA) are left out via the `public_stats.exclude_tenants` server\nsetting, so the figure means \"machines our customers launched\".",
+        "required": [
+          "updatedAt"
+        ],
+        "properties": {
+          "machinesStarted": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Machines started by customers since `since`. `null` when the count could\nnot be computed — the site hides the figure rather than show a zero.",
+            "minimum": 0
+          },
+          "since": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The first day the count covers (`YYYY-MM-DD`), when known."
+          },
+          "updatedAt": {
+            "type": "string",
+            "description": "When the figure was last computed (RFC 3339)."
           }
         }
       },
@@ -4320,6 +5880,7 @@
           "memoryGbHourMicros",
           "diskGbHourMicros",
           "egressGbMicros",
+          "signupCreditMicros",
           "freeCreditMicros",
           "volumeTiers"
         ],
@@ -4355,13 +5916,19 @@
           "freeCreditMicros": {
             "type": "integer",
             "format": "int64",
-            "description": "Recurring monthly free credit applied to each period's bill.",
+            "description": "Deprecated alias of [`Self::signup_credit_micros`], kept so clients written\nagainst the old contract keep parsing. It once meant a recurring monthly\nallowance; that allowance no longer exists, so the value is the same\none-time grant. Read `signup_credit_micros` instead.",
             "minimum": 0
           },
           "memoryGbHourMicros": {
             "type": "integer",
             "format": "int64",
             "description": "Active resident-memory (RSS) GB-hour.",
+            "minimum": 0
+          },
+          "signupCreditMicros": {
+            "type": "integer",
+            "format": "int64",
+            "description": "One-time credit granted when an account is created, in micros. It is paid\ninto the account's prepaid balance and drawn down like any other credit —\nit does NOT reset monthly and is not a per-period discount.",
             "minimum": 0
           },
           "volumeTiers": {
@@ -4420,6 +5987,131 @@
           }
         }
       },
+      "SendAgentTurnRequest": {
+        "type": "object",
+        "description": "Send a prompt to a managed agent session.",
+        "required": [
+          "prompt"
+        ],
+        "properties": {
+          "env": {
+            "type": "object",
+            "description": "Environment for this turn only — typically the model API key. Never\nstored.",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          },
+          "prompt": {
+            "type": "string"
+          },
+          "timeoutSeconds": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Longest the turn may run (default 1800 s).",
+            "minimum": 0
+          }
+        }
+      },
+      "SetCredentialRequest": {
+        "type": "object",
+        "description": "Store a credential for credential substitution. The value is write-only:\nit is sealed at rest and never returned.",
+        "required": [
+          "envVar",
+          "hosts",
+          "value"
+        ],
+        "properties": {
+          "envVar": {
+            "type": "string",
+            "description": "The environment variable a machine that binds this credential sees —\nholding a placeholder, never the value."
+          },
+          "hosts": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The only hosts the value is ever sent to (HTTPS requests only)."
+          },
+          "value": {
+            "type": "string"
+          }
+        }
+      },
+      "SignupAttribution": {
+        "type": "object",
+        "description": "First-touch marketing attribution, reported once by the console right after a\nnew account's first login. Every field is optional and untrusted: the control\nplane keeps an allowlisted, length-capped, query-stripped copy and ignores the\nrest. Stored at most once per tenant and only for recently created tenants.",
+        "properties": {
+          "firstSeenAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "When the visitor first landed (RFC 3339), which can precede signup by days."
+          },
+          "landingPath": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The first path on this site the visitor landed on."
+          },
+          "referrer": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The external page that sent the visitor, as scheme://host/path — the\nquery string and fragment are dropped before storage."
+          },
+          "utmCampaign": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "utmContent": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "utmMedium": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "utmSource": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "utmTerm": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "SignupAttributionResponse": {
+        "type": "object",
+        "description": "Whether a reported attribution was stored. `false` is not an error: the tenant\nalready has one, is not a new account, or the report carried nothing usable.",
+        "required": [
+          "recorded"
+        ],
+        "properties": {
+          "recorded": {
+            "type": "boolean"
+          }
+        }
+      },
       "TenantInfo": {
         "type": "object",
         "description": "A tenant (customer account). Quota override fields are `None` when inherited\nfrom the plan. See docs/product-backend-layer.md.",
@@ -4448,6 +6140,15 @@
               "null"
             ],
             "format": "int32",
+            "minimum": 0
+          },
+          "maxDiskGb": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Per-tenant override of the plan's per-machine disk ceiling (GB).",
             "minimum": 0
           },
           "maxGroups": {
@@ -4481,6 +6182,17 @@
             "type": [
               "string",
               "null"
+            ]
+          },
+          "signupAttribution": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/SignupAttribution",
+                "description": "How this tenant found us, when it was captured at signup."
+              }
             ]
           },
           "status": {
@@ -4573,6 +6285,52 @@
           }
         }
       },
+      "UpdatePlanRequest": {
+        "type": "object",
+        "description": "`PATCH /v1/plans/{id}`: change a plan's limits in place. Every field is\noptional; only the given ones change. Takes effect on the next machine\ncreate for every tenant on the plan.",
+        "properties": {
+          "maxConcurrentMachines": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "minimum": 0
+          },
+          "maxCpus": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "minimum": 0
+          },
+          "maxDiskGb": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
+          },
+          "maxMachines": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "minimum": 0
+          },
+          "maxMemoryMb": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
+          }
+        }
+      },
       "UpdateTenantRequest": {
         "type": "object",
         "description": "Partial update — only present fields change.",
@@ -4590,6 +6348,31 @@
             ],
             "format": "int64",
             "description": "Per-tenant free-credit override (micros). Present → this tenant's monthly\nfree allotment is set to exactly this, overriding its plan's. Absent →\nunchanged (still falls back to the plan). Admin-only.",
+            "minimum": 0
+          },
+          "maxCpus": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "Per-machine size overrides for this tenant (each `null` = leave as is).\nThey sit above the plan's ceilings, for a deal that needs bigger machines\nwithout a new plan.",
+            "minimum": 0
+          },
+          "maxDiskGb": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
+          },
+          "maxMemoryMb": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
             "minimum": 0
           },
           "planId": {
@@ -4760,6 +6543,14 @@
     {
       "name": "machines",
       "description": "First-class machine lifecycle and exec"
+    },
+    {
+      "name": "credentials",
+      "description": "Credentials substituted on the way out, never held by a machine"
+    },
+    {
+      "name": "agents",
+      "description": "Managed agent sessions: a harness in its own machine, run as rewindable turns"
     },
     {
       "name": "checkpoints",

@@ -669,7 +669,7 @@ class LocalTransport implements Transport {
 // Cloud (smolfleet /v1)
 // ---------------------------------------------------------------------------
 
-interface CloudConn {
+export interface CloudConn {
   baseUrl: string;
   apiKey: string;
 }
@@ -681,7 +681,7 @@ const CLOUD_TIMEOUT_MS = 30_000;
 // Starting can include a cold image pull. Keep ordinary API calls short, but
 // give this explicitly long-running operation the same bounded window already
 // used by checkpoint restore.
-const CLOUD_START_TIMEOUT_MS = 30 * 60 * 1_000;
+export const CLOUD_START_TIMEOUT_MS = 30 * 60 * 1_000;
 // Grace before falling back to the guest-agent probe for a machine with no
 // published port: give `ready` time to flip first, so the probe stays a last
 // resort and never preempts a machine legitimately about to become ready.
@@ -699,7 +699,7 @@ export function encodePath(p: string): string {
   return p.split("/").map(encodeURIComponent).join("/");
 }
 
-async function cloudFetch<T = unknown>(
+export async function cloudFetch<T = unknown>(
   conn: CloudConn,
   method: string,
   path: string,
@@ -708,10 +708,12 @@ async function cloudFetch<T = unknown>(
     body?: Buffer;
     accept?: "json" | "bytes";
     timeoutMs?: number;
+    headers?: Record<string, string>;
   } = {},
 ): Promise<T> {
   const headers: Record<string, string> = {
     authorization: `Bearer ${conn.apiKey}`,
+    ...opts.headers,
   };
   let body: BodyInit | undefined;
   if (opts.json !== undefined) {
@@ -759,8 +761,10 @@ async function cloudFetch<T = unknown>(
     throw new SmolError(
       res.status === 404
         ? "NOT_FOUND"
-        : res.status === 401
+        : res.status === 401 || res.status === 403
           ? "UNAUTHORIZED"
+          : res.status === 409
+            ? "CONFLICT"
           : "SMOLVM_ERROR",
       `cloud ${method} ${path} → ${res.status}${text ? `: ${text}` : ""}${rid ? ` [request id: ${rid}]` : ""}`,
     );
@@ -1471,6 +1475,18 @@ export function selectsCloud(conn: ConnectOptions): boolean {
 // that writes to config.toml, which the SDK now reads. Point at the real path.
 const NO_KEY_HINT =
   "pass { apiKey }, set SMOL_CLOUD_TOKEN, or run `smol auth login` to create a CLI session the SDK reuses";
+
+/** Resolve credentials for a cloud-only API such as managed agent sessions. */
+export function resolveCloudConnection(conn: ConnectOptions = {}): CloudConn {
+  if (conn.target === "local") {
+    throw new NotSupportedError("managed agent sessions require the cloud target");
+  }
+  const { apiKey: cliKey, endpoint: cliUrl } = cliSession("cloud");
+  const apiKey = conn.apiKey ?? process.env.SMOL_CLOUD_TOKEN ?? cliKey ?? cliConfigApiKey();
+  if (!apiKey) throw new InvalidConfigError(`cloud target requires an API key — ${NO_KEY_HINT}.`);
+  const baseUrl = (conn.baseUrl ?? process.env.SMOL_CLOUD_URL ?? cliUrl ?? DEFAULT_CLOUD_URL).replace(/\/+$/, "");
+  return { baseUrl, apiKey };
+}
 
 export async function makeTransport(
   config: MachineConfig,
