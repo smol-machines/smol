@@ -35,6 +35,8 @@ export interface NativeResources {
   cpus?: number | undefined;
   memoryMib?: number | undefined;
   network?: boolean | undefined;
+  allowedCidrs?: string[] | undefined;
+  allowedHosts?: string[] | undefined;
   storageGib?: number | undefined;
   overlayGib?: number | undefined;
   gpu?: boolean | undefined;
@@ -47,6 +49,7 @@ export interface NativeMachineConfig {
   image?: string | undefined;
   env?: NativeEnvVar[] | undefined;
   workdir?: string | undefined;
+  user?: string | undefined;
   mounts?: NativeHostMount[] | undefined;
   ports?: NativePortMapping[] | undefined;
   resources?: NativeResources | undefined;

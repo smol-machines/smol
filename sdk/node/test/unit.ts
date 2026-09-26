@@ -64,6 +64,28 @@ check('escapes % so double-encoding is unambiguous', () => {
   assert.strictEqual(encodePath('/a/100%done'), '/a/100%25done');
 });
 
+// --- toNativeConfig: scoped egress and the workload user reach the engine ---
+// Both were documented as enforced locally but never forwarded, so a machine
+// with only `allowHosts` booted with no network at all and `user` ran as the
+// image default. Mirrors the Python SDK's test_native_config_forwards_scoped_egress.
+check('allowCidrs/allowHosts forward to the native config', () => {
+  const nc = toNativeConfig('m', {
+    resources: { allowCidrs: ['10.0.0.0/8'], allowHosts: ['api.example.com'] },
+  });
+  assert.deepStrictEqual(nc.resources?.allowedCidrs, ['10.0.0.0/8']);
+  assert.deepStrictEqual(nc.resources?.allowedHosts, ['api.example.com']);
+});
+check('an allowlist alone does not force unrestricted network', () => {
+  // The engine derives scoped networking from a non-empty list; setting
+  // `network: true` here would request open egress instead.
+  const nc = toNativeConfig('m', { resources: { allowHosts: ['api.example.com'] } });
+  assert.strictEqual(nc.resources?.network, undefined);
+});
+check('user forwards to the native config', () => {
+  assert.strictEqual(toNativeConfig('m', { user: '1000:1000' }).user, '1000:1000');
+  assert.strictEqual(toNativeConfig('m', {}).user, undefined);
+});
+
 // --- toNativeConfig: GPU resources map to the native (snake→camel) field ---
 check('forwards gpu + gpuVramMib to native resources', () => {
   const cfg = toNativeConfig('m', { resources: { gpu: true, gpuVramMib: 512 } });
