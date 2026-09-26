@@ -189,6 +189,17 @@ export interface ExecOptions {
   workdir?: string;
   /** Timeout in **seconds**. */
   timeout?: number;
+  /** Run the command as this user: a name from the image or a numeric
+   *  `uid[:gid]`. Local image machines only — a local bare VM rejects it (its
+   *  agent runs every command as root) and the cloud target throws
+   *  `NotSupportedError`; it is never silently ignored. */
+  user?: string;
+  /** Abort the command. Locally the command is killed in the machine and the
+   *  call (or the `execStream` iteration) rejects with `signal.reason`. On the
+   *  cloud target the request is cancelled and the call rejects the same way;
+   *  whether the command keeps running server-side is up to the service. Not
+   *  supported by `run(image, argv)`. */
+  signal?: AbortSignal;
   /** Cloud target only: which output encodings the server returns. The default
    *  carries both the capped UTF-8 text fields and the byte-exact base64
    *  fields; `"text"` or `"b64"` halves the response payload by dropping the

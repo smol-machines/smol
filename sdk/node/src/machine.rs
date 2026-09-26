@@ -42,6 +42,7 @@ pub struct NapiMachine {
 #[napi]
 pub struct ExecStream {
     rx: std::sync::Arc<std::sync::Mutex<std::sync::mpsc::Receiver<ExecEvent>>>,
+    cancel: smolvm::embedded::ExecCancel,
 }
 
 #[napi]
@@ -54,6 +55,14 @@ impl ExecStream {
                 .await
                 .map_err(|e| napi::Error::from_reason(e.to_string()))?;
         Ok(received.ok().map(ExecStreamEvent::from))
+    }
+
+    /// Kill the command: its connection closes and the guest agent kills it.
+    /// Pending `next()` calls then resolve `null`. Idempotent, and a no-op
+    /// once the command has exited.
+    #[napi]
+    pub fn kill(&self) {
+        self.cancel.cancel();
     }
 }
 
@@ -240,28 +249,25 @@ impl NapiMachine {
     #[napi]
     pub fn exec_stream(&self, command: Vec<String>, options: Option<ExecOptions>) -> ExecStream {
         let name = self.name.clone();
-        let (env, workdir, timeout) = parse_exec_options(options);
+        let options = parse_exec_options(options);
+        let cancel = smolvm::embedded::ExecCancel::new();
+        let worker_cancel = cancel.clone();
         let (tx, rx) = std::sync::mpsc::channel::<ExecEvent>();
         let err_tx = tx.clone();
         std::thread::spawn(move || {
-            match runtime() {
-                Ok(rt) => {
-                    if let Err(e) =
-                        rt.exec_streaming_with(&name, command, env, workdir, timeout, move |ev| {
-                            let _ = tx.send(ev);
-                        })
-                    {
-                        let _ = err_tx.send(ExecEvent::Error(e.to_string()));
-                    }
-                }
-                Err(e) => {
-                    let _ = err_tx.send(ExecEvent::Error(e.to_string()));
-                }
+            let result = runtime().and_then(|rt| {
+                rt.exec_streaming_with_options(&name, command, options, &worker_cancel, move |ev| {
+                    let _ = tx.send(ev);
+                })
+            });
+            if let Err(e) = result {
+                let _ = err_tx.send(ExecEvent::Error(e.to_string()));
             }
             // Senders drop here → channel closes → next() resolves null.
         });
         ExecStream {
             rx: std::sync::Arc::new(std::sync::Mutex::new(rx)),
+            cancel,
         }
     }
 
@@ -427,11 +433,10 @@ impl NapiMachine {
     ) -> napi::Result<ExecResult> {
         let runtime = runtime().into_napi()?;
         let name = self.name.clone();
-        let (env, workdir, timeout) = parse_exec_options(options);
+        let options = parse_exec_options(options);
 
-        let result = tokio::task::spawn_blocking(move || {
-            runtime.exec(&name, command, env, workdir, timeout)
-        })
+        let result =
+            tokio::task::spawn_blocking(move || runtime.exec_with_options(&name, command, options))
         .await
         .map_err(join_error)?
         .into_napi()?;
@@ -456,10 +461,23 @@ impl NapiMachine {
     ) -> napi::Result<ExecResult> {
         let runtime = runtime().into_napi()?;
         let name = self.name.clone();
-        let (env, workdir, timeout) = parse_exec_options(options);
+        let options = parse_exec_options(options);
+        if options.user.is_some() {
+            return Err(napi::Error::from_reason(
+                "[CONFIG_ERROR] user is not supported by run(image, command); \
+                 use exec on an image machine",
+            ));
+        }
 
         let result = tokio::task::spawn_blocking(move || {
-            runtime.run(&name, &image, command, env, workdir, timeout)
+            runtime.run(
+                &name,
+                &image,
+                command,
+                options.env,
+                options.workdir,
+                options.timeout,
+            )
         })
         .await
         .map_err(join_error)?
@@ -542,10 +560,19 @@ impl NapiMachine {
     ) -> napi::Result<Vec<ExecStreamEvent>> {
         let runtime = runtime().into_napi()?;
         let name = self.name.clone();
-        let (env, workdir, timeout) = parse_exec_options(options);
+        let options = parse_exec_options(options);
 
         let events = tokio::task::spawn_blocking(move || {
-            runtime.exec_streaming(&name, command, env, workdir, timeout)
+            let mut events = Vec::new();
+            runtime
+                .exec_streaming_with_options(
+                    &name,
+                    command,
+                    options,
+                    &smolvm::embedded::ExecCancel::new(),
+                    |e| events.push(e),
+                )
+                .map(|()| events)
         })
         .await
         .map_err(join_error)?
