@@ -675,6 +675,7 @@ version = "1.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "843fba2746e448b37e26a819579957415c8cef339bf08564fe8b7ddbd959573c"
 dependencies = [
+ "crc32fast",
  "miniz_oxide",
  "zlib-rs",
 ]
@@ -2388,6 +2389,7 @@ name = "smol-cli"
 version = "1.19.2"
 dependencies = [
  "anyhow",
+ "axum",
  "base64",
  "chrono",
  "clap",
@@ -2403,6 +2405,7 @@ dependencies = [
  "serde_json",
  "sha2",
  "smol-cloud",
+ "smolmachines",
  "smolvm",
  "smolvm-pack",
  "smolvm-protocol",
@@ -2428,12 +2431,31 @@ dependencies = [
 
 [[package]]
 name = "smolfile"
-version = "1.18.2"
+version = "1.19.0"
 dependencies = [
  "serde",
  "smolvm-protocol",
  "thiserror 1.0.69",
  "toml",
+]
+
+[[package]]
+name = "smolmachines"
+version = "1.19.2"
+dependencies = [
+ "flate2",
+ "futures-util",
+ "reqwest",
+ "rustls",
+ "serde",
+ "serde_json",
+ "sha2",
+ "smol-cloud",
+ "tar",
+ "tempfile",
+ "tokio",
+ "tokio-tungstenite",
+ "webpki-roots 1.0.6",
 ]
 
 [[package]]
@@ -2453,7 +2475,7 @@ dependencies = [
 
 [[package]]
 name = "smolvm"
-version = "1.18.2"
+version = "1.19.0"
 dependencies = [
  "async-stream",
  "axum",
@@ -2516,7 +2538,7 @@ dependencies = [
 
 [[package]]
 name = "smolvm-checkpoint"
-version = "1.18.2"
+version = "1.19.0"
 dependencies = [
  "hex",
  "libc",
@@ -2531,7 +2553,7 @@ dependencies = [
 
 [[package]]
 name = "smolvm-credentials"
-version = "1.18.2"
+version = "1.19.0"
 dependencies = [
  "anyhow",
  "bytes",
@@ -2555,7 +2577,7 @@ dependencies = [
 
 [[package]]
 name = "smolvm-cuda"
-version = "1.18.2"
+version = "1.19.0"
 dependencies = [
  "getrandom 0.3.4",
  "libc",
@@ -2564,7 +2586,7 @@ dependencies = [
 
 [[package]]
 name = "smolvm-network"
-version = "1.18.2"
+version = "1.19.0"
 dependencies = [
  "crossbeam-queue",
  "getrandom 0.3.4",
@@ -2579,7 +2601,7 @@ dependencies = [
 
 [[package]]
 name = "smolvm-pack"
-version = "1.18.2"
+version = "1.19.0"
 dependencies = [
  "crc32fast",
  "dirs",
@@ -2599,7 +2621,7 @@ dependencies = [
 
 [[package]]
 name = "smolvm-protocol"
-version = "1.18.2"
+version = "1.19.0"
 dependencies = [
  "base64",
  "serde",
@@ -2609,7 +2631,7 @@ dependencies = [
 
 [[package]]
 name = "smolvm-registry"
-version = "1.18.2"
+version = "1.19.0"
 dependencies = [
  "bytes",
  "dirs",
