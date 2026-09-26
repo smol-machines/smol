@@ -57,7 +57,7 @@ struct AppState {
     token: Option<String>,
     /// Sessions with a turn in flight, so a second turn waits its turn.
     busy: Mutex<HashSet<String>>,
-    /// Per-session lock serializing record changes (turns, rewind, fork, delete).
+    /// Per-session lock serializing record changes (turns, rewind, branch, delete).
     locks: Mutex<HashMap<String, Arc<Mutex<()>>>>,
 }
 

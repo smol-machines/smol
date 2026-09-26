@@ -56,7 +56,7 @@ enum Commands {
     Rollout(commands::rollout::RolloutCmd),
 
     /// Run an agent (Claude Code, or any program) in its own machine as a session of
-    /// turns: start, send, log, rewind, fork, pause, resume, rm
+    /// turns: start, send, log, rewind, branch, pause, resume, rm
     Agent(commands::agent::AgentCmd),
 
     /// Internal: boot a VM subprocess (not for direct use)
