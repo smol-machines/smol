@@ -1443,6 +1443,12 @@ export interface components {
             /** Format: int64 */
             turn: number;
         };
+        /** @description Compatibility request type for callers using the former operation name. */
+        AgentForkRequest: {
+            name: string;
+            /** Format: int64 */
+            turn: number;
+        };
         /** @description A managed agent session. */
         AgentInfo: {
             createdAt: string;
@@ -3227,7 +3233,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["AgentBranchRequest"];
+                "application/json": components["schemas"]["AgentForkRequest"];
             };
         };
         responses: {

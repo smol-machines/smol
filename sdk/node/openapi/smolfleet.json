@@ -380,7 +380,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/AgentBranchRequest"
+                "$ref": "#/components/schemas/AgentForkRequest"
               }
             }
           },
@@ -3334,6 +3334,24 @@
       "AgentBranchRequest": {
         "type": "object",
         "description": "Start a new session `name` from the state right after `turn`.",
+        "required": [
+          "turn",
+          "name"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "turn": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          }
+        }
+      },
+      "AgentForkRequest": {
+        "type": "object",
+        "description": "Compatibility request type for callers using the former operation name.",
         "required": [
           "turn",
           "name"
