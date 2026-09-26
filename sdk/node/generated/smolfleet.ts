@@ -1443,7 +1443,7 @@ export interface components {
             /** Format: int64 */
             turn: number;
         };
-        /** @description Compatibility request type for callers using the former operation name. */
+        /** @description Start a new session `name` from the state right after `turn`. */
         AgentForkRequest: {
             name: string;
             /** Format: int64 */

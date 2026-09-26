@@ -3351,7 +3351,7 @@
       },
       "AgentForkRequest": {
         "type": "object",
-        "description": "Compatibility request type for callers using the former operation name.",
+        "description": "Start a new session `name` from the state right after `turn`.",
         "required": [
           "turn",
           "name"
