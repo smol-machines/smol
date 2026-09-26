@@ -17,6 +17,14 @@ the backend is chosen by `ConnectOptions`:
 // Local (embedded, default) — no server, no config:
 const local = await Machine.create({ resources: { cpus: 2, memoryMb: 1024 } });
 
+// A trusted local interceptor can inspect outbound TCP. Keep its token out of logs.
+const intercepted = await Machine.create({
+  network: true,
+  egressInterceptor: { address: '127.0.0.1:9000', token: process.env.SMOLVM_INTERCEPTOR_TOKEN! },
+});
+// Supply the binding again when connecting from a new process:
+// await Machine.connect(intercepted.name, { target: 'local', egressInterceptor: { address: '127.0.0.1:9000', token: process.env.SMOLVM_INTERCEPTOR_TOKEN! } });
+
 // Branch a prepared machine: a CoW clone of its RAM and disks, typically
 // under 200ms, so a warm environment is reused instead of rebuilt. Pass
 // `network: true` whenever an image has to be pulled.

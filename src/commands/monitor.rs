@@ -6,7 +6,7 @@
 
 use super::start::StartCmd;
 use super::stop::StopCmd;
-use clap::Args;
+use clap::{builder::TypedValueParser, Args};
 use smolvm::agent::{AgentClient, AgentManager};
 use std::time::Duration;
 
@@ -35,14 +35,34 @@ pub struct MonitorCmd {
     /// Health check failures before triggering restart
     #[arg(long, default_value = "3", value_name = "N")]
     pub health_retries: u32,
+
+    /// Rebind the host egress interceptor on each automatic restart.
+    #[arg(long, value_name = "ADDR")]
+    pub egress_interceptor: Option<std::net::SocketAddr>,
+
+    #[arg(
+        long,
+        env = "SMOLVM_INTERCEPTOR_TOKEN",
+        hide = true,
+        hide_env_values = true,
+        value_parser = clap::builder::StringValueParser::new().map(smolvm::secrets::Secret::new)
+    )]
+    pub egress_interceptor_token: Option<smolvm::secrets::Secret>,
 }
 
-fn restart_machine(name: &str) -> anyhow::Result<()> {
+fn restart_machine(
+    name: &str,
+    interceptor: Option<std::net::SocketAddr>,
+    token: Option<&smolvm::secrets::Secret>,
+) -> anyhow::Result<()> {
     StartCmd {
         name: Some(name.to_string()),
         cloud: false,
-        local: false,
+        local: true,
         forkable: false,
+        egress_interceptor: interceptor,
+        egress_interceptor_token: token
+            .map(|token| smolvm::secrets::Secret::new(token.expose().to_owned())),
     }
     .run()
 }
@@ -51,7 +71,7 @@ fn stop_machine(name: &str) {
     let _ = StopCmd {
         name: Some(name.to_string()),
         cloud: false,
-        local: false,
+        local: true,
     }
     .run();
 }
@@ -99,7 +119,11 @@ impl MonitorCmd {
             .map_err(|e| anyhow::anyhow!("create agent manager: {e}"))?;
         if !manager.is_process_alive() {
             println!("Machine '{name}' is not running, starting...");
-            restart_machine(&name)?;
+            restart_machine(
+                &name,
+                self.egress_interceptor,
+                self.egress_interceptor_token.as_ref(),
+            )?;
         }
 
         println!(
@@ -247,7 +271,11 @@ impl MonitorCmd {
                     if stop.load(Ordering::SeqCst) {
                         break;
                     }
-                    match restart_machine(&name) {
+                    match restart_machine(
+                        &name,
+                        self.egress_interceptor,
+                        self.egress_interceptor_token.as_ref(),
+                    ) {
                         Ok(()) => {
                             println!("  machine restarted");
                             last_start = std::time::Instant::now();

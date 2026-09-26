@@ -2386,7 +2386,7 @@ checksum = "67b1b7a3b5fe4f1376887184045fcf45c69e92af734b7aaddc05fb777b6fbd03"
 
 [[package]]
 name = "smol-cli"
-version = "1.18.0"
+version = "1.19.0"
 dependencies = [
  "anyhow",
  "axum",
@@ -2421,7 +2421,7 @@ dependencies = [
 
 [[package]]
 name = "smol-cloud"
-version = "1.18.0"
+version = "1.19.0"
 dependencies = [
  "base64",
  "reqwest",
@@ -2431,7 +2431,7 @@ dependencies = [
 
 [[package]]
 name = "smolfile"
-version = "1.18.0"
+version = "1.18.2"
 dependencies = [
  "serde",
  "smolvm-protocol",
@@ -2475,7 +2475,7 @@ dependencies = [
 
 [[package]]
 name = "smolvm"
-version = "1.18.0"
+version = "1.18.2"
 dependencies = [
  "async-stream",
  "axum",
@@ -2538,7 +2538,7 @@ dependencies = [
 
 [[package]]
 name = "smolvm-checkpoint"
-version = "1.18.0"
+version = "1.18.2"
 dependencies = [
  "hex",
  "libc",
@@ -2553,7 +2553,7 @@ dependencies = [
 
 [[package]]
 name = "smolvm-credentials"
-version = "1.18.0"
+version = "1.18.2"
 dependencies = [
  "anyhow",
  "bytes",
@@ -2577,7 +2577,7 @@ dependencies = [
 
 [[package]]
 name = "smolvm-cuda"
-version = "1.18.0"
+version = "1.18.2"
 dependencies = [
  "getrandom 0.3.4",
  "libc",
@@ -2586,7 +2586,7 @@ dependencies = [
 
 [[package]]
 name = "smolvm-network"
-version = "1.18.0"
+version = "1.18.2"
 dependencies = [
  "crossbeam-queue",
  "getrandom 0.3.4",
@@ -2601,7 +2601,7 @@ dependencies = [
 
 [[package]]
 name = "smolvm-pack"
-version = "1.18.0"
+version = "1.18.2"
 dependencies = [
  "crc32fast",
  "dirs",
@@ -2621,7 +2621,7 @@ dependencies = [
 
 [[package]]
 name = "smolvm-protocol"
-version = "1.18.0"
+version = "1.18.2"
 dependencies = [
  "base64",
  "serde",
@@ -2631,7 +2631,7 @@ dependencies = [
 
 [[package]]
 name = "smolvm-registry"
-version = "1.18.0"
+version = "1.18.2"
 dependencies = [
  "bytes",
  "dirs",

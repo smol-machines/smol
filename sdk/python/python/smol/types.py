@@ -10,6 +10,7 @@ __all__ = [
     "MountSpec",
     "PortSpec",
     "MachineConfig",
+    "EgressInterceptor",
     "ExecOptions",
     "ExecResult",
     "ImageInfo",
@@ -90,10 +91,19 @@ class PortSpec:
 
 
 @dataclass
+class EgressInterceptor:
+    """Per-launch trusted host egress service. Keep the token out of logs and files."""
+
+    address: str
+    token: str = field(repr=False)
+
+
+@dataclass
 class MachineConfig:
     """Configuration for creating a machine."""
 
     name: Optional[str] = None
+    egress_interceptor: Optional[EgressInterceptor] = field(default=None, repr=False)
     """Machine name (auto-generated if omitted)."""
     image: Optional[str] = None
     """Base image. Required for the cloud target; optional for local."""
@@ -280,6 +290,7 @@ class ConnectOptions:
     target: Optional[Literal["local", "cloud"]] = None
     base_url: Optional[str] = None
     api_key: Optional[str] = None
+    egress_interceptor: Optional[EgressInterceptor] = field(default=None, repr=False)
 
 
 @dataclass

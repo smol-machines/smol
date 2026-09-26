@@ -17,7 +17,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use super::{unsupported, ReadyOptions, Transport};
-use crate::config::Port;
+use crate::config::{EgressInterceptor, Port};
 use crate::connect::Target;
 use crate::error::{Error, ErrorKind, Result};
 use crate::exec::{ExecEvent, ExecOptions, ExecResult, ExecStream};
@@ -157,11 +157,12 @@ pub(crate) fn engine_version_of(cli: &Path) -> Option<String> {
     if let Some(version) = seen.lock().ok().and_then(|s| s.get(cli).cloned()) {
         return version;
     }
-    let version = Command::new(cli)
+    let mut command = Command::new(cli);
+    command
         .arg("--version")
         .stdin(Stdio::null())
-        .stderr(Stdio::null())
-        .output()
+        .stderr(Stdio::null());
+    let version = retry_text_busy(|| command.output())
         .ok()
         .filter(|out| out.status.success())
         .and_then(|out| parse_version_line(&String::from_utf8_lossy(&out.stdout)));
@@ -183,6 +184,30 @@ fn parse_version_line(output: &str) -> Option<String> {
         .map(str::to_string)
 }
 
+/// `ETXTBSY`: the same value on Linux and macOS.
+const TEXT_FILE_BUSY: i32 = 26;
+
+/// Start a process, retrying briefly while the kernel reports its binary busy.
+///
+/// A binary written moments ago (the engine this SDK just extracted, or any
+/// freshly written executable) can still be open for writing in a child that
+/// another thread forked before that child execs. Until the child execs and
+/// drops the inherited handle, starting the binary fails with `ETXTBSY`; the
+/// window is a few milliseconds, so waiting it out is enough.
+fn retry_text_busy<T>(mut start: impl FnMut() -> std::io::Result<T>) -> std::io::Result<T> {
+    let mut delay = Duration::from_millis(5);
+    for _ in 0..8 {
+        match start() {
+            Err(e) if e.raw_os_error() == Some(TEXT_FILE_BUSY) => {
+                thread::sleep(delay);
+                delay *= 2;
+            }
+            other => return other,
+        }
+    }
+    start()
+}
+
 fn explicit_cli(path: PathBuf) -> Result<PathBuf> {
     if path.is_file() {
         Ok(path)
@@ -201,6 +226,7 @@ pub(crate) struct LocalTransport {
     /// Ports this SDK published for the machine. The CLI reports only a count,
     /// so a machine the SDK did not create cannot be asked for its mapping.
     ports: Vec<Port>,
+    interceptor: std::sync::Mutex<Option<EgressInterceptor>>,
 }
 
 impl LocalTransport {
@@ -209,6 +235,7 @@ impl LocalTransport {
             name: name.into(),
             cli: resolve_cli()?,
             ports: Vec::new(),
+            interceptor: std::sync::Mutex::new(None),
         })
     }
 
@@ -219,18 +246,38 @@ impl LocalTransport {
         })
     }
 
+    pub(crate) fn set_interceptor(&mut self, binding: EgressInterceptor) -> Result<()> {
+        *self
+            .interceptor
+            .get_mut()
+            .map_err(|_| Error::new(ErrorKind::Other, "interceptor lock poisoned"))? =
+            Some(binding);
+        Ok(())
+    }
+
     /// Run a CLI command and hand back its exit code and streams.
     fn cli(&self, args: &[&str]) -> Result<(i32, Vec<u8>, Vec<u8>)> {
-        let output = Command::new(&self.cli)
+        self.cli_with_token(args, None)
+    }
+
+    fn cli_with_token(
+        &self,
+        args: &[&str],
+        token: Option<&str>,
+    ) -> Result<(i32, Vec<u8>, Vec<u8>)> {
+        let mut command = Command::new(&self.cli);
+        command
             .args(args)
             .stdin(Stdio::null())
             // See assets.rs: this variable makes the engine tie the VM's life
             // to its parent, and every CLI call here is short-lived.
-            .env_remove("SMOLVM_BOOT_BINARY")
-            .output()
-            .map_err(|e| {
-                Error::new(ErrorKind::Other, format!("run {}: {e}", self.cli.display()))
-            })?;
+            .env_remove("SMOLVM_BOOT_BINARY");
+        if let Some(token) = token {
+            command.env("SMOLVM_INTERCEPTOR_TOKEN", token);
+        }
+        let output = retry_text_busy(|| command.output()).map_err(|e| {
+            Error::new(ErrorKind::Other, format!("run {}: {e}", self.cli.display()))
+        })?;
         Ok((
             output.status.code().unwrap_or(-1),
             output.stdout,
@@ -241,6 +288,14 @@ impl LocalTransport {
     /// Run a CLI command that is expected to succeed.
     fn run(&self, args: &[&str]) -> Result<Vec<u8>> {
         let (code, stdout, stderr) = self.cli(args)?;
+        if code == 0 {
+            return Ok(stdout);
+        }
+        Err(cli_error(args, &stderr, &stdout))
+    }
+
+    fn run_with_token(&self, args: &[&str], token: Option<&str>) -> Result<Vec<u8>> {
+        let (code, stdout, stderr) = self.cli_with_token(args, token)?;
         if code == 0 {
             return Ok(stdout);
         }
@@ -374,11 +429,63 @@ impl Transport for LocalTransport {
     }
 
     fn start(&self) -> Result<()> {
-        self.run(&["machine", "start", "--name", &self.name])
-            .map(|_| ())
+        let binding = self
+            .interceptor
+            .lock()
+            .map_err(|_| Error::new(ErrorKind::Other, "interceptor lock poisoned"))?
+            .clone();
+        match binding {
+            Some(binding) => self
+                .run_with_token(
+                    &[
+                        "machine",
+                        "start",
+                        "--name",
+                        &self.name,
+                        "--egress-interceptor",
+                        &binding.address.to_string(),
+                    ],
+                    Some(&binding.token),
+                )
+                .map(|_| ()),
+            None => self
+                .run(&["machine", "start", "--name", &self.name])
+                .map(|_| ()),
+        }
+    }
+
+    fn start_with_interceptor(&self, binding: &EgressInterceptor) -> Result<()> {
+        self.run_with_token(
+            &[
+                "machine",
+                "start",
+                "--name",
+                &self.name,
+                "--egress-interceptor",
+                &binding.address.to_string(),
+            ],
+            Some(&binding.token),
+        )?;
+        *self
+            .interceptor
+            .lock()
+            .map_err(|_| Error::new(ErrorKind::Other, "interceptor lock poisoned"))? =
+            Some(binding.clone());
+        Ok(())
     }
 
     fn start_branchable(&self) -> Result<()> {
+        if self
+            .interceptor
+            .lock()
+            .map_err(|_| Error::new(ErrorKind::Other, "interceptor lock poisoned"))?
+            .is_some()
+        {
+            return Err(Error::new(
+                ErrorKind::NotSupported,
+                "egress interception cannot be combined with branchable machines",
+            ));
+        }
         self.run(&["machine", "start", "--name", &self.name, "--branchable"])
             .map(|_| ())
     }
@@ -417,7 +524,8 @@ impl Transport for LocalTransport {
     fn exec_stream(&self, command: Vec<String>, options: ExecOptions) -> Result<ExecStream> {
         let mut args = self.exec_args(&command, &options);
         args.insert(2, "--stream".into());
-        let mut child = Command::new(&self.cli)
+        let mut command = Command::new(&self.cli);
+        command
             .args(&args)
             // Give the child no stdin. Inheriting the caller's makes the CLI
             // treat the exec as interactive and attach a terminal to the
@@ -425,8 +533,8 @@ impl Transport for LocalTransport {
             .stdin(Stdio::null())
             .env_remove("SMOLVM_BOOT_BINARY")
             .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
+            .stderr(Stdio::piped());
+        let mut child = retry_text_busy(|| command.spawn())
             .map_err(|e| Error::new(ErrorKind::Other, format!("start exec: {e}")))?;
 
         let (tx, rx) = mpsc::channel();
@@ -732,11 +840,12 @@ pub(crate) fn create(
     name: &str,
     ports: Vec<Port>,
 ) -> Result<LocalTransport> {
-    let output = Command::new(cli)
+    let mut command = Command::new(cli);
+    command
         .args(&args)
         .stdin(Stdio::null())
-        .env_remove("SMOLVM_BOOT_BINARY")
-        .output()
+        .env_remove("SMOLVM_BOOT_BINARY");
+    let output = retry_text_busy(|| command.output())
         .map_err(|e| Error::new(ErrorKind::Other, format!("run {}: {e}", cli.display())))?;
     if !output.status.success() {
         let borrowed: Vec<&str> = args.iter().map(String::as_str).collect();
@@ -791,6 +900,41 @@ mod capture_summary_tests {
         let (size, pause) = parse_capture_summary("Checkpointed 'x' to /p\n");
         assert!(size.is_none() && pause.is_none());
         assert!(parse_reused("nothing here").is_none());
+    }
+}
+
+#[cfg(test)]
+mod retry_tests {
+    use super::*;
+
+    #[test]
+    fn a_busy_binary_is_retried_and_other_errors_are_not() {
+        let mut calls = 0;
+        let result = retry_text_busy(|| {
+            calls += 1;
+            if calls < 3 {
+                Err(std::io::Error::from_raw_os_error(TEXT_FILE_BUSY))
+            } else {
+                Ok(calls)
+            }
+        });
+        assert_eq!(result.unwrap(), 3);
+
+        let mut calls = 0;
+        let result: std::io::Result<()> = retry_text_busy(|| {
+            calls += 1;
+            Err(std::io::ErrorKind::NotFound.into())
+        });
+        assert!(result.is_err());
+        assert_eq!(calls, 1, "only a busy binary is retried");
+
+        let mut calls = 0;
+        let result: std::io::Result<()> = retry_text_busy(|| {
+            calls += 1;
+            Err(std::io::Error::from_raw_os_error(TEXT_FILE_BUSY))
+        });
+        assert!(result.is_err());
+        assert_eq!(calls, 9, "a binary that stays busy gives up");
     }
 }
 
@@ -887,7 +1031,18 @@ mod io_tests {
             name: "test".into(),
             cli: path,
             ports: vec![],
+            interceptor: std::sync::Mutex::new(None),
         }
+    }
+
+    #[test]
+    fn interceptor_token_is_passed_in_environment_only() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut transport = cli(dir.path(), "test \"$5\" = --egress-interceptor\ntest \"$6\" = 127.0.0.1:9000\ntest \"$SMOLVM_INTERCEPTOR_TOKEN\" = abc");
+        let binding = EgressInterceptor::new("127.0.0.1:9000".parse().unwrap(), "abc");
+        transport.set_interceptor(binding.clone()).unwrap();
+        transport.start().unwrap();
+        assert!(!format!("{binding:?}").contains("abc"));
     }
 
     #[test]

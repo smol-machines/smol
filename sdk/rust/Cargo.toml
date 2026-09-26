@@ -5,7 +5,7 @@
 
 [package]
 name = "smolmachines"
-version = "1.18.0"
+version = "1.19.0"
 edition = "2021"
 rust-version = "1.82"
 description = "Embed smol machines microVMs directly in a Rust process"
@@ -22,7 +22,7 @@ categories = ["virtualization", "api-bindings"]
 # The cloud transport. Shared with the `smol` CLI so the two clients of the
 # control plane cannot drift. Blocking, because the whole SDK is: the caller
 # owns the choice of runtime.
-smol-cloud = { path = "../../crates/smol-cloud", version = "1.18.0", features = ["blocking"] }
+smol-cloud = { path = "../../crates/smol-cloud", version = "1.19.0", features = ["blocking"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 # Fetching an engine on first local use, so `cargo add` is all a caller needs.

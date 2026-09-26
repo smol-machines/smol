@@ -179,7 +179,9 @@ impl RunCmd {
         };
         let uses_packed_layers = packed_layers_dir.is_some();
 
-        let manager = AgentManager::new_default()?;
+        // Open for launch: an observe-only manager never creates the disks a
+        // fresh install needs, so the first boot would fail with "no disks yet".
+        let manager = AgentManager::new_default_with_sizes(None, None)?;
 
         eprintln!("Starting ephemeral machine...");
 

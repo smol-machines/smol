@@ -76,6 +76,7 @@ from .machine import Episode, Machine
 from .rollout import RolloutClient, RolloutError, adapter_sha256
 from .types import (
     ConnectOptions,
+    EgressInterceptor,
     ExecOptions,
     ExecResult,
     ImageInfo,
@@ -89,7 +90,7 @@ from .types import (
     ResourceSpec,
 )
 
-__version__ = "1.18.0"
+__version__ = "1.19.0"
 
 __all__ = [
     "Machine",
@@ -108,6 +109,7 @@ __all__ = [
     "ShareLink",
     "PortableCheckpointInfo",
     "ConnectOptions",
+    "EgressInterceptor",
     "SmolError",
     "NotSupportedError",
     "InvalidConfigError",
