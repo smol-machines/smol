@@ -388,7 +388,7 @@
         },
         "responses": {
           "201": {
-            "description": "Compatibility alias for branch",
+            "description": "New session from the state right after the turn",
             "content": {
               "application/json": {
                 "schema": {

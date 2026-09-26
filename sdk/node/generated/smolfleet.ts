@@ -3237,7 +3237,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Compatibility alias for branch */
+            /** @description New session from the state right after the turn */
             201: {
                 headers: {
                     [name: string]: unknown;
