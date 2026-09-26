@@ -9,6 +9,12 @@ guest escape lands there and not in your application.
 > **Linux x64/arm64 with glibc ≥ 2.34** (RHEL 9, Ubuntu 22.04+, Debian 12, Amazon
 > Linux 2023). The **cloud** transport works anywhere the package installs.
 > Not yet prebuilt: macOS Intel, and Linux with glibc < 2.34.
+>
+> The local engine for your platform (native addon, boot helper, hypervisor
+> libraries and guest rootfs) installs automatically as an optional dependency,
+> e.g. `smolmachines-linux-x64-gnu`, so an install downloads only your
+> platform's runtime. Using only the cloud transport? Install with
+> `npm install --omit=optional smolmachines` to skip it entirely.
 
 Run the **same code** against the local embedded engine or **smol cloud** —
 the backend is chosen by `ConnectOptions`:

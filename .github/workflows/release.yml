@@ -279,55 +279,43 @@ jobs:
         with:
           path: sdk/node/artifacts
           pattern: node-native-*
-      # Single "fat" package: co-locate binding.js + every platform's
-      # smol.<triple>.node in dist/ (binding.js loads the local .node for the
-      # running platform), and ship the native/<plat>/ libs+helper. No
-      # optionalDependencies / per-platform packages. This exact layout was
-      # validated locally (npm pack → install → require).
-      - name: Assemble fat package
+      # One package per platform: `smolmachines-<triple>` carries that
+      # platform's addon + native/ (boot helper, libkrun/libkrunfw, guest
+      # rootfs), gated by os/cpu/libc, and the main package lists them all as
+      # exact-version optionalDependencies — so an install downloads one
+      # platform's runtime, not all three. The script generates the platform
+      # manifests from package.json (nothing extra to version-bump) and fails
+      # before any publish if a platform package is incomplete.
+      - name: Assemble per-platform packages
         run: |
           cp binding.js binding.d.ts dist/
-          cp artifacts/*/smol.*.node dist/
-          mkdir -p native && cp -R artifacts/*/native/* native/
-          # actions/upload-artifact STRIPS the executable bit — restore it on the
-          # smol-vmm boot helpers, or local transport fails with "Permission denied"
-          # (os error 13) when spawning it. npm preserves modes in the tarball.
-          chmod +x native/*/smol-vmm
-          echo "dist .node:" && ls dist/*.node
-          echo "native platforms:" && ls native/ && ls -l native/*/smol-vmm
-      # Pre-publish gate: fail (BEFORE npm publish, so the version isn't burned)
-      # unless the package actually contains the loader + all 3 platform addons.
-      - name: Verify package completeness
-        run: |
-          set -e
-          test -f dist/binding.js
-          # .node files use napi triple names; native/ dirs use the runtime's
-          # `${process.platform}-${process.arch}` names (see dist/assets.js) — they
-          # differ by the -gnu suffix on Linux, so check them separately.
-          for t in darwin-arm64 linux-x64-gnu linux-arm64-gnu; do
-            test -f "dist/smol.$t.node" || { echo "MISSING dist/smol.$t.node"; exit 1; }
-          done
-          for p in darwin-arm64 linux-x64 linux-arm64; do
-            test -d "native/$p" || { echo "MISSING native/$p"; exit 1; }
-            test -f "native/$p/smol-vmm" || { echo "MISSING native/$p/smol-vmm"; exit 1; }
-            test -s "native/$p/agent-rootfs.tar" || { echo "MISSING native/$p/agent-rootfs.tar"; exit 1; }
-          done
-          npm pack --dry-run 2>&1 | grep -E "binding.js|\.node|native/" >/dev/null
-          echo "package complete: binding.js + 3 addons + native libs + rootfs present"
+          node scripts/prepare-npm-packages.mjs artifacts --out npm-packages
+          for d in npm-packages/*/; do echo "== $d" && ls -l "$d" "$d/native"; done
+          npm pack --dry-run 2>&1 | grep -E "dist/binding.js" >/dev/null
+          if npm pack --dry-run 2>&1 | grep -E "\.node|native/"; then
+            echo "main package must not carry native assets"; exit 1
+          fi
       - name: Publish to npm
         # OIDC trusted publishing: no NPM_TOKEN. npm ≥11.5.1 exchanges the GitHub
         # OIDC token (id-token: write) for a short-lived registry credential, and
         # attaches provenance (the repo is public, so provenance is accepted).
-        # Skip if this exact version is already on npm so a re-run (e.g. to finish
-        # a half-published release) stays green instead of 403-ing on the duplicate
-        # and blocking the gated PyPI publish.
+        # Platform packages go first so the main package never resolves to a
+        # missing optional dependency. Each skips a version already on npm, so a
+        # re-run (e.g. to finish a half-published release) stays green instead of
+        # 403-ing on the duplicate and blocking the gated PyPI publish.
         run: |
-          VER="$(node -p "require('./package.json').version")"
-          if npm view "smolmachines@$VER" version >/dev/null 2>&1; then
-            echo "smolmachines@$VER already published to npm — skipping"
-          else
-            npm publish --access public --provenance
-          fi
+          publish() {
+            local dir="$1" name ver
+            name="$(node -p "require('./$dir/package.json').name")"
+            ver="$(node -p "require('./$dir/package.json').version")"
+            if npm view "$name@$ver" version >/dev/null 2>&1; then
+              echo "$name@$ver already published to npm — skipping"
+            else
+              (cd "$dir" && npm publish --access public --provenance)
+            fi
+          }
+          for d in npm-packages/*/; do publish "${d%/}"; done
+          publish .
 
   # ─── Python: abi3 wheels (one per platform, Py3.9+) ────────────────────────
   python-wheels:

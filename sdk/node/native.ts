@@ -140,7 +140,26 @@ export interface NapiMachineCtor {
   pruneCheckpointStore(store: string): number;
 }
 
-import { wireBundledAssets, type RuntimeAssets } from "./assets";
+import { PLATFORM_PACKAGES, wireBundledAssets, type RuntimeAssets } from "./assets";
+
+/** Explain a failed addon load in terms of the per-platform package that
+ *  carries it. The usual causes are an unsupported platform, an install with
+ *  `--omit=optional`, or a lockfile written on another OS/arch that recorded no
+ *  entry for this platform's package (a long-standing npm behavior with
+ *  platform-gated optional dependencies). */
+function missingPlatformPackageError(cause: unknown): Error {
+  const platformArch = `${process.platform}-${process.arch}`;
+  const pkg = PLATFORM_PACKAGES[platformArch];
+  const detail = cause instanceof Error ? cause.message : String(cause);
+  const hint = pkg
+    ? `The local engine for ${platformArch} ships in the optional package "${pkg}", ` +
+      `which is not installed. Reinstall without --omit=optional, or add it ` +
+      `explicitly (npm install ${pkg}); if your lockfile was generated on another ` +
+      `platform, regenerate it on this one.`
+    : `No prebuilt local engine exists for ${platformArch}. The cloud transport ` +
+      `(ConnectOptions({ target: "cloud" })) works on any platform.`;
+  return new Error(`smolmachines: cannot load the native engine. ${hint}\n(${detail})`);
+}
 
 interface NativeBinding {
   NapiMachine: NapiMachineCtor;
@@ -162,8 +181,13 @@ export function getNapiMachine(): NapiMachineCtor {
     // loads, so the engine (which reads SMOLVM_BOOT_BINARY / SMOLVM_LIB_DIR at
     // spawn time) uses them.
     const assets = wireBundledAssets();
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const binding = require("./binding.js") as NativeBinding;
+    let binding: NativeBinding;
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      binding = require("./binding.js") as NativeBinding;
+    } catch (error) {
+      throw missingPlatformPackageError(error);
+    }
     binding.configureRuntimeAssets(assets);
     cachedCtor = binding.NapiMachine;
   }
