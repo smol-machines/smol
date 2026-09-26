@@ -9,9 +9,9 @@
  *    - SMOLVM_AGENT_ROOTFS_TAR → bundled guest rootfs tarball (the engine
  *      extracts it on first use), so a plain `npm i` is fully self-contained.
  *
- *  A user-provided value always wins. Exposed as a function (and self-invoked)
- *  so it runs reliably regardless of import elision/ordering — `native.ts` calls
- *  it before loading the addon.
+ *  A user-provided value always wins. Called by `native.ts` right before the
+ *  addon loads — i.e. on first LOCAL use, never at import — so importing the
+ *  SDK (e.g. for cloud-only use) leaves `process.env` untouched.
  */
 
 import { existsSync } from 'node:fs';
@@ -84,5 +84,3 @@ export function wireDefaultHardening(): void {
   process.env.SMOLVM_SECCOMP ??= 'enforce';
   process.env.SMOLVM_LANDLOCK ??= 'enforce';
 }
-
-wireBundledAssets();

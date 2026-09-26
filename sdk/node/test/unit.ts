@@ -4,6 +4,7 @@ import assert from 'node:assert';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { spawnSync } from 'node:child_process';
 import { wrapNativeError, SmolError } from '../errors';
 import { adapterSha256, RolloutClient } from '../rollout';
 import { cliConfigApiKey, encodePath, resolveNetwork, selectsCloud, toNativeConfig } from '../transport';
@@ -271,6 +272,26 @@ check('selectsCloud: an explicit local target beats every credential', () => {
 });
 check('selectsCloud: an explicit cloud target needs no credential to select', () => {
   withCloudToken(undefined, () => assert.strictEqual(selectsCloud({ target: 'cloud' }), true));
+});
+
+// --- importing the SDK has no side effects on the process environment ---
+// An app that imports the SDK only for the cloud (or not at all yet) must not
+// have SMOLVM_* / seccomp variables injected into its env and every child it
+// spawns. Checked in a fresh process, since this file already imported it.
+check('importing the SDK leaves process.env untouched', () => {
+  if (!process.versions.bun) return; // the child imports TypeScript directly
+  const script =
+    "const snap = () => JSON.stringify(Object.entries({ ...process.env }).sort());" +
+    "const before = snap();" +
+    `require(${JSON.stringify(join(__dirname, '..', 'index.ts'))});` +
+    "process.stdout.write(before === snap() ? 'SAME' : 'CHANGED');";
+  // Start the child without SMOLVM_* so an import that sets them is visible
+  // (this process may already have them from its own import).
+  const env = Object.fromEntries(
+    Object.entries(process.env).filter(([key]) => !key.startsWith('SMOLVM_')),
+  );
+  const out = spawnSync(process.execPath, ['-e', script], { encoding: 'utf8', env });
+  assert.strictEqual(out.stdout, 'SAME', out.stderr);
 });
 
 // --- wireDefaultHardening: confine the spawned VMM unless told otherwise ---

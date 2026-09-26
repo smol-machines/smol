@@ -334,8 +334,17 @@ export interface PortableCheckpointInfo {
 export interface ConnectOptions {
   /** Binding for a stopped local machine that requires intercepted egress. */
   egressInterceptor?: EgressInterceptor;
-  /** 'local' = embedded engine (default). 'cloud' = smolfleet remote. */
+  /** 'local' = embedded engine; 'cloud' = smolfleet remote. When unset, the
+   *  SDK uses the cloud if `SMOL_CLOUD_TOKEN` is set, else local — so a
+   *  library or framework embedding the SDK should set this explicitly. */
   target?: "local" | "cloud";
+  /** Stop this process's local machines on SIGINT/SIGTERM, then re-raise the
+   *  signal (default: true). Set false when the embedding app or framework
+   *  owns shutdown: the re-raise would otherwise run its signal handlers a
+   *  second time. It must then stop or delete its machines itself; if the
+   *  process dies without doing so, the engine still reaps the VM. Local only;
+   *  branches inherit their source's setting. */
+  handleSignals?: boolean;
   /** Cloud base URL (cloud target only). */
   baseUrl?: string;
   /** Cloud API key, `smk_…` (cloud target only). */

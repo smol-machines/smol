@@ -327,10 +327,17 @@ function installLocalCleanup(): void {
 }
 
 class LocalTransport implements Transport {
+  /**
+   * @param cleanupOnExit register THIS machine for signal-driven stop (false
+   *   for a borrowed machine from `connect`).
+   * @param handleSignals the caller's `ConnectOptions.handleSignals`: whether
+   *   machines this process owns, including branches of this one, register.
+   */
   constructor(
     private readonly inner: NapiInstance,
     private readonly cleanupOnExit = true,
     private interceptor?: EgressInterceptor,
+    private readonly handleSignals = true,
   ) {
     if (cleanupOnExit) {
       liveLocal.add(this);
@@ -608,6 +615,9 @@ class LocalTransport implements Transport {
           nativePorts,
           opts.branchable ?? opts.checkpointable ?? false,
         ),
+        this.handleSignals,
+        undefined,
+        this.handleSignals,
       );
       await clone.waitUntilReady();
       return clone; // ctor registers for cleanup
@@ -630,7 +640,11 @@ class LocalTransport implements Transport {
         nativePorts,
         Math.min(8, names.length),
       );
-      branches.push(...inners.map((inner) => new LocalTransport(inner)));
+      branches.push(
+        ...inners.map(
+          (inner) => new LocalTransport(inner, this.handleSignals, undefined, this.handleSignals),
+        ),
+      );
       for (const branch of branches) {
         await branch.waitUntilReady();
       }
@@ -1635,7 +1649,8 @@ export async function makeTransport(
   let transport: LocalTransport | undefined;
   try {
     const inner = new (getNapiMachine())(toNativeConfig(name, config));
-    transport = new LocalTransport(inner, true, interceptor);
+    const handleSignals = conn.handleSignals ?? true;
+    transport = new LocalTransport(inner, handleSignals, interceptor, handleSignals);
     // A forkable golden boots with memfd-backed guest RAM + a control socket so
     // it can be cloned with Machine.fork (local live-RAM fork).
     if (resolveBranchable(config)) {
@@ -1681,6 +1696,7 @@ export async function connectTransport(
           : getNapiMachine().connect(id),
         false,
         conn.egressInterceptor,
+        conn.handleSignals ?? true,
       );
       // A frozen checkpoint is intentionally not agent-ready; it remains
       // connectable so callers can fork its retained snapshot.
@@ -1744,7 +1760,13 @@ export async function restoreCheckpointTransport(
     const path = resolvePath(checkpointId);
     let restored: LocalTransport | undefined;
     try {
-      restored = new LocalTransport(getNapiMachine().restoreCheckpoint(name, path));
+      const handleSignals = conn.handleSignals ?? true;
+      restored = new LocalTransport(
+        getNapiMachine().restoreCheckpoint(name, path),
+        handleSignals,
+        undefined,
+        handleSignals,
+      );
       await restored.start();
       return restored;
     } catch (error) {
