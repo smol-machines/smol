@@ -244,6 +244,18 @@ export function resolveNetwork(config: MachineConfig): boolean | undefined {
   return config.resources?.network ?? config.network;
 }
 
+/** The cloud create's `network` field for a boolean request. The control plane
+ *  opens egress when the field is absent, so an explicit `false` has to be sent
+ *  as `blocked` — omitting it would hand the machine the network it was asked
+ *  not to have. Unset keeps the control plane's default (open). */
+export function networkMode(
+  network: boolean | undefined,
+): { network: { mode: "open" | "blocked" } } | Record<string, never> {
+  if (network === true) return { network: { mode: "open" } };
+  if (network === false) return { network: { mode: "blocked" } };
+  return {};
+}
+
 /** Resolve the primary branch lifecycle name and its compatibility aliases. */
 export function resolveBranchable(config: MachineConfig): boolean | undefined {
   return config.branchable ?? config.forkable ?? config.checkpoint;
@@ -1568,9 +1580,7 @@ export async function makeTransport(
               hosts: config.resources.allowHosts ?? [],
             },
           }
-        : resolveNetwork(config)
-          ? { network: { mode: "open" as const } }
-          : {}),
+        : networkMode(resolveNetwork(config))),
       // Publish ports: supply only the guest port; the control plane allocates
       // the node host port (read it back from the machine info after start).
       // Publishing a port implies the virtio-net backend on the node.
