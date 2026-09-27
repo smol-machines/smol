@@ -6,8 +6,12 @@ the machine keeps its files between turns, and a checkpoint after every turn let
 you rewind the session or branch it.
 
 The agent's own conversation lives inside the machine, so a rewind returns its
-memory and its files to the same moment. Nothing about the session depends on
-where it runs: the same commands drive the local engine or smol cloud (`--cloud`).
+memory and its files to the same moment. Without `--cloud`, the CLI owns the
+session record on this computer. With `--cloud`, the hosted API owns the session
+and continues its turns after the CLI disconnects; every command addresses the
+hosted session explicitly.
+
+## Local sessions
 
 ```sh
 export ANTHROPIC_API_KEY=...          # stays on this host; the machine sees a placeholder
@@ -23,6 +27,41 @@ smol agent rm fixer
 
 The former `smol agent fork` command remains an alias for `branch`.
 
+## Hosted sessions
+
+Log in with `smol auth login` or set `SMOL_CLOUD_TOKEN`. Store a model key as a
+smol cloud credential once, then name it with `--credential` when starting the
+session. The key stays outside the agent's machine.
+
+```sh
+smol agent start --cloud fixer --credential anthropic
+smol agent send --cloud fixer "make the tests pass"    # follows the turn's events
+smol agent log --cloud fixer                           # status and turn history
+smol agent branch --cloud fixer 0 fixer-alt
+smol agent pause --cloud fixer
+smol agent rm --cloud fixer
+```
+
+`start --cloud` waits for harness setup, and `send --cloud` waits if setup is
+still running. The session itself lives in smol cloud, so closing the CLI does
+not stop setup or an accepted turn. `send --cloud` reconnects to the event
+stream after a transient disconnect. Use the same `--cloud` flag with `ls`,
+`rewind`, `resume`, `cancel`, and `rm`; local and hosted sessions may share a name.
+
+If you have not stored a credential, pass the model key from the current shell
+for each turn without putting its value on the command line:
+
+```sh
+export ANTHROPIC_API_KEY=...
+smol agent start --cloud fixer
+smol agent send --cloud fixer --env-from ANTHROPIC_API_KEY "make the tests pass"
+```
+
+`--idempotency-key` makes a retried `send --cloud` return the same turn, and
+`--timeout-seconds` sets that turn's maximum run time. `--no-template` and
+`--pause-between-turns` apply to local sessions; hosted sessions offer explicit
+`pause` and `resume`.
+
 ## Harnesses
 
 | Harness | Runs | Needs |
@@ -34,7 +73,7 @@ The former `smol agent fork` command remains an alias for `branch`.
 
 ## Templates
 
-The first session of a given setup installs its harness, then saves a template:
+The first local session of a given setup installs its harness, then saves a template:
 a checkpoint of the machine taken right after the install. Later sessions with
 the same setup — harness, model, network hosts, key handling, size — start from
 it in a few seconds instead of installing again. Templates live in
@@ -50,7 +89,7 @@ registry. Add hosts with `--allow-host` (repeatable) or lift the limit with
 
 ## As a service
 
-`smol agent serve` exposes the same sessions over HTTP. Turns run inside the
+`smol agent serve` exposes self-hosted sessions over HTTP. Turns run inside the
 service, not in the client: a client starts a turn, gets its number, and can
 disconnect — the turn keeps going. Its events are kept, so any client can stream
 them from the start or from where it left off.
@@ -85,8 +124,8 @@ before sharing one:
 
 ## From code
 
-The sessions are the Rust SDK's `smolmachines::agent` module; `smol agent` is a
-thin wrapper around it.
+Local sessions use the Rust SDK's `smolmachines::agent` module; hosted sessions
+use `smolmachines::cloud_agent::CloudAgentSession`.
 
 ```rust
 use smolmachines::agent::{Harness, Session, SessionOptions};
@@ -98,16 +137,17 @@ session.rewind(0)?;
 
 ## Notes
 
-- Session records are JSON files under `~/.smol/agents` (`SMOL_AGENTS_DIR`), and
-  local checkpoints sit beside them.
+- Local session records are JSON files under `~/.smol/agents` (`SMOL_AGENTS_DIR`),
+  and local checkpoints sit beside them. Hosted sessions are listed by
+  `smol agent ls --cloud` and have no local record.
 - On the local engine, when `ANTHROPIC_API_KEY` is set as the session starts, the
   key never enters the machine: the agent sees a placeholder, and the engine
   swaps in the real key only on HTTPS requests to `api.anthropic.com`. The engine
   reads the key from the environment of whichever command starts or resumes the
   machine, so keep it set there. A turn that passes the key in its own `env` is
   refused, since that would put it inside the machine.
-- On smol cloud, or with `key_outside_machine` off, the key is passed to each
-  turn's process environment instead. It is never written to the machine's
-  configuration or the session record, but the agent can read it while it runs.
+- Hosted sessions can bind a stored cloud credential, keeping the key outside
+  the machine. With `--env-from` instead, the key is passed in that turn's
+  process environment; the agent can read it while it runs.
 - Rewinding or branching restores a checkpoint into a new machine. Pausing such a
   machine and resuming it needs smolvm with the resume-after-restore fix.

@@ -71,6 +71,32 @@ The default still waits for service readiness. Local creation still requires
 
 ## Local or cloud
 
+### Managed agents on smol cloud
+
+`CloudAgentSession` drives the hosted `/v1/agents` lifecycle, including background turns, replayable events, cancellation, rewind, and branch. This is separate from the local `agent::Session` API.
+
+```rust
+use smolmachines::{cloud_agent::CloudAgentSession, smol_cloud::types::{CreateAgent, SendAgentTurn}, ConnectOptions};
+
+let agent = CloudAgentSession::create(&CreateAgent {
+    name: "fixer".into(),
+    harness: Some("claude-code".into()),
+    credential: Some("anthropic".into()),
+    ..Default::default()
+}, &ConnectOptions::cloud())?;
+while agent.info()?.status == "starting" {
+    std::thread::sleep(std::time::Duration::from_secs(2));
+}
+let turn = agent.send(&SendAgentTurn {
+    prompt: "Fix the failing tests".into(),
+    env: Default::default(),
+    timeout_seconds: None,
+}, Some("task-123"))?;
+for event in agent.events(turn, None)? { println!("{:?}", event?); }
+```
+
+Wait until `agent.info()?.status == "ready"` before sending. The application still stages its repository in `/workspace` through the machine API.
+
 The default is local. Only an **explicit** credential moves that — an `api_key`
 or `SMOL_CLOUD_TOKEN` — so a `smol auth login` session on disk never silently
 redirects a program that meant to run locally.

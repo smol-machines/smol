@@ -6,6 +6,148 @@
 //! fail the parse of a whole list.
 
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+
+/// Create a managed agent session on smol cloud.
+#[derive(Debug, Clone, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateAgent {
+    /// Unique session name within the account.
+    pub name: String,
+    /// `claude-code`, `codex`, `opencode`, or `command`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub harness: Option<String>,
+    /// Harness model, when applicable.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    /// Image for a command harness.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub image: Option<String>,
+    /// Program for a command harness.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub program: Vec<String>,
+    /// Extra egress hosts.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub allow_hosts: Vec<String>,
+    /// Permit unrestricted outbound traffic.
+    pub open_network: bool,
+    /// Capture a checkpoint after each completed turn.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub checkpoints: Option<bool>,
+    /// Virtual CPUs.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cpus: Option<u8>,
+    /// Guest memory in MiB.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub memory_mb: Option<u32>,
+    /// Requested CPU architecture.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub arch: Option<String>,
+    /// Name of a stored provider credential.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub credential: Option<String>,
+}
+
+/// One turn and its final outcome, if available.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentTurn {
+    /// Zero-based turn index.
+    pub index: u64,
+    /// Prompt submitted for this turn.
+    pub prompt: String,
+    /// `preparing`, `running`, `done`, `failed`, `cancelled`, or `interrupted`.
+    pub status: String,
+    /// Final answer or failure reason.
+    pub result: Option<String>,
+    /// Whether the harness reported an error.
+    pub is_error: bool,
+    /// Provider cost when reported by the harness.
+    pub cost_usd: Option<f64>,
+    /// Whether this turn can be a rewind or fork point.
+    pub checkpointed: bool,
+    /// When the turn started.
+    pub started_at: String,
+    /// When the turn finished.
+    pub finished_at: Option<String>,
+}
+
+/// One managed agent session.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Agent {
+    /// Session name.
+    pub name: String,
+    /// Harness name.
+    pub harness: String,
+    /// Model, if configured.
+    pub model: Option<String>,
+    /// Session lifecycle state.
+    pub status: String,
+    /// Failure reason, if any.
+    pub error: Option<String>,
+    /// Current machine id.
+    pub machine_id: Option<String>,
+    /// Running turn index.
+    pub running_turn: Option<u64>,
+    /// Retained turn history.
+    pub turns: Vec<AgentTurn>,
+    /// When the session was created.
+    pub created_at: String,
+}
+
+/// Compact entry in the paginated session list.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentSummary {
+    /// Session name.
+    pub name: String,
+    /// Harness name.
+    pub harness: String,
+    /// Model, if configured.
+    pub model: Option<String>,
+    /// Session lifecycle state.
+    pub status: String,
+    /// Failure reason, if any.
+    pub error: Option<String>,
+    /// Current machine id.
+    pub machine_id: Option<String>,
+    /// Running turn index.
+    pub running_turn: Option<u64>,
+    /// When the session was created.
+    pub created_at: String,
+}
+
+/// One page of managed agent sessions.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentPage {
+    /// Session summaries.
+    pub items: Vec<AgentSummary>,
+    /// Name cursor for the following page.
+    pub next_cursor: Option<String>,
+}
+
+/// Input for one managed agent turn.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SendAgentTurn {
+    /// Task prompt.
+    pub prompt: String,
+    /// Environment for this turn only.
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub env: HashMap<String, String>,
+    /// Maximum run time in seconds.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub timeout_seconds: Option<u64>,
+}
+
+/// A turn accepted for asynchronous execution.
+#[derive(Debug, Clone, Deserialize)]
+pub struct AgentTurnAccepted {
+    /// Zero-based turn index.
+    pub turn: u64,
+}
 
 /// A published port, and the node host port the control plane allocated for it.
 #[derive(Debug, Clone, Deserialize, Serialize)]

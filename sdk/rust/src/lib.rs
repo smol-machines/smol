@@ -122,6 +122,7 @@
 pub mod agent;
 mod assets;
 pub mod bootstrap;
+pub mod cloud_agent;
 mod config;
 mod connect;
 mod error;

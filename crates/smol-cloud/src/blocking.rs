@@ -12,8 +12,23 @@ use serde::de::DeserializeOwned;
 use crate::credentials::Credentials;
 use crate::error::{Error, ErrorKind, Result};
 use crate::types::{
-    BranchBatch, Checkpoint, Command, CommandOutput, CreateMachine, Machine, Port, Share, Usage,
+    Agent, AgentPage, AgentTurn, AgentTurnAccepted, BranchBatch, Checkpoint, Command,
+    CommandOutput, CreateAgent, CreateMachine, Machine, Port, SendAgentTurn, Share, Usage,
 };
+
+/// A recorded agent event or the terminal turn summary.
+#[derive(Debug, Clone)]
+pub enum AgentStreamEvent {
+    /// One harness event, with the SSE id used to resume after disconnecting.
+    Event {
+        /// SSE id for reconnecting with `after`.
+        id: u64,
+        /// Harness event JSON.
+        data: serde_json::Value,
+    },
+    /// The turn finished. This is the final stream item.
+    Done(AgentTurn),
+}
 
 /// Ordinary calls are short: a hung request must not block a caller forever.
 pub const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
@@ -138,6 +153,185 @@ impl Client {
         timeout: Duration,
     ) -> Result<()> {
         self.send(method, path, body, timeout).map(|_| ())
+    }
+
+    // -- managed agents ---------------------------------------------------
+
+    /// Create a cloud managed agent session; setup continues in the background.
+    pub fn create_agent(&self, request: &CreateAgent) -> Result<Agent> {
+        self.json(
+            reqwest::Method::POST,
+            "/v1/agents",
+            Body::Json(serde_json::to_value(request).map_err(serialize_error)?),
+            REQUEST_TIMEOUT,
+        )
+    }
+
+    /// Fetch a managed session and its turn history.
+    pub fn agent(&self, name: &str) -> Result<Agent> {
+        self.json(
+            reqwest::Method::GET,
+            &format!("/v1/agents/{}", agent_segment(name)),
+            Body::None,
+            REQUEST_TIMEOUT,
+        )
+    }
+
+    /// List a page of session summaries.
+    pub fn agents(&self, after: Option<&str>, limit: Option<u32>) -> Result<AgentPage> {
+        let mut query = Vec::new();
+        if let Some(after) = after {
+            query.push(format!("after={}", encode_path(after)));
+        }
+        if let Some(limit) = limit {
+            query.push(format!("limit={limit}"));
+        }
+        let path = if query.is_empty() {
+            "/v1/agents".to_string()
+        } else {
+            format!("/v1/agents?{}", query.join("&"))
+        };
+        self.json(reqwest::Method::GET, &path, Body::None, REQUEST_TIMEOUT)
+    }
+
+    /// Submit a turn. Reusing an idempotency key with the same input returns its original index.
+    pub fn send_agent_turn(
+        &self,
+        name: &str,
+        request: &SendAgentTurn,
+        idempotency_key: Option<&str>,
+    ) -> Result<u64> {
+        let path = format!("/v1/agents/{}/turns", agent_segment(name));
+        let mut call = self
+            .http
+            .post(format!("{}{path}", self.credentials.base_url()))
+            .bearer_auth(self.credentials.api_key())
+            .timeout(REQUEST_TIMEOUT)
+            .json(request);
+        if let Some(key) = idempotency_key {
+            call = call.header("Idempotency-Key", key);
+        }
+        let response = call.send().map_err(|error| {
+            Error::new(
+                if error.is_timeout() {
+                    ErrorKind::Timeout
+                } else {
+                    ErrorKind::Connection
+                },
+                format!("POST {path} failed: {error}"),
+            )
+        })?;
+        let response = check_status(response, &reqwest::Method::POST, &path)?;
+        response
+            .json::<AgentTurnAccepted>()
+            .map(|accepted| accepted.turn)
+            .map_err(|error| {
+                Error::new(
+                    ErrorKind::Other,
+                    format!("POST {path} returned an unreadable body: {error}"),
+                )
+            })
+    }
+
+    /// Replay and follow a turn's events; pass the last event id on reconnect.
+    pub fn agent_events(&self, name: &str, turn: u64, after: Option<u64>) -> Result<AgentEvents> {
+        let mut path = format!("/v1/agents/{}/turns/{turn}/events", agent_segment(name));
+        if let Some(after) = after {
+            path.push_str(&format!("?after={after}"));
+        }
+        let response = self
+            .http
+            .get(format!("{}{path}", self.credentials.base_url()))
+            .bearer_auth(self.credentials.api_key())
+            .header(reqwest::header::ACCEPT, "text/event-stream")
+            .send()
+            .map_err(|error| {
+                Error::new(ErrorKind::Connection, format!("GET {path} failed: {error}"))
+            })?;
+        Ok(AgentEvents::new(check_status(
+            response,
+            &reqwest::Method::GET,
+            &path,
+        )?))
+    }
+
+    /// Stop a running turn's machine and mark the turn cancelled.
+    pub fn cancel_agent_turn(&self, name: &str, turn: u64) -> Result<()> {
+        self.empty(
+            reqwest::Method::POST,
+            &format!("/v1/agents/{}/turns/{turn}/cancel", agent_segment(name)),
+            Body::None,
+            START_TIMEOUT,
+        )
+    }
+
+    /// Restore the session to the state after `turn`.
+    pub fn rewind_agent(&self, name: &str, turn: u64) -> Result<Agent> {
+        self.json(
+            reqwest::Method::POST,
+            &format!("/v1/agents/{}/rewind", agent_segment(name)),
+            Body::Json(serde_json::json!({"turn":turn})),
+            START_TIMEOUT,
+        )
+    }
+
+    /// Branch an independent session from a checkpointed turn.
+    pub fn branch_agent(&self, name: &str, turn: u64, new_name: &str) -> Result<Agent> {
+        let body = serde_json::json!({"turn":turn,"name":new_name});
+        match self.json(
+            reqwest::Method::POST,
+            &format!("/v1/agents/{}/branch", agent_segment(name)),
+            Body::Json(body.clone()),
+            START_TIMEOUT,
+        ) {
+            Err(error) if error.kind() == ErrorKind::NotFound => self.json(
+                reqwest::Method::POST,
+                &format!("/v1/agents/{}/fork", agent_segment(name)),
+                Body::Json(body),
+                START_TIMEOUT,
+            ),
+            result => result,
+        }
+    }
+
+    /// Compatibility alias for the former agent operation.
+    pub fn fork_agent(&self, name: &str, turn: u64, new_name: &str) -> Result<Agent> {
+        self.json(
+            reqwest::Method::POST,
+            &format!("/v1/agents/{}/fork", agent_segment(name)),
+            Body::Json(serde_json::json!({"turn":turn,"name":new_name})),
+            START_TIMEOUT,
+        )
+    }
+
+    /// Pause an idle session's machine.
+    pub fn pause_agent(&self, name: &str) -> Result<()> {
+        self.empty(
+            reqwest::Method::POST,
+            &format!("/v1/agents/{}/pause", agent_segment(name)),
+            Body::None,
+            START_TIMEOUT,
+        )
+    }
+
+    /// Resume an idle session's machine.
+    pub fn resume_agent(&self, name: &str) -> Result<()> {
+        self.empty(
+            reqwest::Method::POST,
+            &format!("/v1/agents/{}/resume", agent_segment(name)),
+            Body::None,
+            START_TIMEOUT,
+        )
+    }
+
+    /// Delete a session and its unshared resources.
+    pub fn delete_agent(&self, name: &str) -> Result<()> {
+        self.empty(
+            reqwest::Method::DELETE,
+            &format!("/v1/agents/{}", agent_segment(name)),
+            Body::None,
+            START_TIMEOUT,
+        )
     }
 
     // -- machines ----------------------------------------------------------
@@ -593,6 +787,103 @@ pub fn encode_path(path: &str) -> String {
         .join("/")
 }
 
+fn agent_segment(name: &str) -> String {
+    encode_path(name).replace('/', "%2F")
+}
+
+/// A resumable stream of one managed agent turn.
+pub struct AgentEvents {
+    reader: BufReader<Box<dyn Read + Send>>,
+    finished: bool,
+}
+
+impl AgentEvents {
+    fn new(response: impl Read + Send + 'static) -> Self {
+        Self {
+            reader: BufReader::new(Box::new(response)),
+            finished: false,
+        }
+    }
+}
+
+impl Iterator for AgentEvents {
+    type Item = Result<AgentStreamEvent>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.finished {
+            return None;
+        }
+        let mut kind = String::new();
+        let mut id = 0;
+        let mut data = Vec::new();
+        loop {
+            let mut line = String::new();
+            match self.reader.read_line(&mut line) {
+                Ok(0) => {
+                    self.finished = true;
+                    return Some(Err(Error::new(
+                        ErrorKind::Connection,
+                        "agent event stream ended before the turn finished; reconnect with after",
+                    )));
+                }
+                Ok(_) => {}
+                Err(error) => {
+                    self.finished = true;
+                    return Some(Err(Error::new(
+                        ErrorKind::Connection,
+                        format!("agent event stream failed: {error}"),
+                    )));
+                }
+            }
+            let line = line.trim_end_matches(['\r', '\n']);
+            if let Some(value) = line.strip_prefix("event:") {
+                kind = value.trim().to_string();
+            } else if let Some(value) = line.strip_prefix("id:") {
+                id = value.trim().parse().unwrap_or(0);
+            } else if let Some(value) = line.strip_prefix("data:") {
+                data.push(value.trim_start().to_string());
+            } else if line.is_empty() {
+                let payload = data.join("\n");
+                match kind.as_str() {
+                    "event" => {
+                        return Some(
+                            serde_json::from_str(&payload)
+                                .map(|data| AgentStreamEvent::Event { id, data })
+                                .map_err(|error| {
+                                    Error::new(
+                                        ErrorKind::Other,
+                                        format!("invalid agent event: {error}"),
+                                    )
+                                }),
+                        )
+                    }
+                    "done" => {
+                        self.finished = true;
+                        return Some(
+                            serde_json::from_str(&payload)
+                                .map(AgentStreamEvent::Done)
+                                .map_err(|error| {
+                                    Error::new(
+                                        ErrorKind::Other,
+                                        format!("invalid turn summary: {error}"),
+                                    )
+                                }),
+                        );
+                    }
+                    "error" => {
+                        self.finished = true;
+                        return Some(Err(Error::new(ErrorKind::Other, payload)));
+                    }
+                    _ => {}
+                }
+                kind.clear();
+                id = 0;
+                data.clear();
+            }
+        }
+    }
+}
+
 /// Server-sent events, parsed off a reader.
 ///
 /// Each event is an `event:` line naming the kind and one or more `data:` lines
@@ -677,6 +968,92 @@ fn sse_event(kind: &str, data: &str) -> Option<StreamEvent> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Write;
+
+    #[test]
+    fn managed_turn_sends_idempotency_key_and_camel_case_body() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = std::thread::spawn(move || {
+            let (mut socket, _) = listener.accept().unwrap();
+            let mut reader = BufReader::new(socket.try_clone().unwrap());
+            let mut first = String::new();
+            reader.read_line(&mut first).unwrap();
+            let mut headers = String::new();
+            let mut length = 0;
+            loop {
+                let mut line = String::new();
+                reader.read_line(&mut line).unwrap();
+                if line == "\r\n" {
+                    break;
+                }
+                if line.to_ascii_lowercase().starts_with("content-length:") {
+                    length = line
+                        .split(':')
+                        .nth(1)
+                        .unwrap()
+                        .trim()
+                        .parse::<usize>()
+                        .unwrap();
+                }
+                headers.push_str(&line);
+            }
+            let mut body = vec![0; length];
+            reader.read_exact(&mut body).unwrap();
+            socket.write_all(b"HTTP/1.1 202 Accepted\r\nContent-Type: application/json\r\nContent-Length: 10\r\n\r\n{\"turn\":0}").unwrap();
+            (first, headers, body)
+        });
+        let client =
+            Client::new(Credentials::new(format!("http://{address}"), "smk_test")).unwrap();
+        let turn = client
+            .send_agent_turn(
+                "fixer",
+                &SendAgentTurn {
+                    prompt: "fix tests".into(),
+                    env: Default::default(),
+                    timeout_seconds: Some(123),
+                },
+                Some("task-1"),
+            )
+            .unwrap();
+        assert_eq!(turn, 0);
+        let (first, headers, body) = server.join().unwrap();
+        assert!(first.starts_with("POST /v1/agents/fixer/turns HTTP/1.1"));
+        assert!(headers
+            .to_ascii_lowercase()
+            .contains("idempotency-key: task-1"));
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["timeoutSeconds"], 123);
+    }
+
+    #[test]
+    fn managed_agent_stream_preserves_resume_id_and_terminal_turn() {
+        let raw = concat!(
+            "event: event\r\nid: 7\r\ndata: {\"type\":\"text\"}\r\n\r\n",
+            "event: done\ndata: {\"index\":0,\"prompt\":\"fix\",\"status\":\"done\",",
+            "\"isError\":false,\"checkpointed\":true,\"startedAt\":\"now\"}\n\n"
+        );
+        let mut stream = AgentEvents::new(std::io::Cursor::new(raw.as_bytes().to_vec()));
+        match stream.next().unwrap().unwrap() {
+            AgentStreamEvent::Event { id, data } => {
+                assert_eq!(id, 7);
+                assert_eq!(data["type"], "text");
+            }
+            _ => panic!("expected event"),
+        }
+        match stream.next().unwrap().unwrap() {
+            AgentStreamEvent::Done(turn) => assert_eq!(turn.index, 0),
+            _ => panic!("expected done"),
+        }
+        assert!(stream.next().is_none());
+        let mut broken =
+            AgentEvents::new(std::io::Cursor::new(b"event: event\ndata: {}\n\n".to_vec()));
+        assert!(broken.next().unwrap().is_ok());
+        assert_eq!(
+            broken.next().unwrap().unwrap_err().kind(),
+            ErrorKind::Connection
+        );
+    }
 
     #[test]
     fn a_files_path_keeps_its_separators_and_escapes_the_rest() {
