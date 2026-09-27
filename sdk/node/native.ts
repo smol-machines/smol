@@ -17,6 +17,7 @@ export interface NativeExecOptions {
   env?: NativeEnvVar[] | undefined;
   workdir?: string | undefined;
   timeoutSecs?: number | undefined;
+  user?: string | undefined;
 }
 
 export interface NativeHostMount {
@@ -88,6 +89,8 @@ export interface NativeExecStreamEvent {
 /** A live exec stream: `next()` resolves the next event, or `null` at end. */
 export interface NativeExecStream {
   next(): Promise<NativeExecStreamEvent | null>;
+  /** Kill the command; pending and later `next()` calls resolve `null`. */
+  kill(): void;
 }
 
 export interface NapiMachine {

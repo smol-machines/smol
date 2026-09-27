@@ -24,7 +24,10 @@ const check = (label: string, ok: boolean, detail = "") => {
 };
 
 // --- in-memory mock cloud ---
-const seen: any = { auth: null, execBody: null };
+const seen: any = { auth: null, execBody: null, execBodies: [] as any[] };
+// Whether the mock control plane echoes a per-command `user` (a current one
+// does; one that predates the field silently drops it and echoes nothing).
+let echoUser = true;
 const files = new Map<string, Buffer>();
 const readinessGets: Record<string, number> = {};
 
@@ -248,7 +251,9 @@ const server = createServer(async (req, res) => {
   }
   if (method === "POST" && url === "/v1/machines/m1/exec") {
     seen.execBody = JSON.parse((await readBody(req)).toString() || "{}");
+    seen.execBodies.push(seen.execBody);
     return json(200, {
+      ...(echoUser && seen.execBody.user !== undefined ? { user: seen.execBody.user } : {}),
       exitCode: 0,
       stdout: "cloud-exec-ok\n",
       stderr: "",
@@ -516,6 +521,33 @@ async function main(): Promise<void> {
     JSON.stringify(seen.createBody),
   );
 
+  // The control plane opens egress when `network` is absent, so an explicit
+  // "no network" must be sent as `blocked`, and unset must stay absent.
+  await Machine.create(
+    { image: "alpine", resources: { network: false } },
+    { target: "cloud", baseUrl, apiKey: "smk_test123" },
+  );
+  check(
+    "network: false is sent as blocked",
+    JSON.stringify(seen.createBody?.network) === JSON.stringify({ mode: "blocked" }),
+    JSON.stringify(seen.createBody?.network),
+  );
+  await Machine.create(
+    { image: "alpine", network: true },
+    { target: "cloud", baseUrl, apiKey: "smk_test123" },
+  );
+  check(
+    "network: true is sent as open",
+    JSON.stringify(seen.createBody?.network) === JSON.stringify({ mode: "open" }),
+    JSON.stringify(seen.createBody?.network),
+  );
+  await Machine.create({ image: "alpine" }, { target: "cloud", baseUrl, apiKey: "smk_test123" });
+  check(
+    "unset network is left to the control plane",
+    !("network" in (seen.createBody ?? {})),
+    JSON.stringify(seen.createBody),
+  );
+
   // --- branch: live-RAM child over the cloud ---
   const clone = await m.branch("rollout-1", {
     ports: [{ host: 18080, guest: 80 }],
@@ -705,6 +737,56 @@ async function main(): Promise<void> {
   );
   await m.unshare();
   check("unshare() issues DELETE on the share route", seen.unshared === true);
+
+  // --- per-command user: probe the control plane before running as a user ---
+  const cloudConn = { target: "cloud" as const, baseUrl, apiKey: "smk_test123" };
+  seen.execBodies = [];
+  const asUser = await m.exec(["id", "-u"], { user: "nobody" });
+  const firstRun = seen.execBodies.map((b: any) => [b.command.join(" "), b.user]);
+  check(
+    "a user-bearing exec probes with a harmless `true` first, then runs as the user",
+    JSON.stringify(firstRun) === JSON.stringify([["true", "nobody"], ["id -u", "nobody"]]) &&
+      asUser.exitCode === 0,
+    JSON.stringify(firstRun),
+  );
+  seen.execBodies = [];
+  await m.exec(["id", "-u"], { user: "nobody" });
+  check(
+    "a proven user is not probed again on the same handle",
+    seen.execBodies.length === 1 && seen.execBodies[0].command[0] === "id",
+    `${seen.execBodies.length} request(s)`,
+  );
+  // A control plane that predates per-command users drops the field: the SDK
+  // must refuse BEFORE the real command runs as the default account.
+  echoUser = false;
+  const old = await Machine.connect("m1", cloudConn);
+  seen.execBodies = [];
+  let oldErr: unknown;
+  try {
+    await old.exec(["rm", "-rf", "/data"], { user: "app" });
+  } catch (e) {
+    oldErr = e;
+  }
+  check(
+    "an old control plane is refused with NotSupportedError",
+    oldErr instanceof NotSupportedError,
+    String(oldErr),
+  );
+  check(
+    "...and the real command never reaches it",
+    seen.execBodies.length === 1 && seen.execBodies[0].command[0] === "true",
+    JSON.stringify(seen.execBodies.map((b: any) => b.command)),
+  );
+  let streamErr: unknown;
+  try {
+    for await (const _ of old.execStream(["id"], { user: "app" })) {
+      /* unreachable */
+    }
+  } catch (e) {
+    streamErr = e;
+  }
+  check("execStream is refused the same way", streamErr instanceof NotSupportedError, String(streamErr));
+  echoUser = true;
 
   await m.stop();
   await m.delete();

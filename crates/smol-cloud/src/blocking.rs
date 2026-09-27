@@ -5,6 +5,7 @@
 //! [`crate::credentials`] with its own HTTP client.
 
 use std::io::{BufRead, BufReader, Read};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use serde::de::DeserializeOwned;
@@ -50,6 +51,8 @@ enum Body<'a> {
 pub struct Client {
     credentials: Credentials,
     http: reqwest::blocking::Client,
+    /// Streams only: async so a read can be raced against a cancel.
+    stream_http: reqwest::Client,
 }
 
 impl Client {
@@ -58,7 +61,20 @@ impl Client {
         let http = reqwest::blocking::Client::builder().build().map_err(|e| {
             Error::new(ErrorKind::Connection, format!("build the HTTP client: {e}"))
         })?;
-        Ok(Self { credentials, http })
+        // Each stream runs on its own short-lived runtime, and a pooled
+        // connection is bound to the runtime that opened it, so never reuse one.
+        let stream_http = reqwest::Client::builder()
+            .connect_timeout(REQUEST_TIMEOUT)
+            .pool_max_idle_per_host(0)
+            .build()
+            .map_err(|e| {
+                Error::new(ErrorKind::Connection, format!("build the HTTP client: {e}"))
+            })?;
+        Ok(Self {
+            credentials,
+            http,
+            stream_http,
+        })
     }
 
     /// Build a client, resolving credentials from the environment and the CLI
@@ -341,17 +357,81 @@ impl Client {
         id: &str,
         command: &Command,
     ) -> Result<impl Iterator<Item = StreamEvent>> {
+        self.exec_stream_cancellable(id, command, &StreamCancel::new())
+    }
+
+    /// [`Self::exec_stream`], ended early by `cancel` from any thread.
+    ///
+    /// A command can run, and stay quiet, for longer than any fixed request
+    /// window, so only the wait for the response headers is bounded (by
+    /// [`REQUEST_TIMEOUT`]); the body is read for as long as the command runs.
+    /// Cancelling closes the connection at once, even while a reader is blocked
+    /// waiting for the next event, and the iterator then ends. Whether the
+    /// command keeps running is up to the control plane.
+    pub fn exec_stream_cancellable(
+        &self,
+        id: &str,
+        command: &Command,
+        cancel: &StreamCancel,
+    ) -> Result<impl Iterator<Item = StreamEvent>> {
         let path = format!("/v1/machines/{id}/exec/stream");
-        let response = self
-            .http
+        // A private runtime per stream: the blocking client's reads cannot be
+        // interrupted from another thread, and an async read raced against the
+        // cancel token can.
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .map_err(|e| Error::new(ErrorKind::Other, format!("start a stream runtime: {e}")))?;
+        let request = self
+            .stream_http
             .post(format!("{}{path}", self.credentials.base_url()))
             .bearer_auth(self.credentials.api_key())
             .header(reqwest::header::ACCEPT, "text/event-stream")
-            .json(command)
-            .send()
-            .map_err(|e| Error::new(ErrorKind::Connection, format!("POST {path} failed: {e}")))?;
-        let response = check_status(response, &reqwest::Method::POST, &path)?;
-        Ok(SseEvents::new(response))
+            .json(command);
+        let mut cancelled = cancel.subscribe();
+        let sent = runtime.block_on(async {
+            tokio::select! {
+                biased;
+                _ = wait_cancelled(&mut cancelled) => None,
+                sent = tokio::time::timeout(REQUEST_TIMEOUT, request.send()) => Some(sent),
+            }
+        });
+        let response = match sent {
+            None => None,
+            Some(Err(_)) => {
+                return Err(Error::new(
+                    ErrorKind::Timeout,
+                    format!("POST {path} timed out after {REQUEST_TIMEOUT:?}"),
+                ))
+            }
+            Some(Ok(Err(e))) => {
+                return Err(Error::new(
+                    ErrorKind::Connection,
+                    format!("POST {path} failed: {e}"),
+                ))
+            }
+            Some(Ok(Ok(response))) if response.status().is_success() => Some(response),
+            Some(Ok(Ok(response))) => {
+                let status = response.status();
+                let request_id = request_id(response.headers());
+                let text = runtime
+                    .block_on(async {
+                        tokio::time::timeout(REQUEST_TIMEOUT, response.text()).await
+                    })
+                    .ok()
+                    .and_then(|text| text.ok())
+                    .unwrap_or_default();
+                return Err(status_error(status, &reqwest::Method::POST, &path, &text)
+                    .with_request_id(request_id));
+            }
+        };
+        Ok(SseEvents::new(StreamBody {
+            runtime,
+            response,
+            cancelled,
+            pending: Vec::new(),
+            offset: 0,
+        }))
     }
 
     /// Read a file out of a machine.
@@ -559,18 +639,122 @@ fn check_status(
     if status.is_success() {
         return Ok(response);
     }
-    let request_id = response
-        .headers()
+    let request_id = request_id(response.headers());
+    let text = response.text().unwrap_or_default();
+    Err(status_error(status, method, path, &text).with_request_id(request_id))
+}
+
+fn request_id(headers: &reqwest::header::HeaderMap) -> Option<String> {
+    headers
         .get("x-request-id")
         .and_then(|value| value.to_str().ok())
-        .map(str::to_owned);
-    let kind = ErrorKind::from_status(status.as_u16());
-    let text = response.text().unwrap_or_default();
+        .map(str::to_owned)
+}
+
+fn status_error(
+    status: reqwest::StatusCode,
+    method: &reqwest::Method,
+    path: &str,
+    text: &str,
+) -> Error {
     let mut message = format!("{method} {path} → {status}");
     if !text.is_empty() {
         message.push_str(&format!(": {text}"));
     }
-    Err(Error::new(kind, message).with_request_id(request_id))
+    Error::new(ErrorKind::from_status(status.as_u16()), message)
+}
+
+/// Ends a live [`Client::exec_stream_cancellable`] stream from any thread.
+/// Clones share one token; cancelling twice is harmless.
+#[derive(Debug, Clone)]
+pub struct StreamCancel(Arc<tokio::sync::watch::Sender<bool>>);
+
+impl Default for StreamCancel {
+    fn default() -> Self {
+        Self(Arc::new(tokio::sync::watch::channel(false).0))
+    }
+}
+
+impl StreamCancel {
+    /// A token that has not been cancelled.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// End the stream: close its connection, or keep it from being opened.
+    pub fn cancel(&self) {
+        self.0.send_replace(true);
+    }
+
+    /// Whether [`Self::cancel`] has been called.
+    pub fn is_cancelled(&self) -> bool {
+        *self.0.borrow()
+    }
+
+    fn subscribe(&self) -> tokio::sync::watch::Receiver<bool> {
+        self.0.subscribe()
+    }
+}
+
+/// Resolves once the token is cancelled.
+async fn wait_cancelled(cancelled: &mut tokio::sync::watch::Receiver<bool>) {
+    // The stream holds a receiver, not the sender, so the sender can go away
+    // with the caller's token; that is not a cancel, so wait forever then.
+    if cancelled.wait_for(|cancelled| *cancelled).await.is_err() {
+        std::future::pending::<()>().await;
+    }
+}
+
+/// A streaming response body, read chunk by chunk on the stream's runtime and
+/// abandoned the moment its token is cancelled.
+struct StreamBody {
+    runtime: tokio::runtime::Runtime,
+    /// None once the body ended or was cancelled; dropping it closes the
+    /// connection.
+    response: Option<reqwest::Response>,
+    cancelled: tokio::sync::watch::Receiver<bool>,
+    pending: Vec<u8>,
+    /// How much of `pending` has been handed out.
+    offset: usize,
+}
+
+impl Read for StreamBody {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        while self.offset == self.pending.len() {
+            let Some(response) = self.response.as_mut() else {
+                return Ok(0);
+            };
+            let cancelled = &mut self.cancelled;
+            let next = self.runtime.block_on(async {
+                tokio::select! {
+                    biased;
+                    _ = wait_cancelled(cancelled) => None,
+                    chunk = response.chunk() => Some(chunk),
+                }
+            });
+            match next {
+                Some(Ok(Some(chunk))) => {
+                    self.pending = chunk.to_vec();
+                    self.offset = 0;
+                }
+                Some(Err(e)) => {
+                    self.response = None;
+                    return Err(std::io::Error::other(e));
+                }
+                // The body ended, or the caller cancelled: either way close the
+                // connection now rather than when the reader is dropped.
+                Some(Ok(None)) | None => {
+                    self.response = None;
+                    return Ok(0);
+                }
+            }
+        }
+        let rest = &self.pending[self.offset..];
+        let n = buf.len().min(rest.len());
+        buf[..n].copy_from_slice(&rest[..n]);
+        self.offset += n;
+        Ok(n)
+    }
 }
 
 /// Percent-encode each path segment but keep the separators: the files route is
