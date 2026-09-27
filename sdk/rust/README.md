@@ -272,7 +272,7 @@ iterator:
 ```rust
 use smolmachines::{ExecEvent, ExecOptions};
 
-for event in machine.exec_stream(["sh", "-c", "make 2>&1"], ExecOptions::new()) {
+for event in machine.exec_stream(["sh", "-c", "make 2>&1"], ExecOptions::new())? {
     match event {
         ExecEvent::Stdout(chunk) => print!("{}", String::from_utf8_lossy(&chunk)),
         ExecEvent::Stderr(chunk) => eprint!("{}", String::from_utf8_lossy(&chunk)),
@@ -282,8 +282,19 @@ for event in machine.exec_stream(["sh", "-c", "make 2>&1"], ExecOptions::new()) 
 }
 ```
 
-Dropping the stream early leaves the command running in the guest. It does not
-kill it.
+`stream.kill()` (or a `KillHandle` from `stream.kill_handle()`, usable from
+another thread) kills the command and ends the stream. Dropping the stream
+without killing it leaves the command running in the guest, like dropping a
+`std::process::Child`.
+
+`ExecOptions::user("nobody")` runs a command as another user on an image
+machine; a bare VM refuses it rather than running it as root. On the cloud the
+SDK first checks that the control plane applies the user, and returns
+`NotSupported` before running anything if it would not.
+
+`smolmachines::local_availability()` says whether this host can run local
+machines at all (a supported platform, a usable `/dev/kvm` or
+Hypervisor.framework) without booting or downloading anything.
 
 ## Mounts
 

@@ -120,6 +120,7 @@
 #![warn(missing_docs)]
 
 mod assets;
+mod availability;
 pub mod bootstrap;
 mod config;
 mod connect;
@@ -130,10 +131,11 @@ mod transport;
 mod tunnel;
 
 pub use assets::{configure_runtime_assets, RuntimeAssets};
+pub use availability::local_availability;
 pub use config::{EgressInterceptor, MachineBuilder, MachineConfig, Mount, Port, Resources};
 pub use connect::{ConnectOptions, Target};
 pub use error::{Error, ErrorKind, Result};
-pub use exec::{ExecEvent, ExecOptions, ExecResult, ExecStream};
+pub use exec::{ExecEvent, ExecOptions, ExecResult, ExecStream, KillHandle};
 pub use machine::{
     list_cloud_machines, BranchOptions, Checkpoint, CheckpointOptions, CheckpointResult,
     CloudCheckpoint, CostBreakdown, ImageInfo, Machine, MachineState, PortEndpoint, ShareLink,

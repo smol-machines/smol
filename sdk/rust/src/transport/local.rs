@@ -12,7 +12,7 @@
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::sync::mpsc;
+use std::sync::{mpsc, Arc, Mutex, MutexGuard};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -20,7 +20,7 @@ use super::{unsupported, ReadyOptions, Transport};
 use crate::config::{EgressInterceptor, Port};
 use crate::connect::Target;
 use crate::error::{Error, ErrorKind, Result};
-use crate::exec::{ExecEvent, ExecOptions, ExecResult, ExecStream};
+use crate::exec::{ExecEvent, ExecOptions, ExecResult, ExecStream, KillHandle};
 use crate::machine::{
     BranchOptions, Checkpoint, CheckpointOptions, CheckpointResult, CloudCheckpoint, ImageInfo,
     MachineState, PortEndpoint, ShareLink, UsageReport,
@@ -40,6 +40,13 @@ fn transfer_dir() -> Result<tempfile::TempDir> {
     builder
         .tempdir()
         .map_err(|e| Error::new(ErrorKind::Storage, format!("stage file transfer: {e}")))
+}
+
+/// Lock a mutex whose guarded state a panic cannot leave half-updated.
+fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
+    mutex
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
 fn forward_output(
@@ -208,7 +215,7 @@ fn retry_text_busy<T>(mut start: impl FnMut() -> std::io::Result<T>) -> std::io:
     start()
 }
 
-fn explicit_cli(path: PathBuf) -> Result<PathBuf> {
+pub(crate) fn explicit_cli(path: PathBuf) -> Result<PathBuf> {
     if path.is_file() {
         Ok(path)
     } else {
@@ -332,13 +339,25 @@ impl LocalTransport {
             args.push("--workdir".into());
             args.push(workdir.clone());
         }
-        if let Some(timeout) = options.timeout {
-            args.push("--timeout".into());
-            args.push(format!("{}s", timeout.as_secs()));
-        }
+        push_timeout_and_user(&mut args, options);
         args.push("--".into());
         args.extend(command.iter().cloned());
         args
+    }
+}
+
+/// The CLI flags for a command's timeout and user, shared by `exec` and `run`.
+fn push_timeout_and_user(args: &mut Vec<String>, options: &ExecOptions) {
+    if let Some(timeout) = options.timeout {
+        // Whole milliseconds, rounded up so a sub-second timeout neither turns
+        // into zero (which the CLI rejects) nor into a longer whole second.
+        let millis = timeout.as_nanos().div_ceil(1_000_000);
+        args.push("--timeout".into());
+        args.push(format!("{millis}ms"));
+    }
+    if let Some(user) = &options.user {
+        // One argument, so a user that starts with `-` cannot read as a flag.
+        args.push(format!("--user={user}"));
     }
 }
 
@@ -544,16 +563,38 @@ impl Transport for LocalTransport {
         let stdout = thread::spawn(move || forward_output(out, out_tx, ExecEvent::Stdout));
         let err_tx = tx.clone();
         let stderr = thread::spawn(move || forward_output(err, err_tx, ExecEvent::Stderr));
+        // The child is shared with the kill handle, so it is reaped by polling
+        // rather than a blocking wait that would hold the lock.
+        let child = Arc::new(Mutex::new(child));
+        let waited = Arc::clone(&child);
         thread::spawn(move || {
-            let code = child.wait().ok().and_then(|s| s.code()).unwrap_or(-1);
+            // The CLI closes its output when it exits, so the readers finish
+            // first and the poll below is normally answered at once.
             let out_result = stdout.join();
             let err_result = stderr.join();
+            let status = loop {
+                match lock(&waited).try_wait() {
+                    Ok(Some(status)) => break Some(status),
+                    Ok(None) => {}
+                    Err(_) => break None,
+                }
+                thread::sleep(Duration::from_millis(10));
+            };
             if out_result.is_err() || err_result.is_err() {
                 let _ = tx.send(ExecEvent::Error("exec output reader failed".into()));
             }
+            let code = status.and_then(|s| s.code()).unwrap_or(-1);
             let _ = tx.send(ExecEvent::Exit(code));
         });
-        Ok(ExecStream::from_receiver(rx))
+        // Killing the CLI closes its connection to the guest agent, and the
+        // agent kills the command's whole process tree when its client goes.
+        let kill = KillHandle::new(move || {
+            let mut child = lock(&child);
+            if matches!(child.try_wait(), Ok(None)) {
+                let _ = child.kill();
+            }
+        });
+        Ok(ExecStream::new(rx, kill))
     }
 
     /// Run a command in a *fresh ephemeral* machine from `image`.
@@ -576,6 +617,7 @@ impl Transport for LocalTransport {
             args.push("--workdir".into());
             args.push(workdir.clone());
         }
+        push_timeout_and_user(&mut args, &options);
         args.push("--".into());
         args.extend(command);
         let borrowed: Vec<&str> = args.iter().map(String::as_str).collect();
@@ -1072,6 +1114,103 @@ mod io_tests {
     }
 
     #[test]
+    fn exec_and_run_pass_the_user_and_a_millisecond_timeout() {
+        let dir = tempfile::tempdir().unwrap();
+        let transport = cli(dir.path(), "printf '%s\\n' \"$@\"");
+        let options = ExecOptions::new()
+            .timeout(Duration::from_millis(1500))
+            .user("-nobody");
+        let exec = transport.exec(vec!["id".into()], options.clone()).unwrap();
+        let args: Vec<_> = exec.stdout_utf8().lines().map(str::to_owned).collect();
+        let before_command = &args[..args.iter().position(|a| a == "--").unwrap()];
+        assert!(
+            before_command
+                .windows(2)
+                .any(|w| w == ["--timeout", "1500ms"]),
+            "{args:?}"
+        );
+        // One argument, so a user starting with `-` cannot be read as a flag.
+        assert!(
+            before_command.contains(&"--user=-nobody".to_string()),
+            "{args:?}"
+        );
+
+        let run = Transport::run(&transport, "alpine", vec!["id".into()], options).unwrap();
+        let args: Vec<_> = run.stdout_utf8().lines().map(str::to_owned).collect();
+        assert_eq!(&args[..2], ["machine", "run"]);
+        assert!(
+            args.windows(2).any(|w| w == ["--timeout", "1500ms"]),
+            "{args:?}"
+        );
+        assert!(args.contains(&"--user=-nobody".to_string()), "{args:?}");
+
+        // A sub-millisecond timeout rounds up rather than becoming zero.
+        let tiny = transport
+            .exec(
+                vec!["id".into()],
+                ExecOptions::new().timeout(Duration::from_micros(10)),
+            )
+            .unwrap();
+        assert!(
+            tiny.stdout_utf8().contains("\n1ms\n"),
+            "{}",
+            tiny.stdout_utf8()
+        );
+    }
+
+    #[test]
+    fn killing_a_stream_kills_the_command_and_ends_the_stream() {
+        let dir = tempfile::tempdir().unwrap();
+        let pidfile = dir.path().join("pid");
+        let transport = cli(
+            dir.path(),
+            &format!(
+                "echo $$ > {}\nprintf started\nexec sleep 30",
+                pidfile.display()
+            ),
+        );
+        let mut stream = transport
+            .exec_stream(vec!["sleep".into()], ExecOptions::new())
+            .unwrap();
+        assert_eq!(stream.next(), Some(ExecEvent::Stdout(b"started".to_vec())));
+        let pid = std::fs::read_to_string(&pidfile)
+            .unwrap()
+            .trim()
+            .to_string();
+        let proc_dir = Path::new("/proc").join(&pid);
+
+        // Kill from another thread while this one waits for the next event.
+        let handle = stream.kill_handle();
+        let killer = thread::spawn(move || {
+            thread::sleep(Duration::from_millis(200));
+            handle.kill();
+        });
+        let start = Instant::now();
+        assert_eq!(stream.next(), None, "a killed stream ends without an exit");
+        assert!(start.elapsed() < Duration::from_secs(5));
+        killer.join().unwrap();
+
+        // The process is gone and reaped, not left as a zombie.
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while proc_dir.exists() && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(20));
+        }
+        assert!(!proc_dir.exists(), "pid {pid} is still around");
+        // Killing again, after the command is gone, is harmless.
+        stream.kill();
+    }
+
+    #[test]
+    fn an_unkilled_stream_still_reports_its_exit() {
+        let dir = tempfile::tempdir().unwrap();
+        let transport = cli(dir.path(), "exit 4");
+        let stream = transport
+            .exec_stream(vec!["true".into()], ExecOptions::new())
+            .unwrap();
+        assert_eq!(stream.collect_result().exit_code, 4);
+    }
+
+    #[test]
     fn transfers_use_private_independent_staging_and_clean_up_on_failure() {
         let a = transfer_dir().unwrap();
         let b = transfer_dir().unwrap();
@@ -1121,7 +1260,7 @@ mod io_tests {
         forward_output(Broken, tx.clone(), ExecEvent::Stdout);
         tx.send(ExecEvent::Exit(0)).unwrap();
         drop(tx);
-        let result = ExecStream::from_receiver(rx).collect_result();
+        let result = ExecStream::new(rx, KillHandle::new(|| {})).collect_result();
         assert_eq!(result.exit_code, -1);
         assert!(result.stderr_utf8().contains("broken pipe"));
     }

@@ -1,17 +1,18 @@
 //! smol cloud, over the shared [`smol_cloud`] client.
 
+use std::collections::HashSet;
 use std::path::Path;
-use std::sync::mpsc;
+use std::sync::{mpsc, Mutex};
 use std::thread;
 use std::time::Duration;
 
-use smol_cloud::blocking::{Client, StreamEvent, REQUEST_TIMEOUT};
+use smol_cloud::blocking::{Client, StreamCancel, StreamEvent, REQUEST_TIMEOUT};
 use smol_cloud::types as wire;
 
 use super::{unsupported, ReadyOptions, Transport};
 use crate::connect::Target;
 use crate::error::{Error, ErrorKind, Result};
-use crate::exec::{ExecEvent, ExecOptions, ExecResult, ExecStream};
+use crate::exec::{ExecEvent, ExecOptions, ExecResult, ExecStream, KillHandle};
 use crate::machine::{
     BranchOptions, Checkpoint, CheckpointOptions, CloudCheckpoint, CostBreakdown, ImageInfo,
     MachineState, PortEndpoint, ShareLink, UsageReport, UsageTotals,
@@ -26,6 +27,8 @@ pub(crate) struct CloudTransport {
     client: Client,
     name: String,
     id: String,
+    /// Users this control plane has been shown to apply (see `ensure_user`).
+    verified_users: Mutex<HashSet<String>>,
 }
 
 impl CloudTransport {
@@ -34,6 +37,7 @@ impl CloudTransport {
             client,
             name: name.into(),
             id: id.into(),
+            verified_users: Mutex::new(HashSet::new()),
         }
     }
 
@@ -47,8 +51,37 @@ impl CloudTransport {
             command,
             env: options.env.iter().cloned().collect(),
             cwd: options.workdir.clone(),
-            timeout_seconds: options.timeout.map(|t| t.as_secs()),
+            // Whole seconds, rounded up: rounding down would turn a sub-second
+            // timeout into zero and cut every other one short.
+            timeout_seconds: options
+                .timeout
+                .map(|t| t.as_nanos().div_ceil(1_000_000_000) as u64),
+            user: options.user.clone(),
         }
+    }
+
+    /// Check, once per user, that this control plane applies a per-command
+    /// user before running anything as one.
+    ///
+    /// A control plane that predates the field ignores it and runs the command
+    /// as the image's default account, which for a sandbox is the dangerous
+    /// direction to fail in. The ones that support it echo the user back, so a
+    /// harmless `true` proves it before the real command runs; a stream has no
+    /// response body to carry the echo, so this is its only check.
+    fn ensure_user(&self, user: &str) -> Result<()> {
+        if lock(&self.verified_users).contains(user) {
+            return Ok(());
+        }
+        let probe = wire::Command {
+            command: vec!["true".to_string()],
+            timeout_seconds: Some(REQUEST_TIMEOUT.as_secs()),
+            user: Some(user.to_string()),
+            ..Default::default()
+        };
+        let output = self.client.exec(&self.id, &probe, REQUEST_TIMEOUT)?;
+        check_user_echo(&output, user)?;
+        lock(&self.verified_users).insert(user.to_string());
+        Ok(())
     }
 
     /// A command may legitimately outlive the default request window, so size
@@ -71,6 +104,27 @@ impl CloudTransport {
             })
             .collect()
     }
+}
+
+/// Refuse a response that does not echo the requested user: the control plane
+/// ignored it, so the command ran (or would run) as someone else.
+fn check_user_echo(output: &wire::CommandOutput, user: &str) -> Result<()> {
+    if output.user.as_deref() == Some(user) {
+        return Ok(());
+    }
+    Err(Error::new(
+        ErrorKind::NotSupported,
+        format!(
+            "the control plane did not honor user \"{user}\": it predates per-command \
+             users and would run the command as the image's default account"
+        ),
+    ))
+}
+
+fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    mutex
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
 impl Transport for CloudTransport {
@@ -142,10 +196,16 @@ impl Transport for CloudTransport {
     }
 
     fn exec(&self, command: Vec<String>, options: ExecOptions) -> Result<ExecResult> {
+        if let Some(user) = &options.user {
+            self.ensure_user(user)?;
+        }
         let timeout = Self::exec_timeout(&options);
         let output = self
             .client
             .exec(&self.id, &Self::command(command, &options), timeout)?;
+        if let Some(user) = &options.user {
+            check_user_echo(&output, user)?;
+        }
         Ok(ExecResult {
             exit_code: output.exit_code.unwrap_or(0),
             stdout: output.stdout_bytes(),
@@ -154,9 +214,15 @@ impl Transport for CloudTransport {
     }
 
     fn exec_stream(&self, command: Vec<String>, options: ExecOptions) -> Result<ExecStream> {
-        let events = self
-            .client
-            .exec_stream(&self.id, &Self::command(command, &options))?;
+        if let Some(user) = &options.user {
+            self.ensure_user(user)?;
+        }
+        let cancel = StreamCancel::new();
+        let events = self.client.exec_stream_cancellable(
+            &self.id,
+            &Self::command(command, &options),
+            &cancel,
+        )?;
         let (tx, rx) = mpsc::channel();
         // Drain on a worker so the caller sees each chunk as it arrives rather
         // than when the command ends.
@@ -173,7 +239,8 @@ impl Transport for CloudTransport {
                 }
             }
         });
-        Ok(ExecStream::from_receiver(rx))
+        let kill = KillHandle::new(move || cancel.cancel());
+        Ok(ExecStream::new(rx, kill))
     }
 
     fn run(
