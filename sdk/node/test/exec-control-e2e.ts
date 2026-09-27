@@ -17,7 +17,7 @@ const sleep = (n: number) => new Promise((r) => setTimeout(r, n));
  *  process check that works on image machines too, where each exec is its own
  *  container and `ps` from another exec cannot see it. */
 const heartbeat = (name: string) =>
-  ['sh', '-c', `mkdir -p /workspace && while true; do date +%s%N > /workspace/${name}; sleep 0.2; done`];
+  ['sh', '-c', `mkdir -p /workspace && i=0; while true; do i=$((i+1)); echo $i > /workspace/${name}; sleep 0.2; done`];
 /** True while the heartbeat file keeps changing. */
 async function beating(m: Machine, name: string): Promise<boolean> {
   const read = async () => (await m.exec(['cat', `/workspace/${name}`])).stdout.trim();
@@ -61,7 +61,7 @@ async function suite(label: string, m: Machine) {
   check('aborted command is gone from the machine', !(await beating(m, 'hb-abort')));
 
   // 3. Breaking out of the loop early kills the command.
-  const ticker = m.execStream(['sh', '-c', 'mkdir -p /workspace && while true; do echo tick; date +%s%N > /workspace/hb-break; sleep 0.2; done']);
+  const ticker = m.execStream(['sh', '-c', 'mkdir -p /workspace && i=0; while true; do echo tick; i=$((i+1)); echo $i > /workspace/hb-break; sleep 0.2; done']);
   for await (const e of ticker) { if (e.kind === 'stdout') break; }
   await sleep(300);
   check('breaking out of the loop kills the command', !(await beating(m, 'hb-break')));
