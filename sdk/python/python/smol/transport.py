@@ -16,14 +16,17 @@ from __future__ import annotations
 import atexit
 import base64
 import json
+import math
 import os
 import platform
 import socket
+import sys
+import threading
 import time
 import urllib.error
 import urllib.request
 import weakref
-from typing import Any, Optional, Protocol
+from typing import Any, Callable, Iterable, Iterator, Optional, Protocol
 from urllib.parse import quote
 
 from .errors import InvalidConfigError, NotSupportedError, SmolError, wrap_native_error
@@ -191,7 +194,64 @@ def _encode_path(p: str) -> str:
 # ---------------------------------------------------------------------------
 # Local (embedded engine via the native extension)
 # ---------------------------------------------------------------------------
+def _wire_bundled_native() -> None:
+    """Point the embedded engine at the boot helper + libs bundled in this wheel.
+
+    Mirrors the Node SDK's ``assets.js``. On macOS the hypervisor entitlement
+    lives on ``smol-vmm`` (spawned as a subprocess), so the engine must launch the
+    bundled, signed helper rather than call the hypervisor from the unentitled
+    python process. No-op (cloud still works) if the helper isn't present.
+    """
+    pkg = os.path.dirname(os.path.realpath(__file__))
+    helper = os.path.join(pkg, "smol-vmm.exe" if os.name == "nt" else "smol-vmm")
+    if os.path.exists(helper):
+        os.environ.setdefault("SMOLVM_BOOT_BINARY", helper)
+    # libkrun/libkrunfw are bundled flat next to _native in the package dir.
+    os.environ.setdefault("SMOLVM_LIB_DIR", pkg)
+    # Bundled guest rootfs tarball — the engine extracts it on first use, so the
+    # wheel is fully self-contained (no separate engine install needed). A wheel
+    # can't ship a rootfs dir tree (symlinks/modes), so we ship a tarball.
+    rootfs_tar = os.path.join(pkg, "agent-rootfs.tar")
+    if os.path.exists(rootfs_tar) and "SMOLVM_AGENT_ROOTFS" not in os.environ:
+        os.environ.setdefault("SMOLVM_AGENT_ROOTFS_TAR", rootfs_tar)
+
+
+def _wire_default_hardening() -> None:
+    """Confine the spawned VMM by default on Linux.
+
+    ``smol-vmm _boot-vm`` reads SMOLVM_SECCOMP / SMOLVM_LANDLOCK and treats
+    unset as OFF, which ``smolvm serve`` compensates for by defaulting both to
+    "enforce". An embedding app got neither, so the SDK — whose whole purpose is
+    running untrusted code — was the least confined way to boot a VM. Default
+    them on here; an explicitly-set value always wins, so ``SMOLVM_SECCOMP=off``
+    remains the escape hatch for a workload the allowlist does not cover. Linux
+    only: seccomp filtering is x86_64-Linux and Landlock is Linux, so setting
+    them elsewhere would only mislead.
+    """
+    if not sys.platform.startswith("linux"):
+        return
+    os.environ.setdefault("SMOLVM_SECCOMP", "enforce")
+    os.environ.setdefault("SMOLVM_LANDLOCK", "enforce")
+
+
+_native_wired = False
+_native_wire_lock = threading.Lock()
+
+
 def _load_native() -> Any:
+    """The native engine, with its environment wired on first use.
+
+    The engine is configured through process environment variables, which
+    every subprocess the embedding program starts would inherit. So they are
+    set here, when a local machine is first used, rather than on ``import
+    smol`` — a program that only uses the cloud never has its environment
+    touched."""
+    global _native_wired
+    with _native_wire_lock:
+        if not _native_wired:
+            _wire_bundled_native()
+            _wire_default_hardening()
+            _native_wired = True
     try:
         from . import _native  # type: ignore[attr-defined]
 
@@ -204,14 +264,91 @@ def _load_native() -> Any:
         ) from e
 
 
+# Hosts with a prebuilt local engine: (sys.platform, machine) pairs.
+_SUPPORTED_LOCAL = {("darwin", "arm64"), ("linux", "x86_64"), ("linux", "aarch64")}
+# Oldest glibc the Linux prebuilt engine runs on.
+_MIN_GLIBC = (2, 34)
+
+
+def local_availability() -> "tuple[bool, Optional[str], Optional[str]]":
+    """Whether this host can run local machines, answered without booting one.
+
+    Returns ``(available, code, reason)``. A framework choosing a sandbox ("a
+    local microVM if possible, otherwise something else") would otherwise learn
+    the answer only from a failed start. This runs the checks a start would fail
+    on and reports the same error ``code``, in order:
+
+    1. a prebuilt engine exists for this OS/architecture (and, on Linux, a new
+       enough glibc) — ``UNSUPPORTED_PLATFORM``;
+    2. the native engine loads — ``RUNTIME_NOT_INSTALLED``;
+    3. the engine's own host checks pass — ``KVM_UNAVAILABLE`` (Linux, no
+       usable ``/dev/kvm``) or ``HYPERVISOR_UNAVAILABLE``.
+
+    Never raises. The cloud target has no host requirements.
+    """
+    machine = platform.machine().lower()
+    if (sys.platform, machine) not in _SUPPORTED_LOCAL:
+        return (
+            False,
+            "UNSUPPORTED_PLATFORM",
+            f"no prebuilt local engine for {sys.platform}/{machine} (supported: macOS "
+            "Apple Silicon, Linux x86_64/aarch64 with glibc); the cloud target works "
+            "on any platform",
+        )
+    if sys.platform.startswith("linux"):
+        libc, version = platform.libc_ver()
+        if libc != "glibc":
+            return (
+                False,
+                "UNSUPPORTED_PLATFORM",
+                "the local engine needs glibc; this Linux uses another libc (e.g. musl/Alpine)",
+            )
+        try:
+            have = tuple(int(part) for part in version.split(".")[:2])
+        except ValueError:
+            have = _MIN_GLIBC
+        if have < _MIN_GLIBC:
+            return (
+                False,
+                "UNSUPPORTED_PLATFORM",
+                f"the local engine needs glibc >= {'.'.join(map(str, _MIN_GLIBC))}; "
+                f"this host has {version}",
+            )
+    try:
+        native = _load_native()
+    except NotSupportedError as e:
+        return (False, "RUNTIME_NOT_INSTALLED", str(e))
+    try:
+        available, code, reason = native.Machine.check_host()
+    except Exception as e:  # noqa: BLE001 - never raise
+        return (False, "RUNTIME_NOT_INSTALLED", f"the local engine could not check this host: {e}")
+    if available:
+        return (True, None, None)
+    return (False, code or "HYPERVISOR_UNAVAILABLE", reason or "this host cannot run local machines")
+
+
+def _validate_exec_options(opts: Optional[ExecOptions]) -> None:
+    """Refuse options no target could honor, before anything runs."""
+    if opts is None:
+        return
+    if opts.timeout is not None and not opts.timeout > 0:
+        raise InvalidConfigError(f"an exec timeout must be greater than zero, got {opts.timeout!r}")
+    if opts.user is not None and not opts.user.strip():
+        raise InvalidConfigError("an exec user must not be empty")
+
+
 def _native_exec_options(opts: Optional[ExecOptions]) -> Optional[dict]:
     if opts is None:
         return None
+    _validate_exec_options(opts)
     out: dict[str, Any] = {}
     if opts.workdir is not None:
         out["workdir"] = opts.workdir
     if opts.timeout is not None:
-        out["timeout_secs"] = opts.timeout
+        # Whole milliseconds, rounded up so a tiny timeout never becomes zero.
+        out["timeout_ms"] = max(1, math.ceil(opts.timeout * 1000))
+    if opts.user is not None:
+        out["user"] = opts.user
     if opts.env is not None:
         out["env"] = [{"key": k, "value": v} for k, v in opts.env.items()]
     return out
@@ -316,6 +453,79 @@ def _register_local(t: "LocalTransport") -> None:
         _atexit_registered = True
 
 
+class ExecStream:
+    """A command's output as it arrives.
+
+    Iterate for event dicts: ``{"kind": "stdout"|"stderr", "data": str}``,
+    ``{"kind": "exit", "exit_code": int}`` (always last) or
+    ``{"kind": "error", "message": str}``.
+
+    :meth:`kill` stops the command from any thread and ends the iteration.
+    Stopping early any other way — ``break``, :meth:`close`, leaving a ``with``
+    block, or dropping the stream — kills it too, so an abandoned command never
+    keeps running unseen. Locally the command and everything it started are
+    killed in the machine; on the cloud the stream's connection is closed and
+    whether the command keeps running is up to the control plane.
+    """
+
+    def __init__(self, events: Iterable[dict], kill: Callable[[], None]) -> None:
+        self._events: Iterator[dict] = iter(events)
+        self._kill = kill
+        self._lock = threading.Lock()
+        self._killed = False
+        self._finished = False
+
+    def __iter__(self) -> "ExecStream":
+        return self
+
+    def __next__(self) -> dict:
+        if self._killed or self._finished:
+            raise StopIteration
+        try:
+            event = next(self._events)
+        except StopIteration:
+            self._finished = True
+            raise
+        except Exception:
+            # Killing tears the connection down under the reader; that is the
+            # kill working, not a failure to report.
+            if self._killed:
+                raise StopIteration from None
+            raise
+        # A kill that raced this event wins: what the teardown produced (a
+        # closed connection, an exit by signal) is not the command's output.
+        if self._killed:
+            raise StopIteration
+        if event.get("kind") == "exit":
+            self._finished = True
+        return event
+
+    def kill(self) -> None:
+        """Kill the command and end the stream. Idempotent, safe from any
+        thread, and a no-op once the command has exited."""
+        with self._lock:
+            if self._killed or self._finished:
+                return
+            self._killed = True
+        self._kill()
+
+    def close(self) -> None:
+        """Stop reading; kills the command if it is still running."""
+        self.kill()
+
+    def __enter__(self) -> "ExecStream":
+        return self
+
+    def __exit__(self, *exc: Any) -> None:
+        self.close()
+
+    def __del__(self) -> None:
+        try:
+            self.close()
+        except Exception:  # noqa: BLE001 - nothing to report to at teardown
+            pass
+
+
 class LocalTransport:
     def __init__(self, inner: Any, *, cleanup_on_exit: bool = True, interceptor: Optional[EgressInterceptor] = None) -> None:
         self._inner = inner
@@ -405,9 +615,17 @@ class LocalTransport:
         # Local machines have no public ingress URL — that's a cloud feature.
         return None
 
-    def exec(self, command: list[str], opts: Optional[ExecOptions] = None) -> ExecResult:
+    def exec(
+        self, command: list[str], opts: Optional[ExecOptions] = None, cancel: Any = None
+    ) -> ExecResult:
+        """Run a command and wait. ``cancel`` (from :meth:`canceller`) lets
+        another thread kill it."""
+        options = _native_exec_options(opts)
         try:
-            r = self._inner.exec(command, _native_exec_options(opts))
+            if cancel is None:
+                r = self._inner.exec(command, options)
+            else:
+                r = self._inner.exec(command, options, cancel)
         except Exception as e:  # noqa: BLE001 - re-typed below
             raise wrap_native_error(e) from e
         return ExecResult(
@@ -418,9 +636,19 @@ class LocalTransport:
             stderr_bytes=r.stderr.encode("utf-8", "replace"),
         )
 
+    def canceller(self) -> Any:
+        """A token that kills an :meth:`exec` from another thread."""
+        return _load_native().ExecCanceller()
+
     def run(self, image: str, command: list[str], opts: Optional[ExecOptions] = None) -> ExecResult:
+        if opts is not None and opts.user is not None:
+            raise NotSupportedError(
+                "a per-command user is not supported by run(image, ...); create a "
+                "machine from the image and exec as the user instead"
+            )
+        options = _native_exec_options(opts)
         try:
-            r = self._inner.run(image, command, _native_exec_options(opts))
+            r = self._inner.run(image, command, options)
         except Exception as e:  # noqa: BLE001
             raise wrap_native_error(e) from e
         return ExecResult(
@@ -431,14 +659,14 @@ class LocalTransport:
             stderr_bytes=r.stderr.encode("utf-8", "replace"),
         )
 
-    def exec_stream(self, command: list[str], opts: Optional[ExecOptions] = None):
+    def exec_stream(self, command: list[str], opts: Optional[ExecOptions] = None) -> ExecStream:
+        options = _native_exec_options(opts)
         try:
-            stream = self._inner.exec_stream(command, _native_exec_options(opts))
+            stream = self._inner.exec_stream(command, options)
         except Exception as e:  # noqa: BLE001
             raise wrap_native_error(e) from e
-        # native ExecStream is a Python iterator of event dicts (live)
-        for event in stream:
-            yield event
+        # The native stream is a live iterator of event dicts.
+        return ExecStream(stream, stream.kill)
 
     def read_file(self, path: str) -> bytes:
         try:
@@ -670,6 +898,41 @@ class CloudTransport:
         self._key = api_key
         self._id = machine_id
         self._name = name
+        # Users this control plane has been shown to apply (see _ensure_user).
+        self._verified_users: set[str] = set()
+        self._users_lock = threading.Lock()
+
+    def _command_body(self, command: list[str], opts: Optional[ExecOptions]) -> dict:
+        _validate_exec_options(opts)
+        body: dict[str, Any] = {
+            "command": command,  # CommandSpec: argv array
+            "env": (opts.env if opts else None) or {},
+            "cwd": opts.workdir if opts else None,
+            # Whole seconds, rounded up: rounding down would turn a sub-second
+            # timeout into zero and cut every other one short.
+            "timeoutSeconds": math.ceil(opts.timeout) if opts and opts.timeout is not None else None,
+        }
+        if opts is not None and opts.user is not None:
+            body["user"] = opts.user
+        return body
+
+    def _ensure_user(self, user: str) -> None:
+        """Check, once per user, that this control plane applies a per-command
+        user before running anything as one.
+
+        A control plane that predates the field ignores it and runs the command
+        as the image's default account — the dangerous direction for a sandbox
+        to fail in. The ones that support it echo the user back, so a harmless
+        ``true`` proves it before the real command runs; a stream has no
+        response body to carry the echo, so this is its only check."""
+        with self._users_lock:
+            if user in self._verified_users:
+                return
+        probe = {"command": ["true"], "env": {}, "cwd": None, "timeoutSeconds": 30, "user": user}
+        r = _cloud_fetch(self._base, self._key, "POST", f"/v1/machines/{self._id}/exec", json_body=probe)
+        _check_user_echo(r, user)
+        with self._users_lock:
+            self._verified_users.add(user)
 
     @property
     def name(self) -> str:
@@ -739,12 +1002,10 @@ class CloudTransport:
         return (m or {}).get("url")
 
     def exec(self, command: list[str], opts: Optional[ExecOptions] = None) -> ExecResult:
-        body = {
-            "command": command,  # CommandSpec: argv array
-            "env": (opts.env if opts else None) or {},
-            "cwd": opts.workdir if opts else None,
-            "timeoutSeconds": opts.timeout if opts else None,
-        }
+        body = self._command_body(command, opts)
+        user = opts.user if opts else None
+        if user is not None:
+            self._ensure_user(user)
         # The command may legitimately run far longer than the default cloud
         # timeout, so size the HTTP read timeout off the request's own timeout
         # (plus headroom) — never below the default. The server-sent
@@ -763,6 +1024,8 @@ class CloudTransport:
             json_body=body,
             timeout=http_timeout,
         )
+        if user is not None:
+            _check_user_echo(r, user)
         r = r or {}
         stdout = str(r.get("stdout", ""))
         stderr = str(r.get("stderr", ""))
@@ -786,13 +1049,10 @@ class CloudTransport:
             "ConnectOptions(target='cloud')) and use exec()."
         )
 
-    def exec_stream(self, command: list[str], opts: Optional[ExecOptions] = None):
-        body = {
-            "command": command,
-            "env": (opts.env if opts else None) or {},
-            "cwd": opts.workdir if opts else None,
-            "timeoutSeconds": opts.timeout if opts else None,
-        }
+    def exec_stream(self, command: list[str], opts: Optional[ExecOptions] = None) -> ExecStream:
+        body = self._command_body(command, opts)
+        if opts is not None and opts.user is not None:
+            self._ensure_user(opts.user)
         headers = {
             "authorization": f"Bearer {self._key}",
             "content-type": "application/json",
@@ -818,7 +1078,32 @@ class CloudTransport:
             raise SmolError(code, f"cloud POST exec/stream → {e.code}{(': ' + text) if text else ''}{suffix}") from e
         except urllib.error.URLError as e:
             raise SmolError("CONNECTION", f"cloud exec/stream failed: {getattr(e, 'reason', e)}") from e
+        except TimeoutError as e:
+            raise SmolError("TIMEOUT", f"cloud exec/stream timed out after {CLOUD_TIMEOUT_S}s") from e
 
+        # The timeout above bounds the connect and the wait for headers. The body
+        # lasts as long as the command, which may run — and stay quiet — far
+        # longer, so reads must not inherit it.
+        sock = _response_socket(resp)
+        if sock is not None:
+            sock.settimeout(None)
+
+        def kill() -> None:
+            # Shutting the socket down wakes a reader blocked in recv on another
+            # thread; closing alone would not.
+            try:
+                if sock is not None:
+                    sock.shutdown(socket.SHUT_RDWR)
+                else:
+                    resp.close()
+            except OSError:
+                pass
+
+        return ExecStream(self._sse_events(resp), kill)
+
+    @staticmethod
+    def _sse_events(resp: Any) -> Iterator[dict]:
+        """Event dicts from an exec/stream response; closes it when done."""
         # Parse the server's SSE stream: each event is `event: <kind>` + one or
         # more `data:` lines, terminated by a blank line. Multiple data lines join
         # with `\n` (SSE spec); the `exit` event's data is JSON `{ "exitCode": N }`.
@@ -846,7 +1131,7 @@ class CloudTransport:
             return None
 
         try:
-            for raw in resp:
+            for raw in _read_lines(resp):
                 line = raw.decode("utf-8", "replace").rstrip("\n")
                 if line.endswith("\r"):
                     line = line[:-1]
@@ -1164,6 +1449,38 @@ def _resolve_batch_names(
     return [f"{prefix}-{i}" for i in range(1, count + 1)]
 
 
+def _check_user_echo(response: Any, user: str) -> None:
+    """Refuse a response that does not echo the requested user: the control
+    plane ignored it, so the command ran (or would run) as someone else."""
+    if not isinstance(response, dict) or response.get("user") != user:
+        raise NotSupportedError(
+            f'the control plane did not honor user "{user}": it predates per-command '
+            "users and would run the command as the image's default account"
+        )
+
+
+def _response_socket(resp: Any) -> Optional[socket.socket]:
+    """The socket under a urllib response, to adjust its timeout or shut it
+    down from another thread. ``None`` if this Python lays it out differently."""
+    raw = getattr(getattr(resp, "fp", None), "raw", None)
+    sock = getattr(raw, "_sock", None)
+    return sock if isinstance(sock, socket.socket) else None
+
+
+def _read_lines(resp: Any) -> Iterator[bytes]:
+    """Lines of a streaming response, with a dropped connection reported as a
+    typed error rather than a bare socket exception."""
+    while True:
+        try:
+            line = resp.readline()
+        except (OSError, ValueError) as e:
+            # ValueError: read from a response closed under the reader.
+            raise SmolError("CONNECTION", f"cloud exec/stream connection lost: {e}") from e
+        if not line:
+            return
+        yield line
+
+
 def _cloud_fetch(
     base_url: str,
     api_key: str,
@@ -1467,6 +1784,12 @@ def make_transport(config: MachineConfig, conn: Optional[ConnectOptions] = None)
                 "host mounts are local-only and are not applied on the cloud target; "
                 "use cloud volumes for persistent storage instead."
             )
+        if config.user is not None:
+            raise NotSupportedError(
+                "a machine-wide user is local-only: the cloud API has no field for it, "
+                "so the machine would run as the image's default account; pass the "
+                "user per command with ExecOptions(user=...) instead."
+            )
         base_url = (conn.base_url or os.environ.get("SMOL_CLOUD_URL") or cli_url or DEFAULT_CLOUD_URL).rstrip("/")
 
         r = config.resources
@@ -1493,8 +1816,14 @@ def make_transport(config: MachineConfig, conn: Optional[ConnectOptions] = None)
                 "cidrs": r.allow_cidrs or [],
                 "hosts": r.allow_hosts or [],
             }
-        elif resolve_network(config):
-            body["network"] = {"mode": "open"}
+        else:
+            network = resolve_network(config)
+            if network is True:
+                body["network"] = {"mode": "open"}
+            elif network is False:
+                # The control plane opens egress when `network` is absent, so an
+                # explicit "no network" has to be sent as `blocked`.
+                body["network"] = {"mode": "blocked"}
         # Publish ports: supply only the guest port; the control plane allocates
         # the node host port (read the allocated hostPort back from the machine
         # info after start). Publishing a port implies the virtio-net backend.

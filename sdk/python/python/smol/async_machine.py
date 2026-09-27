@@ -169,8 +169,18 @@ class AsyncMachine:
         return await asyncio.to_thread(self._m.url)
 
     async def exec(self, command: list[str], opts: Optional[ExecOptions] = None) -> ExecResult:
-        """Execute a command directly in the machine."""
-        return await asyncio.to_thread(self._m.exec, command, opts)
+        """Execute a command directly in the machine.
+
+        Cancelling the awaiting task kills a local command; on the cloud the
+        request is abandoned and the command runs to its own end."""
+        cancel, run = self._m._exec_cancellable(command, opts)
+        if cancel is None:
+            return await asyncio.to_thread(self._m.exec, command, opts)
+        try:
+            return await asyncio.to_thread(run)
+        except asyncio.CancelledError:
+            cancel.cancel()
+            raise
 
     async def run(self, image: str, command: list[str], opts: Optional[ExecOptions] = None) -> ExecResult:
         """Pull an image (if needed) and run a command in a container. (local)"""
@@ -179,24 +189,31 @@ class AsyncMachine:
     async def exec_stream(
         self, command: list[str], opts: Optional[ExecOptions] = None
     ) -> AsyncIterator[dict]:
-        """Execute a command and yield its output events LIVE. (local)
+        """Execute a command and yield its output events LIVE.
 
-        Bridges the sync generator to async by pulling each event off the event
-        loop, so streaming never blocks other coroutines."""
-        sync_gen = self._m.exec_stream(command, opts)
+        Bridges the sync stream to async by pulling each event off the event
+        loop, so streaming never blocks other coroutines. Stopping early —
+        ``break``, cancelling the task, or closing the generator — kills the
+        command."""
+        stream = await asyncio.to_thread(self._m.exec_stream, command, opts)
         sentinel = object()
 
         def _next():
             try:
-                return next(sync_gen)
+                return next(stream)
             except StopIteration:
                 return sentinel
 
-        while True:
-            event = await asyncio.to_thread(_next)
-            if event is sentinel:
-                return
-            yield event
+        try:
+            while True:
+                event = await asyncio.to_thread(_next)
+                if event is sentinel:
+                    return
+                yield event
+        finally:
+            # A no-op once the command has exited; otherwise this wakes the
+            # worker thread still blocked on the next event.
+            stream.close()
 
     async def read_file(self, path: str) -> bytes:
         """Read a file from the machine."""

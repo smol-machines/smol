@@ -19,7 +19,7 @@ use pyo3::exceptions::PyRuntimeError;
 use pyo3::prelude::*;
 use pyo3::types::{PyBytes, PyDict};
 use smolvm::agent::ExecEvent;
-use smolvm::embedded::{runtime, MachineSpec};
+use smolvm::embedded::{runtime, ExecCancel, ExecOptions, MachineSpec};
 use smolvm::error::{AgentErrorKind, Error as SmolvmError};
 
 // Error codes exposed to Python as `SmolError.code` (parity with smol-node's
@@ -54,7 +54,13 @@ fn parse_interceptor(
 /// smol-node's `to_napi_error` so both SDKs surface identical error codes. The
 /// Python `wrap_native_error` parses the prefix back into a typed `SmolError`.
 fn err(e: SmolvmError) -> PyErr {
-    let (code, msg) = match &e {
+    let (code, msg) = code_and_message(&e);
+    PyRuntimeError::new_err(format!("[{code}] {msg}"))
+}
+
+/// The SDK error code and message for an engine error.
+fn code_and_message(e: &SmolvmError) -> (&'static str, String) {
+    match e {
         SmolvmError::VmNotFound { name } => (NOT_FOUND, format!("VM not found: {name}")),
         SmolvmError::InvalidState { expected, actual } => (
             INVALID_STATE,
@@ -109,8 +115,7 @@ fn err(e: SmolvmError) -> PyErr {
             (KVM_UNAVAILABLE, format!("KVM permission denied: {reason}"))
         }
         _ => (SMOLVM_ERROR, e.to_string()),
-    };
-    PyRuntimeError::new_err(format!("[{code}] {msg}"))
+    }
 }
 
 /// Result of a command execution (mirrors smol-node's `ExecResult`).
@@ -165,23 +170,30 @@ fn to_image_info(i: smolvm_protocol::ImageInfo) -> ImageInfo {
     }
 }
 
-/// Parse the Python `{env: [{key,value}], workdir, timeout_secs}` options dict
-/// into the engine's `(env, workdir, timeout)` triple.
-fn parse_exec_opts(
-    options: Option<&Bound<'_, PyDict>>,
-) -> PyResult<(Vec<(String, String)>, Option<String>, Option<u64>)> {
-    let mut env: Vec<(String, String)> = Vec::new();
-    let mut workdir: Option<String> = None;
-    let mut timeout: Option<u64> = None;
+/// Parse the Python `{env: [{key,value}], workdir, timeout_ms, user}` options
+/// dict into the engine's `ExecOptions`.
+fn parse_exec_opts(options: Option<&Bound<'_, PyDict>>) -> PyResult<ExecOptions> {
+    let mut opts = ExecOptions::default();
     if let Some(d) = options {
         if let Some(w) = d.get_item("workdir")? {
             if !w.is_none() {
-                workdir = Some(w.extract()?);
+                opts.workdir = Some(w.extract()?);
             }
         }
-        if let Some(t) = d.get_item("timeout_secs")? {
+        if let Some(t) = d.get_item("timeout_ms")? {
             if !t.is_none() {
-                timeout = Some(t.extract()?);
+                let ms: u64 = t.extract()?;
+                if ms == 0 {
+                    return Err(PyRuntimeError::new_err(format!(
+                        "[{CONFIG_ERROR}] an exec timeout must be greater than zero"
+                    )));
+                }
+                opts.timeout = Some(std::time::Duration::from_millis(ms));
+            }
+        }
+        if let Some(u) = d.get_item("user")? {
+            if !u.is_none() {
+                opts.user = Some(u.extract()?);
             }
         }
         if let Some(e) = d.get_item("env")? {
@@ -191,12 +203,12 @@ fn parse_exec_opts(
                     let kv = kv.downcast::<PyDict>()?;
                     let k: String = kv.get_item("key")?.unwrap().extract()?;
                     let v: String = kv.get_item("value")?.unwrap().extract()?;
-                    env.push((k, v));
+                    opts.env.push((k, v));
                 }
             }
         }
     }
-    Ok((env, workdir, timeout))
+    Ok(opts)
 }
 
 fn lossy(v: Vec<u8>) -> String {
@@ -231,12 +243,13 @@ fn exec_event_to_dict(py: Python<'_>, ev: ExecEvent) -> PyResult<Py<PyDict>> {
 
 /// A live, incremental exec stream: a Python iterator whose `__next__` blocks
 /// (off-GIL) for the next event from a worker thread driving the engine's
-/// `exec_streaming_with`. Iteration ends (StopIteration) when the command exits
-/// and the channel closes.
+/// `exec_streaming_with_options`. Iteration ends (StopIteration) when the
+/// command exits and the channel closes, or once the stream is killed.
 #[pyclass]
 struct ExecStream {
     // Mutex makes `&Receiver` Send so __next__ can recv inside `allow_threads`.
     rx: std::sync::Mutex<std::sync::mpsc::Receiver<ExecEvent>>,
+    cancel: ExecCancel,
 }
 
 #[pymethods]
@@ -246,12 +259,72 @@ impl ExecStream {
     }
 
     fn __next__(&self, py: Python<'_>) -> PyResult<Option<Py<PyDict>>> {
+        if self.cancel.is_cancelled() {
+            return Ok(None);
+        }
         let received = py.allow_threads(|| self.rx.lock().expect("exec stream lock").recv());
         match received {
+            // A kill that raced this event wins: what the teardown produced is
+            // not the command's output.
+            Ok(_) if self.cancel.is_cancelled() => Ok(None),
             Ok(ev) => Ok(Some(exec_event_to_dict(py, ev)?)),
             Err(_) => Ok(None), // channel closed → command finished → StopIteration
         }
     }
+
+    /// Kill the command (its whole process tree, or its container on an image
+    /// machine) and end the stream. Safe from any thread, idempotent, and
+    /// harmless once the command has exited.
+    fn kill(&self) {
+        self.cancel.cancel();
+    }
+}
+
+/// Cancels a running `Machine.exec` from another thread.
+#[pyclass]
+#[derive(Clone, Default)]
+struct ExecCanceller {
+    cancel: ExecCancel,
+}
+
+#[pymethods]
+impl ExecCanceller {
+    #[new]
+    fn new() -> Self {
+        Self::default()
+    }
+
+    /// Kill the command, or keep it from starting. Idempotent.
+    fn cancel(&self) {
+        self.cancel.cancel();
+    }
+
+    fn is_cancelled(&self) -> bool {
+        self.cancel.is_cancelled()
+    }
+}
+
+/// Start `command` streaming on a worker thread, feeding `tx`.
+fn spawn_exec_stream(
+    name: String,
+    command: Vec<String>,
+    opts: ExecOptions,
+    cancel: ExecCancel,
+    tx: std::sync::mpsc::Sender<ExecEvent>,
+) {
+    std::thread::spawn(move || {
+        let err_tx = tx.clone();
+        let outcome = runtime().and_then(|rt| {
+            rt.exec_streaming_with_options(&name, command, opts, &cancel, move |ev| {
+                let _ = tx.send(ev);
+            })
+        });
+        if let Err(e) = outcome {
+            let (code, msg) = code_and_message(&e);
+            let _ = err_tx.send(ExecEvent::Error(format!("[{code}] {msg}")));
+        }
+        // Senders drop here → channel closes → iterator raises StopIteration.
+    });
 }
 
 /// A microVM sandbox handle. Mirrors `smol-node`'s `NapiMachine`.
@@ -470,6 +543,28 @@ impl Machine {
         Ok(Self { name })
     }
 
+    /// Whether this host can run local machines, answered without booting
+    /// one: `/dev/kvm` access on Linux and a locatable libkrun everywhere, the
+    /// checks a start would fail on. Returns `(available, code, reason)`.
+    #[staticmethod]
+    fn check_host() -> (bool, Option<String>, Option<String>) {
+        let unavailable = |e: SmolvmError| {
+            let (code, reason) = code_and_message(&e);
+            (false, Some(code.to_string()), Some(reason))
+        };
+        #[cfg(target_os = "linux")]
+        if let Err(e) = smolvm::platform::linux::check_kvm_available() {
+            return unavailable(e);
+        }
+        match smolvm::vm::backend::LibkrunBackend::new() {
+            Ok(backend) if smolvm::vm::VmBackend::is_available(&backend) => (true, None, None),
+            Ok(_) => unavailable(SmolvmError::HypervisorUnavailable(
+                "libkrun was not found; reinstall the SDK or set SMOLVM_LIB_DIR".into(),
+            )),
+            Err(e) => unavailable(e),
+        }
+    }
+
     /// Attach to an existing machine by name, starting it if stopped
     /// (start-or-reconnect). Re-opens a persisted machine in a new process —
     /// backs the SDK's local `Machine.connect()`.
@@ -634,30 +729,58 @@ impl Machine {
         Ok(names.into_iter().map(|name| Machine { name }).collect())
     }
 
-    #[pyo3(signature = (command, options=None))]
+    /// Run a command and wait for it. With `cancel`, another thread can kill
+    /// it through that `ExecCanceller`; the call then raises `[CANCELLED]`.
+    #[pyo3(signature = (command, options=None, cancel=None))]
     fn exec(
         &self,
         py: Python<'_>,
         command: Vec<String>,
         options: Option<&Bound<'_, PyDict>>,
+        cancel: Option<ExecCanceller>,
     ) -> PyResult<ExecResult> {
-        let (env, workdir, timeout) = parse_exec_opts(options)?;
+        let opts = parse_exec_opts(options)?;
         let runtime = runtime().map_err(err)?;
-        let (code, out, errb) = py
-            .allow_threads(|| {
-                runtime.exec(
-                    &self.name,
-                    command,
-                    env,
-                    workdir,
-                    timeout.map(std::time::Duration::from_secs),
-                )
+        let Some(cancel) = cancel else {
+            let (code, out, errb) = py
+                .allow_threads(|| runtime.exec_with_options(&self.name, command, opts))
+                .map_err(err)?;
+            return Ok(ExecResult {
+                exit_code: code,
+                stdout: lossy(out),
+                stderr: lossy(errb),
+            });
+        };
+        // The streaming path is the cancellable one; gather its output here.
+        let mut stdout = Vec::new();
+        let mut stderr = Vec::new();
+        let mut exit_code = None;
+        let mut failure = None;
+        py.allow_threads(|| {
+            runtime.exec_streaming_with_options(&self.name, command, opts, &cancel.cancel, |ev| {
+                match ev {
+                    ExecEvent::Stdout(b) => stdout.extend_from_slice(&b),
+                    ExecEvent::Stderr(b) => stderr.extend_from_slice(&b),
+                    ExecEvent::Exit(code) => exit_code = Some(code),
+                    ExecEvent::Error(m) => failure = Some(m),
+                }
             })
-            .map_err(err)?;
+        })
+        .map_err(err)?;
+        if cancel.cancel.is_cancelled() {
+            return Err(PyRuntimeError::new_err(
+                "[CANCELLED] the command was killed",
+            ));
+        }
+        if let Some(message) = failure {
+            return Err(PyRuntimeError::new_err(format!(
+                "[{SMOLVM_ERROR}] {message}"
+            )));
+        }
         Ok(ExecResult {
-            exit_code: code,
-            stdout: lossy(out),
-            stderr: lossy(errb),
+            exit_code: exit_code.unwrap_or(-1),
+            stdout: lossy(stdout),
+            stderr: lossy(stderr),
         })
     }
 
@@ -669,7 +792,13 @@ impl Machine {
         command: Vec<String>,
         options: Option<&Bound<'_, PyDict>>,
     ) -> PyResult<ExecResult> {
-        let (env, workdir, timeout) = parse_exec_opts(options)?;
+        let opts = parse_exec_opts(options)?;
+        if opts.user.is_some() {
+            return Err(PyRuntimeError::new_err(format!(
+                "[{CONFIG_ERROR}] a per-command user is not supported by run(image, ...); \
+                 create a machine from the image and exec as the user instead"
+            )));
+        }
         let runtime = runtime().map_err(err)?;
         let (code, out, errb) = py
             .allow_threads(|| {
@@ -677,9 +806,9 @@ impl Machine {
                     &self.name,
                     &image,
                     command,
-                    env,
-                    workdir,
-                    timeout.map(std::time::Duration::from_secs),
+                    opts.env,
+                    opts.workdir,
+                    opts.timeout,
                 )
             })
             .map_err(err)?;
@@ -694,36 +823,20 @@ impl Machine {
     /// iterator yielding `{kind, ...}` dicts as output arrives (no buffering).
     /// A worker thread drives the engine and feeds an mpsc channel; the iterator
     /// blocks off-GIL for each event and stops when the command exits.
+    /// `ExecStream.kill()` kills the command.
     #[pyo3(signature = (command, options=None))]
     fn exec_stream(
         &self,
         command: Vec<String>,
         options: Option<&Bound<'_, PyDict>>,
     ) -> PyResult<ExecStream> {
-        let (env, workdir, timeout) = parse_exec_opts(options)?;
-        let timeout = timeout.map(std::time::Duration::from_secs);
-        let name = self.name.clone();
+        let opts = parse_exec_opts(options)?;
+        let cancel = ExecCancel::new();
         let (tx, rx) = std::sync::mpsc::channel::<ExecEvent>();
-        let err_tx = tx.clone();
-        std::thread::spawn(move || {
-            match runtime() {
-                Ok(rt) => {
-                    if let Err(e) =
-                        rt.exec_streaming_with(&name, command, env, workdir, timeout, move |ev| {
-                            let _ = tx.send(ev);
-                        })
-                    {
-                        let _ = err_tx.send(ExecEvent::Error(e.to_string()));
-                    }
-                }
-                Err(e) => {
-                    let _ = err_tx.send(ExecEvent::Error(e.to_string()));
-                }
-            }
-            // Senders drop here → channel closes → iterator raises StopIteration.
-        });
+        spawn_exec_stream(self.name.clone(), command, opts, cancel.clone(), tx);
         Ok(ExecStream {
             rx: std::sync::Mutex::new(rx),
+            cancel,
         })
     }
 
@@ -796,5 +909,6 @@ fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<ImageInfo>()?;
     m.add_class::<LocalCheckpointResult>()?;
     m.add_class::<ExecStream>()?;
+    m.add_class::<ExecCanceller>()?;
     Ok(())
 }

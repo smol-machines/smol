@@ -169,6 +169,20 @@ jobs:
           bun test/fork-service-e2e.ts
           bun test/checkpoint-branch-e2e.ts
           bun test/staged-mount-e2e.ts
+      - name: Run Python SDK exec control on the same engine
+        working-directory: ${{ github.workspace }}/monorepo/smol/sdk/python
+        env:
+          LIBKRUN_BUNDLE: ${{ github.workspace }}/monorepo/lib/linux-x86_64
+          SMOLVM_LIB_DIR: ${{ github.workspace }}/monorepo/lib/linux-x86_64
+          SMOLVM_BOOT_BINARY: ${{ github.workspace }}/.cargo-target/smol-bun/release/smolvm
+          SMOLVM_AGENT_ROOTFS: ${{ github.workspace }}/monorepo/target/agent-rootfs
+          XDG_DATA_HOME: ${{ runner.temp }}/py-smol-data
+          XDG_CACHE_HOME: ${{ runner.temp }}/py-smol-cache
+          XDG_CONFIG_HOME: ${{ runner.temp }}/py-smol-config
+        run: |
+          PYO3_PYTHON=python3 cargo build --release --lib
+          cp "$CARGO_TARGET_DIR/release/lib_native.so" python/smol/_native.abi3.so
+          python3 tests/test_exec_control_e2e.py
 
   python-check:
     name: Python · unit + cloud-mock
@@ -195,6 +209,8 @@ jobs:
           python tests/test_unsloth_vllm.py
       - name: Cloud-transport tests (mock /v1 server; pure Python)
         run: python tests/test_cloud_mock.py
+      - name: Exec user, kill and host checks (mock /v1 server + fake engine; pure Python)
+        run: python tests/test_exec_control.py
       - name: Cloud start-failure surfacing (mock /v1 server; pure Python)
         run: python tests/test_cloud_start_error.py
       - name: Cloud start timeout (pure Python)
