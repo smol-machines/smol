@@ -11,6 +11,7 @@ use crate::error::IntoNapiResult;
 use crate::types::*;
 use smolvm::agent::ExecEvent;
 use smolvm::embedded::{runtime, MachineSpec};
+use std::collections::HashMap;
 
 fn join_error(err: tokio::task::JoinError) -> napi::Error {
     napi::Error::from_reason(format!("Task join error: {}", err))
@@ -183,12 +184,32 @@ impl NapiMachine {
             ..Default::default()
         };
 
-        runtime()
-            .into_napi()?
-            .create_machine_with_workload(spec, env, workdir, user)
-            .into_napi()?;
+        let runtime = runtime().into_napi()?;
+        match config.credentials.filter(|c| !c.is_empty()) {
+            Some(bindings) => runtime.create_machine_with_credentials(
+                spec,
+                env,
+                workdir,
+                user,
+                credential_policy(bindings),
+            ),
+            None => runtime.create_machine_with_workload(spec, env, workdir, user),
+        }
+        .into_napi()?;
 
         Ok(Self { name: config.name })
+    }
+
+    /// Hold the values of this machine's credential bindings (binding name →
+    /// value) in this process, replacing any held before. Never written
+    /// anywhere; they take effect when the machine next starts, and branches
+    /// of this machine use them too unless given their own.
+    #[napi]
+    pub fn set_credential_values(&self, values: HashMap<String, String>) -> napi::Result<()> {
+        runtime()
+            .into_napi()?
+            .supply_credential_values(&self.name, values.into_iter().collect())
+            .into_napi()
     }
 
     /// Attach to an existing machine by name, starting it if stopped
@@ -437,9 +458,9 @@ impl NapiMachine {
 
         let result =
             tokio::task::spawn_blocking(move || runtime.exec_with_options(&name, command, options))
-        .await
-        .map_err(join_error)?
-        .into_napi()?;
+                .await
+                .map_err(join_error)?
+                .into_napi()?;
 
         Ok(ExecResult {
             exit_code: result.0,
@@ -633,5 +654,29 @@ impl NapiMachine {
             .await
             .map_err(join_error)?
             .into_napi()
+    }
+}
+
+/// The engine's policy for these bindings. Values never pass through here.
+fn credential_policy(
+    bindings: Vec<CredentialBindingConfig>,
+) -> smolvm::credentials::CredentialPolicy {
+    smolvm::credentials::CredentialPolicy {
+        credentials: bindings
+            .into_iter()
+            .map(|b| smolvm::credentials::CredentialBinding {
+                name: b.name,
+                environment_variable: b.environment_variable.unwrap_or_default(),
+                allowed_hosts: b.allowed_hosts,
+                injection_location: Default::default(),
+                methods: b.methods.unwrap_or_else(|| {
+                    smolvm_protocol::credentials::DEFAULT_METHODS
+                        .iter()
+                        .map(|m| m.to_string())
+                        .collect()
+                }),
+                set_header: b.set_header,
+            })
+            .collect(),
     }
 }

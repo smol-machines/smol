@@ -27,6 +27,7 @@ import {
 import type {
   CheckpointOptions,
   ConnectOptions,
+  CredentialBinding,
   ExecEvent,
   ExecOptions,
   EgressInterceptor,
@@ -112,6 +113,7 @@ export interface Transport {
   listImages(): Promise<ImageInfo[]>;
   readonly machineId: string;
   sync(): Promise<void>;
+  setCredentialValues(values: Record<string, string>): Promise<void>;
   stop(): Promise<void>;
   pause(): Promise<void>;
   resume(): Promise<void>;
@@ -292,6 +294,16 @@ export function networkMode(
   return {};
 }
 
+/** The values given inline with credential bindings, or undefined if none. */
+function credentialValues(
+  bindings: CredentialBinding[] | undefined,
+): Record<string, string> | undefined {
+  const entries = (bindings ?? [])
+    .filter((b) => b.value !== undefined)
+    .map((b) => [b.name, b.value as string] as const);
+  return entries.length ? Object.fromEntries(entries) : undefined;
+}
+
 /** Resolve the primary branch lifecycle name and its compatibility aliases. */
 export function resolveBranchable(config: MachineConfig): boolean | undefined {
   return config.branchable ?? config.forkable ?? config.checkpoint;
@@ -311,6 +323,15 @@ export function toNativeConfig(
     user: config.user,
     persistent: config.persistent,
     forkable: resolveBranchable(config),
+    // Values stay out of the native config: they are supplied separately and
+    // never reach the machine record.
+    credentials: config.credentials?.map((c) => ({
+      name: c.name,
+      allowedHosts: c.allowedHosts,
+      setHeader: c.setHeader,
+      environmentVariable: c.environmentVariable,
+      methods: c.methods,
+    })),
     mounts: config.mounts?.map((m) => ({
       source: m.source,
       target: m.target,
@@ -564,6 +585,14 @@ class LocalTransport implements Transport {
   async sync(): Promise<void> {
     try {
       await this.inner.sync();
+    } catch (e) {
+      throw wrapNativeError(e);
+    }
+  }
+
+  async setCredentialValues(values: Record<string, string>): Promise<void> {
+    try {
+      this.inner.setCredentialValues(values);
     } catch (e) {
       throw wrapNativeError(e);
     }
@@ -1293,6 +1322,10 @@ class CloudTransport implements Transport {
     );
   }
 
+  async setCredentialValues(): Promise<void> {
+    throw new NotSupportedError("credentials are local-only.");
+  }
+
   async stop(): Promise<void> {
     await cloudFetch(this.conn, "POST", `/v1/machines/${this.id}/stop`);
   }
@@ -1636,6 +1669,7 @@ export async function makeTransport(
     // The cloud create API has no workload user; refuse rather than silently
     // run the workload as the image's default user.
     if (config.user !== undefined) throw new NotSupportedError("user is local-only.");
+    if (config.credentials?.length) throw new NotSupportedError("credentials are local-only.");
     // Cloud is settled: NOW the CLI's stored login may supply the credential
     // and endpoint, which is the reuse `smol auth login` promises.
     const { apiKey: cliKey, endpoint: cliUrl } = cliSession(conn.target);
@@ -1776,6 +1810,8 @@ export async function makeTransport(
     const inner = new (getNapiMachine())(toNativeConfig(name, config));
     const handleSignals = conn.handleSignals ?? true;
     transport = new LocalTransport(inner, handleSignals, interceptor, handleSignals);
+    const values = credentialValues(config.credentials);
+    if (values) inner.setCredentialValues(values);
     // A forkable golden boots with memfd-backed guest RAM + a control socket so
     // it can be cloned with Machine.fork (local live-RAM fork).
     if (resolveBranchable(config)) {

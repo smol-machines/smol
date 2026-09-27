@@ -278,6 +278,14 @@ export class Machine {
     return this.transport.sync();
   }
 
+  /** Supply the values of this machine's credential bindings (binding name →
+   *  value), replacing any supplied before. Held in this process's memory only;
+   *  they take effect when the machine next starts, and branches of this
+   *  machine use them too unless given their own. (local) */
+  setCredentialValues(values: Record<string, string>): Promise<void> {
+    return this.transport.setCredentialValues(values);
+  }
+
   /** Stop the machine. */
   stop(): Promise<void> {
     return this.transport.stop();

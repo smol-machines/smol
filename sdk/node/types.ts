@@ -182,6 +182,37 @@ export interface MachineConfig {
    *  owner of a mounted host directory. Local target only; the cloud target
    *  rejects it with `NotSupportedError`. */
   user?: string;
+  /** Credentials the machine's HTTPS requests can carry without the machine
+   *  ever holding them. The host terminates TLS for each binding's hosts with
+   *  a per-machine CA the guest trusts, and either sets a header to the value
+   *  (`setHeader`) or swaps a placeholder the guest sends
+   *  (`environmentVariable`). Values given here are held in this process's
+   *  memory only and never written anywhere. Local target only; the cloud
+   *  target rejects it with `NotSupportedError`. Needs network egress to the
+   *  hosts (`network`, or an allowlist covering them). */
+  credentials?: CredentialBinding[];
+}
+
+/** One credential a machine can use toward named hosts. */
+export interface CredentialBinding {
+  /** Binding name; values are keyed by it (see `Machine.setCredentialValues`). */
+  name: string;
+  /** Hosts the credential may be sent to: exact names (`api.github.com`) or a
+   *  wildcard for every subdomain (`*.github.com`, which does not match
+   *  `github.com` itself). */
+  allowedHosts: string[];
+  /** Set this request header (lowercase, e.g. `"authorization"`) to the value
+   *  on every request to `allowedHosts` with an allowed method, replacing what
+   *  the guest sent. The value is the whole header value (`"Bearer …"`). */
+  setHeader?: string;
+  /** Guest environment variable that receives an opaque placeholder; the host
+   *  swaps it for the value when the guest sends it in a request header. */
+  environmentVariable?: string;
+  /** HTTP methods the credential may be used with. Default: all. */
+  methods?: string[];
+  /** The value. Optional here: it can be (re)supplied later with
+   *  `Machine.setCredentialValues`. */
+  value?: string;
 }
 
 /** Per-call execution options. */

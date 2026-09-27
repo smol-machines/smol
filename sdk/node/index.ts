@@ -36,6 +36,7 @@ export { SmolError, NotSupportedError, InvalidConfigError, ExecutionError } from
 export type { LocalAvailability, LocalUnavailableCode } from './availability';
 export type {
   MachineConfig,
+  CredentialBinding,
   MachineState,
   ResourceSpec,
   MountSpec,
