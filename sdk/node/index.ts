@@ -35,6 +35,7 @@ export type {
   RolloutSampling,
 } from './rollout';
 export { SmolError, NotSupportedError, InvalidConfigError, ExecutionError } from './errors';
+export type { LocalAvailability, LocalUnavailableCode } from './availability';
 export type {
   MachineConfig,
   MachineState,

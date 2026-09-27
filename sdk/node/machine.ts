@@ -12,6 +12,7 @@ import { randomUUID } from "node:crypto";
 import { resolve as resolvePath } from "node:path";
 import { ExecutionError, wrapNativeError } from "./errors";
 import { getNapiMachine } from "./native";
+import { localAvailability, type LocalAvailability } from "./availability";
 import {
   makeTransport,
   connectTransport,
@@ -123,6 +124,15 @@ export class Machine {
     } catch (error) {
       throw wrapNativeError(error);
     }
+  }
+
+  /** Whether this host can run local machines, answered without booting one.
+   *  Checks the platform, that the local engine is installed, and the engine's
+   *  own host requirements (`/dev/kvm` on Linux), reporting the same `code` a
+   *  failing local `create()` would. Never throws. Use it to choose between a
+   *  local machine and another sandbox up front. */
+  static localAvailability(): LocalAvailability {
+    return localAvailability();
   }
 
   /** Remove objects that no retained checkpoint in a local store references. */

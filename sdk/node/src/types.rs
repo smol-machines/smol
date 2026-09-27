@@ -52,6 +52,19 @@ pub struct MachineConfig {
     pub forkable: Option<bool>,
 }
 
+/// Whether this host can run local machines, from the engine's own checks.
+#[napi(object)]
+#[derive(Debug, Clone)]
+pub struct HostAvailability {
+    /// True when a local machine can boot here.
+    pub available: bool,
+    /// The `error.code` a failing `create()` would report (e.g.
+    /// `KVM_UNAVAILABLE`, `HYPERVISOR_UNAVAILABLE`); unset when available.
+    pub code: Option<String>,
+    /// Human-readable cause and remedy; unset when available.
+    pub reason: Option<String>,
+}
+
 /// A host directory mount specification.
 #[napi(object)]
 #[derive(Debug, Clone)]
@@ -86,6 +99,14 @@ pub struct VmResourcesConfig {
     pub memory_mib: Option<u32>,
     /// Enable outbound network access (default: false).
     pub network: Option<bool>,
+    /// Scope egress to these CIDR ranges. A non-empty list enables networking
+    /// on its own and is enforced by the engine (mirrors the Python SDK and the
+    /// CLI's `--allow-cidr`).
+    pub allowed_cidrs: Option<Vec<String>>,
+    /// Scope egress to these hostnames. A non-empty list enables networking on
+    /// its own; the engine's DNS filter resolves and enforces it at runtime
+    /// (mirrors the Python SDK and the CLI's `--allow-host`).
+    pub allowed_hosts: Option<Vec<String>>,
     /// Storage disk size in GiB (default: 20).
     pub storage_gib: Option<f64>,
     /// Overlay disk size in GiB (default: 10).
@@ -224,6 +245,7 @@ impl VmResourcesConfig {
             cpus: self.cpus.unwrap_or(DEFAULT_MICROVM_CPU_COUNT),
             memory_mib: self.memory_mib.unwrap_or(DEFAULT_MICROVM_MEMORY_MIB),
             network: self.network.unwrap_or(false),
+            allowed_cidrs: self.allowed_cidrs.clone(),
             storage_gib: self.storage_gib.map(|g| g as u64),
             overlay_gib: self.overlay_gib.map(|g| g as u64),
             gpu: self.gpu.unwrap_or(false),
