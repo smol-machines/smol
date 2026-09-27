@@ -254,10 +254,19 @@ async function collectExec(
   throw new SmolError("SMOLVM_ERROR", "command stream ended without an exit status");
 }
 
-/** The cloud exec API has no per-command user; refuse rather than run the
- *  command as the machine's default user. */
-function rejectCloudExecUser(opts?: ExecOptions): void {
-  if (opts?.user !== undefined) throw new NotSupportedError("exec user is local-only.");
+/** A cloud exec request carrying the per-command `user`, which the control
+ *  plane added after the generated schema. */
+type CloudCommandRequest = MachineCommandRequest & { user?: string };
+
+/** The control plane echoes the user it ran a command as; an older one, which
+ *  predates the field, echoes nothing because it silently dropped it. */
+function assertCloudUserEcho(response: unknown, requested: string): void {
+  if ((response as { user?: unknown } | undefined)?.user !== requested) {
+    throw new NotSupportedError(
+      `the control plane did not honour user "${requested}": it predates per-command ` +
+        "users and would run the command as the image's default account",
+    );
+  }
 }
 
 /** Whether a machine wants outbound network, from either place it can be asked.
@@ -940,11 +949,40 @@ async function waitForReady(
 }
 
 class CloudTransport implements Transport {
+  /** Users this control plane has been proven to honour (see `ensureUser`). */
+  private readonly verifiedUsers = new Set<string>();
+
   constructor(
     private readonly conn: CloudConn,
     public readonly name: string,
     private readonly id: string,
   ) {}
+
+  /**
+   * Prove the control plane honours a per-command `user` before running a real
+   * command as it. An older control plane drops the unknown field and would
+   * run the command as the image's default account without any sign; checking
+   * the echo only after the fact would be too late. A harmless `true` whose
+   * response echoes the user settles it, once per user for this handle.
+   */
+  private async ensureUser(user: string, signal: AbortSignal | undefined): Promise<void> {
+    if (this.verifiedUsers.has(user)) return;
+    const probe: CloudCommandRequest = {
+      command: ["true"],
+      env: {},
+      cwd: null,
+      timeoutSeconds: 30,
+      user,
+    };
+    const response = await cloudFetch<unknown>(
+      this.conn,
+      "POST",
+      `/v1/machines/${this.id}/exec`,
+      { json: probe, signal },
+    );
+    assertCloudUserEcho(response, user);
+    this.verifiedUsers.add(user);
+  }
 
   get machineId(): string {
     return this.id;
@@ -1014,14 +1052,15 @@ class CloudTransport implements Transport {
   }
 
   async exec(command: string[], opts?: ExecOptions): Promise<RawExec> {
-    rejectCloudExecUser(opts);
+    if (opts?.user !== undefined) await this.ensureUser(opts.user, opts.signal);
     // smolfleet MachineCommandRequest: command (CommandSpec — argv array),
-    // cwd, env, timeoutSeconds. (exactOptionalPropertyTypes: coerce undefined → null.)
-    const json: MachineCommandRequest = {
+    // cwd, env, timeoutSeconds, user. (exactOptionalPropertyTypes: coerce undefined → null.)
+    const json: CloudCommandRequest = {
       command,
       env: opts?.env ?? {},
       cwd: opts?.workdir ?? null,
       timeoutSeconds: opts?.timeout ?? null,
+      ...(opts?.user !== undefined ? { user: opts.user } : {}),
     };
     // The command may legitimately run far longer than the default cloud
     // timeout, so size the request abort timeout off the request's own timeout
@@ -1047,6 +1086,8 @@ class CloudTransport implements Transport {
         signal: opts?.signal,
       },
     );
+    // Defense in depth: the probe proved support; confirm this run too.
+    if (opts?.user !== undefined) assertCloudUserEcho(r, opts.user);
     const stdout = r.stdout ?? "";
     const stderr = r.stderr ?? "";
     // `stdoutB64`/`stderrB64` are byte-exact and untruncated; the generated
@@ -1080,14 +1121,16 @@ class CloudTransport implements Transport {
     command: string[],
     opts?: ExecOptions,
   ): AsyncGenerator<ExecEvent> {
-    rejectCloudExecUser(opts);
     const signal = opts?.signal;
     signal?.throwIfAborted();
-    const json: MachineCommandRequest = {
+    // A stream's response cannot echo the user, so the probe is the only check.
+    if (opts?.user !== undefined) await this.ensureUser(opts.user, signal);
+    const json: CloudCommandRequest = {
       command,
       env: opts?.env ?? {},
       cwd: opts?.workdir ?? null,
       timeoutSeconds: opts?.timeout ?? null,
+      ...(opts?.user !== undefined ? { user: opts.user } : {}),
     };
     let res: Response;
     try {
