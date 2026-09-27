@@ -15,6 +15,7 @@ import {
   getNapiMachine,
   type NapiMachine as NapiInstance,
   type NativeExecOptions,
+  type NativeExecStream,
   type NativeMachineConfig,
 } from "./native";
 import {
@@ -227,10 +228,45 @@ function toNativeExecOptions(
   return {
     workdir: opts.workdir,
     timeoutSecs: opts.timeout,
+    user: opts.user,
     env:
       opts.env &&
       Object.entries(opts.env).map(([key, value]) => ({ key, value })),
   };
+}
+
+/** Drain an exec stream into an exec result, for an `exec` that must be
+ *  abortable (only the streaming path can kill a running command). */
+async function collectExec(
+  events: AsyncGenerator<ExecEvent>,
+  signal: AbortSignal,
+): Promise<RawExec> {
+  let stdout = "";
+  let stderr = "";
+  for await (const e of events) {
+    if (e.kind === "stdout") stdout += e.data;
+    else if (e.kind === "stderr") stderr += e.data;
+    else if (e.kind === "exit") return { exitCode: e.exitCode, stdout, stderr };
+    // An abort tears the connection down; report the abort, not the teardown.
+    else if (signal.aborted) throw signal.reason;
+    else throw wrapNativeError(new Error(e.message));
+  }
+  throw new SmolError("SMOLVM_ERROR", "command stream ended without an exit status");
+}
+
+/** A cloud exec request carrying the per-command `user`, which the control
+ *  plane added after the generated schema. */
+type CloudCommandRequest = MachineCommandRequest & { user?: string };
+
+/** The control plane echoes the user it ran a command as; an older one, which
+ *  predates the field, echoes nothing because it silently dropped it. */
+function assertCloudUserEcho(response: unknown, requested: string): void {
+  if ((response as { user?: unknown } | undefined)?.user !== requested) {
+    throw new NotSupportedError(
+      `the control plane did not honour user "${requested}": it predates per-command ` +
+        "users and would run the command as the image's default account",
+    );
+  }
 }
 
 /** Whether a machine wants outbound network, from either place it can be asked.
@@ -410,6 +446,7 @@ class LocalTransport implements Transport {
   }
 
   async exec(command: string[], opts?: ExecOptions): Promise<RawExec> {
+    if (opts?.signal) return collectExec(this.execStream(command, opts), opts.signal);
     try {
       return await this.inner.exec(command, toNativeExecOptions(opts));
     } catch (e) {
@@ -422,6 +459,9 @@ class LocalTransport implements Transport {
     command: string[],
     opts?: ExecOptions,
   ): Promise<RawExec> {
+    if (opts?.signal) {
+      throw new NotSupportedError("signal is not supported by run(); use exec on an image machine.");
+    }
     try {
       return await this.inner.run(image, command, toNativeExecOptions(opts));
     } catch (e) {
@@ -433,26 +473,43 @@ class LocalTransport implements Transport {
     command: string[],
     opts?: ExecOptions,
   ): AsyncGenerator<ExecEvent> {
-    let stream;
+    const signal = opts?.signal;
+    signal?.throwIfAborted();
+    let stream: NativeExecStream;
     try {
       stream = this.inner.execStream(command, toNativeExecOptions(opts));
     } catch (e) {
       throw wrapNativeError(e);
     }
-    // Pull events live as they arrive; null marks end-of-stream (command exit).
-    for (;;) {
-      let e;
-      try {
-        e = await stream.next();
-      } catch (err) {
-        throw wrapNativeError(err);
+    const kill = () => stream.kill();
+    signal?.addEventListener("abort", kill, { once: true });
+    let ended = false;
+    try {
+      // Pull events live as they arrive; null marks end-of-stream.
+      for (;;) {
+        let e;
+        try {
+          e = await stream.next();
+        } catch (err) {
+          throw wrapNativeError(err);
+        }
+        if (e === null) {
+          ended = true;
+          // A kill ends the stream too; report it as the abort it was.
+          if (signal?.aborted) throw signal.reason;
+          return;
+        }
+        if (e.kind === "stdout" || e.kind === "stderr")
+          yield { kind: e.kind, data: e.data ?? "" };
+        else if (e.kind === "exit")
+          yield { kind: "exit", exitCode: e.exitCode ?? 0 };
+        else yield { kind: "error", message: e.message ?? "unknown error" };
       }
-      if (e === null) return;
-      if (e.kind === "stdout" || e.kind === "stderr")
-        yield { kind: e.kind, data: e.data ?? "" };
-      else if (e.kind === "exit")
-        yield { kind: "exit", exitCode: e.exitCode ?? 0 };
-      else yield { kind: "error", message: e.message ?? "unknown error" };
+    } finally {
+      signal?.removeEventListener("abort", kill);
+      // The consumer stopped early (break/return/throw) — don't leave the
+      // command running in the machine. A no-op once it has exited.
+      if (!ended) stream.kill();
     }
   }
 
@@ -727,6 +784,8 @@ async function cloudFetch<T = unknown>(
     body?: Buffer;
     accept?: "json" | "bytes";
     timeoutMs?: number;
+    /** Caller abort; rejects with `signal.reason` rather than TIMEOUT. */
+    signal?: AbortSignal | undefined;
   } = {},
 ): Promise<T> {
   const headers: Record<string, string> = {
@@ -742,11 +801,14 @@ async function cloudFetch<T = unknown>(
   }
 
   // Bound every request so a hung network call can't block the caller forever.
+  opts.signal?.throwIfAborted();
   const controller = new AbortController();
   const timer = setTimeout(
     () => controller.abort(),
     opts.timeoutMs ?? CLOUD_TIMEOUT_MS,
   );
+  const onAbort = () => controller.abort();
+  opts.signal?.addEventListener("abort", onAbort, { once: true });
   let res: Response;
   try {
     res = await fetch(`${conn.baseUrl}${path}`, {
@@ -756,6 +818,7 @@ async function cloudFetch<T = unknown>(
       signal: controller.signal,
     });
   } catch (e) {
+    if (opts.signal?.aborted) throw opts.signal.reason;
     if ((e as Error).name === "AbortError") {
       throw new SmolError(
         "TIMEOUT",
@@ -768,6 +831,7 @@ async function cloudFetch<T = unknown>(
     );
   } finally {
     clearTimeout(timer);
+    opts.signal?.removeEventListener("abort", onAbort);
   }
   if (!res.ok) {
     const text = await res.text().catch(() => "");
@@ -885,11 +949,40 @@ async function waitForReady(
 }
 
 class CloudTransport implements Transport {
+  /** Users this control plane has been proven to honour (see `ensureUser`). */
+  private readonly verifiedUsers = new Set<string>();
+
   constructor(
     private readonly conn: CloudConn,
     public readonly name: string,
     private readonly id: string,
   ) {}
+
+  /**
+   * Prove the control plane honours a per-command `user` before running a real
+   * command as it. An older control plane drops the unknown field and would
+   * run the command as the image's default account without any sign; checking
+   * the echo only after the fact would be too late. A harmless `true` whose
+   * response echoes the user settles it, once per user for this handle.
+   */
+  private async ensureUser(user: string, signal: AbortSignal | undefined): Promise<void> {
+    if (this.verifiedUsers.has(user)) return;
+    const probe: CloudCommandRequest = {
+      command: ["true"],
+      env: {},
+      cwd: null,
+      timeoutSeconds: 30,
+      user,
+    };
+    const response = await cloudFetch<unknown>(
+      this.conn,
+      "POST",
+      `/v1/machines/${this.id}/exec`,
+      { json: probe, signal },
+    );
+    assertCloudUserEcho(response, user);
+    this.verifiedUsers.add(user);
+  }
 
   get machineId(): string {
     return this.id;
@@ -959,13 +1052,15 @@ class CloudTransport implements Transport {
   }
 
   async exec(command: string[], opts?: ExecOptions): Promise<RawExec> {
+    if (opts?.user !== undefined) await this.ensureUser(opts.user, opts.signal);
     // smolfleet MachineCommandRequest: command (CommandSpec — argv array),
-    // cwd, env, timeoutSeconds. (exactOptionalPropertyTypes: coerce undefined → null.)
-    const json: MachineCommandRequest = {
+    // cwd, env, timeoutSeconds, user. (exactOptionalPropertyTypes: coerce undefined → null.)
+    const json: CloudCommandRequest = {
       command,
       env: opts?.env ?? {},
       cwd: opts?.workdir ?? null,
       timeoutSeconds: opts?.timeout ?? null,
+      ...(opts?.user !== undefined ? { user: opts.user } : {}),
     };
     // The command may legitimately run far longer than the default cloud
     // timeout, so size the request abort timeout off the request's own timeout
@@ -988,8 +1083,11 @@ class CloudTransport implements Transport {
       {
         json,
         timeoutMs,
+        signal: opts?.signal,
       },
     );
+    // Defense in depth: the probe proved support; confirm this run too.
+    if (opts?.user !== undefined) assertCloudUserEcho(r, opts.user);
     const stdout = r.stdout ?? "";
     const stderr = r.stderr ?? "";
     // `stdoutB64`/`stderrB64` are byte-exact and untruncated; the generated
@@ -1023,11 +1121,16 @@ class CloudTransport implements Transport {
     command: string[],
     opts?: ExecOptions,
   ): AsyncGenerator<ExecEvent> {
-    const json: MachineCommandRequest = {
+    const signal = opts?.signal;
+    signal?.throwIfAborted();
+    // A stream's response cannot echo the user, so the probe is the only check.
+    if (opts?.user !== undefined) await this.ensureUser(opts.user, signal);
+    const json: CloudCommandRequest = {
       command,
       env: opts?.env ?? {},
       cwd: opts?.workdir ?? null,
       timeoutSeconds: opts?.timeout ?? null,
+      ...(opts?.user !== undefined ? { user: opts.user } : {}),
     };
     let res: Response;
     try {
@@ -1041,9 +1144,11 @@ class CloudTransport implements Transport {
             accept: "text/event-stream",
           },
           body: JSON.stringify(json),
+          signal: signal ?? null,
         },
       );
     } catch (e) {
+      if (signal?.aborted) throw signal.reason;
       throw new SmolError(
         "CONNECTION",
         `cloud exec/stream failed: ${(e as Error).message}`,
@@ -1096,7 +1201,14 @@ class CloudTransport implements Transport {
     };
     try {
       for (;;) {
-        const { value, done } = await reader.read();
+        let chunk: ReadableStreamReadResult<Uint8Array>;
+        try {
+          chunk = await reader.read();
+        } catch (e) {
+          if (signal?.aborted) throw signal.reason;
+          throw e;
+        }
+        const { value, done } = chunk;
         if (done) break;
         buf += decoder.decode(value, { stream: true });
         let nl: number;
@@ -1117,6 +1229,9 @@ class CloudTransport implements Transport {
       const ev = flush();
       if (ev) yield ev;
     } finally {
+      // Stopping early (break/return/abort) must end the HTTP stream, not just
+      // stop reading it.
+      await reader.cancel().catch(() => {});
       reader.releaseLock();
     }
   }

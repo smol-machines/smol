@@ -131,6 +131,9 @@ pub struct ExecOptions {
     pub workdir: Option<String>,
     /// Timeout in seconds.
     pub timeout_secs: Option<u32>,
+    /// Run the command as this user (image user name or `uid[:gid]`). Image
+    /// machines only; a bare VM rejects it rather than run as root.
+    pub user: Option<String>,
 }
 
 /// Options for writing a file into the VM.
@@ -300,26 +303,19 @@ impl From<AgentExecEvent> for ExecStreamEvent {
 }
 
 /// Parse ExecOptions into the components needed by AgentClient::vm_exec().
-pub fn parse_exec_options(
-    options: Option<ExecOptions>,
-) -> (
-    Vec<(String, String)>,
-    Option<String>,
-    Option<std::time::Duration>,
-) {
-    match options {
-        Some(opts) => {
-            let env = opts
-                .env
-                .map(|vars| vars.into_iter().map(|v| (v.key, v.value)).collect())
-                .unwrap_or_default();
-
-            let timeout = opts
-                .timeout_secs
-                .map(|s| std::time::Duration::from_secs(s as u64));
-
-            (env, opts.workdir, timeout)
-        }
-        None => (Vec::new(), None, None),
+pub fn parse_exec_options(options: Option<ExecOptions>) -> smolvm::embedded::ExecOptions {
+    let Some(opts) = options else {
+        return smolvm::embedded::ExecOptions::default();
+    };
+    smolvm::embedded::ExecOptions {
+        env: opts
+            .env
+            .map(|vars| vars.into_iter().map(|v| (v.key, v.value)).collect())
+            .unwrap_or_default(),
+        workdir: opts.workdir,
+        timeout: opts
+            .timeout_secs
+            .map(|s| std::time::Duration::from_secs(s as u64)),
+        user: opts.user,
     }
 }
