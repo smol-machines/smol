@@ -1,4 +1,5 @@
 pub mod agent;
+pub mod agent_cloud;
 pub mod agent_serve;
 pub mod auth;
 pub mod auth_status;

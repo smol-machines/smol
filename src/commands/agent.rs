@@ -1,20 +1,21 @@
-//! `smol agent`: run an agent harness (Claude Code, or any program) in its own
-//! machine as a session of turns, with a checkpoint per turn so the session can
-//! be rewound or branched. Built on the SDK's `smolmachines::agent`.
+//! `smol agent`: local sessions use `smolmachines::agent`; `--cloud` uses the
+//! hosted managed agent API through `smolmachines::cloud_agent`.
 
 use anyhow::{bail, Result};
 use clap::{Args, Subcommand, ValueEnum};
 use smolmachines::agent::{AgentEvent, Harness, Session, SessionOptions};
-use smolmachines::ConnectOptions;
 
 #[derive(Args, Debug)]
 pub struct AgentCmd {
+    /// Use hosted managed agent sessions; without this, sessions run locally.
+    #[arg(long, global = true)]
+    cloud: bool,
     #[command(subcommand)]
     command: AgentSubcommand,
 }
 
 #[derive(Clone, Copy, Debug, ValueEnum)]
-enum HarnessKind {
+pub(super) enum HarnessKind {
     /// Anthropic's Claude Code (needs ANTHROPIC_API_KEY)
     ClaudeCode,
     /// OpenAI's Codex CLI (needs OPENAI_API_KEY)
@@ -27,7 +28,7 @@ enum HarnessKind {
 }
 
 #[derive(Subcommand, Debug)]
-enum AgentSubcommand {
+pub(super) enum AgentSubcommand {
     /// Start a session: create its machine and install the harness
     Start {
         /// Session name
@@ -45,9 +46,12 @@ enum AgentSubcommand {
         /// anthropic/claude-sonnet-4-5 or openai/gpt-5
         #[arg(long)]
         model: Option<String>,
-        /// Run the session on smol cloud instead of the local engine
+        /// Stored model credential to bind to a hosted session (--cloud only)
         #[arg(long)]
-        cloud: bool,
+        credential: Option<String>,
+        /// Cloud CPU architecture: amd64 or arm64 (--cloud only)
+        #[arg(long)]
+        arch: Option<String>,
         /// Another host the agent may reach (repeatable)
         #[arg(long = "allow-host")]
         allow_hosts: Vec<String>,
@@ -81,6 +85,15 @@ enum AgentSubcommand {
         /// Print every event as a JSON line instead of formatted text
         #[arg(long)]
         json: bool,
+        /// Read this variable from the host environment for this turn (--cloud only; repeatable)
+        #[arg(long = "env-from")]
+        env_from: Vec<String>,
+        /// Retry a hosted turn safely with the same key (--cloud only)
+        #[arg(long)]
+        idempotency_key: Option<String>,
+        /// Maximum hosted turn duration in seconds (--cloud only)
+        #[arg(long)]
+        timeout_seconds: Option<u64>,
     },
     /// List sessions
     Ls,
@@ -116,6 +129,13 @@ enum AgentSubcommand {
         /// Session name
         name: String,
     },
+    /// Cancel a running hosted turn (--cloud only)
+    Cancel {
+        /// Session name
+        name: String,
+        /// Turn number
+        turn: u64,
+    },
     /// Delete a session, its machine and its checkpoints
     Rm {
         /// Session name
@@ -127,6 +147,9 @@ enum AgentSubcommand {
 
 impl AgentCmd {
     pub fn run(self) -> Result<()> {
+        if self.cloud {
+            return super::agent_cloud::run(self.command);
+        }
         match self.command {
             AgentSubcommand::Start {
                 name,
@@ -134,7 +157,8 @@ impl AgentCmd {
                 image,
                 program,
                 model,
-                cloud,
+                credential,
+                arch,
                 allow_hosts,
                 open_network,
                 no_checkpoints,
@@ -143,6 +167,9 @@ impl AgentCmd {
                 cpus,
                 memory,
             } => {
+                if credential.is_some() || arch.is_some() {
+                    bail!("--credential and --arch require --cloud");
+                }
                 let harness = match harness {
                     HarnessKind::ClaudeCode => Harness::ClaudeCode,
                     HarnessKind::Codex => Harness::Codex { model },
@@ -162,9 +189,6 @@ impl AgentCmd {
                     }
                 };
                 let mut opts = SessionOptions::new(&name, harness);
-                if cloud {
-                    opts.connect = ConnectOptions::cloud();
-                }
                 opts.extra_hosts = allow_hosts;
                 opts.open_network = open_network;
                 opts.checkpoint_turns = !no_checkpoints;
@@ -195,7 +219,17 @@ impl AgentCmd {
                 }
                 Ok(())
             }
-            AgentSubcommand::Send { name, prompt, json } => {
+            AgentSubcommand::Send {
+                name,
+                prompt,
+                json,
+                env_from,
+                idempotency_key,
+                timeout_seconds,
+            } => {
+                if !env_from.is_empty() || idempotency_key.is_some() || timeout_seconds.is_some() {
+                    bail!("--env-from, --idempotency-key and --timeout-seconds require --cloud");
+                }
                 let mut session = Session::open(&name)?;
                 let prompt = prompt.join(" ");
                 let mut last_text = None;
@@ -310,6 +344,7 @@ impl AgentCmd {
                 Ok(())
             }
             AgentSubcommand::Serve(cmd) => cmd.run(),
+            AgentSubcommand::Cancel { .. } => bail!("cancel requires --cloud"),
             AgentSubcommand::Rm { name } => {
                 Session::open(&name)?.delete()?;
                 println!("Deleted '{name}'");
@@ -319,7 +354,7 @@ impl AgentCmd {
     }
 }
 
-fn one_line(text: &str, max: usize) -> String {
+pub(super) fn one_line(text: &str, max: usize) -> String {
     let flat: String = text.split_whitespace().collect::<Vec<_>>().join(" ");
     if flat.chars().count() > max {
         format!("{}…", flat.chars().take(max).collect::<String>())
@@ -328,7 +363,7 @@ fn one_line(text: &str, max: usize) -> String {
     }
 }
 
-fn print_event(event: &AgentEvent) {
+pub(super) fn print_event(event: &AgentEvent) {
     match event {
         AgentEvent::Text { text } => println!("{text}"),
         AgentEvent::ToolUse { name, input } => {
