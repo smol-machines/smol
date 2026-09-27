@@ -521,6 +521,33 @@ async function main(): Promise<void> {
     JSON.stringify(seen.createBody),
   );
 
+  // The control plane opens egress when `network` is absent, so an explicit
+  // "no network" must be sent as `blocked`, and unset must stay absent.
+  await Machine.create(
+    { image: "alpine", resources: { network: false } },
+    { target: "cloud", baseUrl, apiKey: "smk_test123" },
+  );
+  check(
+    "network: false is sent as blocked",
+    JSON.stringify(seen.createBody?.network) === JSON.stringify({ mode: "blocked" }),
+    JSON.stringify(seen.createBody?.network),
+  );
+  await Machine.create(
+    { image: "alpine", network: true },
+    { target: "cloud", baseUrl, apiKey: "smk_test123" },
+  );
+  check(
+    "network: true is sent as open",
+    JSON.stringify(seen.createBody?.network) === JSON.stringify({ mode: "open" }),
+    JSON.stringify(seen.createBody?.network),
+  );
+  await Machine.create({ image: "alpine" }, { target: "cloud", baseUrl, apiKey: "smk_test123" });
+  check(
+    "unset network is left to the control plane",
+    !("network" in (seen.createBody ?? {})),
+    JSON.stringify(seen.createBody),
+  );
+
   // --- branch: live-RAM child over the cloud ---
   const clone = await m.branch("rollout-1", {
     ports: [{ host: 18080, guest: 80 }],

@@ -13,9 +13,12 @@ export interface ResourceSpec {
   /** Memory in MB. */
   memoryMb?: number;
   /**
-   * Enable unrestricted outbound network access (TSI). Default: false. To allow
-   * only specific destinations, set `allowHosts` or `allowCidrs` instead of
-   * this flag; either one enables networking scoped to its list.
+   * Enable unrestricted outbound network access (TSI). To allow only specific
+   * destinations, set `allowHosts` or `allowCidrs` instead of this flag;
+   * either one enables networking scoped to its list. Unset means off locally
+   * and the control plane's default (open) on the cloud; `false` blocks egress
+   * on both. A blocked cloud machine cannot pull an image the node has not
+   * cached.
    */
   network?: boolean;
   /**
