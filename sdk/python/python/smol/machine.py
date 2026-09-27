@@ -17,6 +17,7 @@ import uuid
 from typing import Any, Optional
 
 from .transport import (
+    ExecStream,
     Transport,
     _load_native,
     connect_transport,
@@ -218,15 +219,28 @@ class Machine:
         """Pull an image (if needed) and run a command in a container of it. (local)"""
         return self._t.run(image, command, opts)
 
-    def exec_stream(self, command: list[str], opts: Optional[ExecOptions] = None):
-        """Execute a command and stream its output LIVE as it is produced (local).
+    def exec_stream(self, command: list[str], opts: Optional[ExecOptions] = None) -> ExecStream:
+        """Execute a command and stream its output LIVE as it is produced.
 
-        Yields event dicts:
+        Returns an :class:`ExecStream` yielding event dicts:
         ``{"kind": "stdout"|"stderr", "data": str}``,
         ``{"kind": "exit", "exit_code": int}``, or
         ``{"kind": "error", "message": str}``.
+
+        ``stream.kill()`` stops the command from any thread; stopping early any
+        other way (``break``, ``close()``, leaving a ``with`` block, dropping the
+        stream) kills it too.
         """
         return self._t.exec_stream(command, opts)
+
+    def _exec_cancellable(self, command: list[str], opts: Optional[ExecOptions]) -> "tuple[Any, Any]":
+        """``(canceller, run)`` for an exec another thread can kill, or
+        ``(None, None)`` where the transport cannot (the cloud)."""
+        make = getattr(self._t, "canceller", None)
+        if make is None:
+            return None, None
+        cancel = make()
+        return cancel, lambda: self._t.exec(command, opts, cancel)
 
     def read_file(self, path: str) -> bytes:
         """Read a file from the machine."""

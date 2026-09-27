@@ -170,8 +170,16 @@ class MachineConfig:
 class ExecOptions:
     env: Optional[dict[str, str]] = None
     workdir: Optional[str] = None
-    timeout: Optional[int] = None
-    """Timeout in seconds."""
+    timeout: Optional[float] = None
+    """Kill the command after this many seconds. Fractions are honored: locally
+    to the millisecond, on the cloud rounded up to a whole second. Must be > 0."""
+    user: Optional[str] = None
+    """Run the command as this user: a name from the image or a numeric
+    ``uid[:gid]``. Image machines only — a bare VM runs every command as root, so
+    asking for a user there is an error rather than a silent root. On the cloud
+    the SDK first checks that the control plane applies it and raises
+    :class:`NotSupportedError` before running anything if it would not. Not
+    supported by local ``run(image, ...)``."""
     output: Optional[Literal["text", "b64", "both"]] = None
     """Cloud target only: which output encodings the server returns. The default
     carries both the capped UTF-8 text fields and the byte-exact base64 fields;

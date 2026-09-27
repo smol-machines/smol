@@ -660,24 +660,6 @@ def test_rollout_automatic_cohorts_partition_large_batches():
     assert cohorts[0]["id"] != cohorts[2]["id"]
 
 
-if __name__ == "__main__":
-    import traceback
-
-    fns = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
-    passed = failed = 0
-    for fn in fns:
-        try:
-            fn()
-            passed += 1
-            print(f"  ok {fn.__name__}")
-        except Exception:  # noqa: BLE001
-            failed += 1
-            print(f"  FAIL {fn.__name__}")
-            traceback.print_exc()
-    print(f"\n{passed} passed, {failed} failed")
-    sys.exit(1 if failed else 0)
-
-
 # --- resolve_network: a top-level `network` must not be dropped (Node parity) ---
 def test_toplevel_network_is_honoured_instead_of_dropped():
     cfg = MachineConfig(image="alpine", network=True)
@@ -709,3 +691,21 @@ def test_toplevel_network_alone_still_emits_a_resources_block():
     cfg = MachineConfig(image="alpine", network=True)
     native = _native_config("m", cfg)
     assert native["resources"] == {"network": True}
+
+
+if __name__ == "__main__":
+    import traceback
+
+    fns = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
+    passed = failed = 0
+    for fn in fns:
+        try:
+            fn()
+            passed += 1
+            print(f"  ok {fn.__name__}")
+        except Exception:  # noqa: BLE001
+            failed += 1
+            print(f"  FAIL {fn.__name__}")
+            traceback.print_exc()
+    print(f"\n{passed} passed, {failed} failed")
+    sys.exit(1 if failed else 0)

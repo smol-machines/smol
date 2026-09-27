@@ -326,7 +326,17 @@ connections may need to reconnect. Both methods are awaitable on `AsyncMachine`.
   waits for `ready is True` before returning.
 - `Machine.connect(machine_id, conn=None)` — attach without waiting; call
   `wait_until_ready()` before use.
-- `machine.exec(command, opts=None)` / `machine.run(image, command, opts=None)` → `ExecResult`
+- `machine.exec(command, opts=None)` / `machine.run(image, command, opts=None)` → `ExecResult`.
+  `ExecOptions(env=..., workdir=..., timeout=1.5, user="nobody")`: `user` runs
+  the command as that user on an image machine (a bare VM refuses it rather than
+  running it as root); on the cloud the SDK first checks that the control plane
+  applies it and raises `NotSupportedError` before running anything if not.
+- `machine.exec_stream(command, opts=None)` → `ExecStream`, an iterator of
+  event dicts. `stream.kill()` stops the command from any thread; `break`,
+  `close()` or leaving a `with` block kills it too. On `AsyncMachine`,
+  cancelling the task kills a local `exec` or `exec_stream`.
+- `smol.local_availability()` → `(available, code, reason)`: whether this host
+  can run local machines, without booting one.
 - `machine.read_file(path)` → `bytes` / `machine.write_file(path, data, mode=None)`
 - `machine.ready()` / `machine.ready_at()` / `machine.wait_until_ready(timeout_s=120, interval_s=1)`  *(cloud)*
 - `machine.endpoint(port, path=None)` → `PortEndpoint` / `machine.request(port, path=None, method="GET", data=None)` → `bytes`  *(cloud connect bridge)*
