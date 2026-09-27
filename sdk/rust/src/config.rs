@@ -481,7 +481,10 @@ impl MachineBuilder {
         self
     }
 
-    /// Give the guest outbound networking.
+    /// Give the guest outbound networking, or deny it. Unset means off locally
+    /// and the control plane's default (open) on the cloud; `false` blocks
+    /// egress on both. A blocked cloud machine cannot pull an image the node
+    /// has not cached.
     pub fn network(mut self, network: bool) -> Self {
         self.config.resources.network = Some(network);
         self
