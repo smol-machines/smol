@@ -48,7 +48,7 @@ pub(crate) fn is_compatible_engine(installed: &str, wanted: &str) -> bool {
 }
 
 /// The release artifact name for the host, or an error naming the platform.
-fn platform_slug() -> Result<&'static str> {
+pub(crate) fn platform_slug() -> Result<&'static str> {
     Ok(match (std::env::consts::OS, std::env::consts::ARCH) {
         ("macos", "aarch64") => "darwin-arm64",
         ("linux", "aarch64") => "linux-arm64",

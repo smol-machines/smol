@@ -339,20 +339,35 @@ impl MachineConfig {
             ));
         }
 
+        if self.user.is_some() {
+            return Err(Error::new(
+                ErrorKind::NotSupported,
+                "a machine-wide user is local-only: the cloud API has no field for it, so \
+                 the machine would run as the image's default account; pass the user per \
+                 command with ExecOptions::user instead",
+            ));
+        }
+
+        let mode = |mode: &str| wire::Network {
+            mode: Some(mode.to_string()),
+            cidrs: Vec::new(),
+            hosts: Vec::new(),
+        };
         let network = if !self.allowed_cidrs.is_empty() || !self.allowed_hosts.is_empty() {
             Some(wire::Network {
                 mode: Some("allowCidrs".to_string()),
                 cidrs: self.allowed_cidrs,
                 hosts: self.allowed_hosts,
             })
-        } else if self.resources.network.unwrap_or(false) {
-            Some(wire::Network {
-                mode: Some("open".to_string()),
-                cidrs: Vec::new(),
-                hosts: Vec::new(),
-            })
         } else {
-            None
+            match self.resources.network {
+                Some(true) => Some(mode("open")),
+                // The control plane opens egress when the field is absent, so
+                // an explicit "no network" has to be sent as `blocked`.
+                Some(false) => Some(mode("blocked")),
+                // Unset keeps the control plane's own default.
+                None => None,
+            }
         };
 
         Ok(wire::CreateMachine {

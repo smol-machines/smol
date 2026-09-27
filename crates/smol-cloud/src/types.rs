@@ -55,7 +55,8 @@ pub struct Resources {
 /// A machine's egress policy.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Network {
-    /// `open`, `allowCidrs`, or none at all.
+    /// `open`, `blocked`, `allowCidrs`, or none at all (the control plane
+    /// then defaults to `open`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mode: Option<String>,
     /// CIDRs the machine may reach, under `allowCidrs`.
@@ -218,6 +219,11 @@ pub struct Command {
     pub cwd: Option<String>,
     /// Server-side timeout.
     pub timeout_seconds: Option<u64>,
+    /// Run as this user (a name from the image or a numeric `uid[:gid]`).
+    /// Control planes that predate the field ignore it, so a caller must check
+    /// that [`CommandOutput::user`] echoes it back before trusting it applied.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub user: Option<String>,
 }
 
 /// What a finished command produced.
@@ -245,6 +251,10 @@ pub struct CommandOutput {
     #[serde(default)]
     /// Whether the text stderr hit the server's cap.
     pub stderr_truncated: Option<bool>,
+    /// The user the command ran as, echoed back when the request named one.
+    /// Absent from control planes that do not support a per-command user.
+    #[serde(default)]
+    pub user: Option<String>,
 }
 
 impl CommandOutput {

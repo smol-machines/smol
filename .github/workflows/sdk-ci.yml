@@ -169,6 +169,17 @@ jobs:
           bun test/fork-service-e2e.ts
           bun test/checkpoint-branch-e2e.ts
           bun test/staged-mount-e2e.ts
+      - name: Run Rust SDK exec control on the same engine
+        working-directory: ${{ github.workspace }}/monorepo/smol/sdk/rust
+        env:
+          SMOLVM: ${{ github.workspace }}/.cargo-target/smol-bun/release/smolvm
+          SMOLVM_AGENT_ROOTFS: ${{ github.workspace }}/monorepo/target/agent-rootfs
+          SMOLVM_LIB_DIR: ${{ github.workspace }}/monorepo/lib/linux-x86_64
+          LD_LIBRARY_PATH: ${{ github.workspace }}/monorepo/lib/linux-x86_64
+          XDG_DATA_HOME: ${{ runner.temp }}/rust-smol-data
+          XDG_CACHE_HOME: ${{ runner.temp }}/rust-smol-cache
+          XDG_CONFIG_HOME: ${{ runner.temp }}/rust-smol-config
+        run: cargo run --example e2e_exec_control
 
   python-check:
     name: Python · unit + cloud-mock

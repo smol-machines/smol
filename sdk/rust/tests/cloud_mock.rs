@@ -29,6 +29,15 @@ struct Reply {
     status: u16,
     body: String,
     content_type: &'static str,
+    /// Keep the connection open after the body, like a command still running.
+    held: Option<Held>,
+}
+
+enum Held {
+    /// Until the client hangs up, which is reported here.
+    UntilClosed(mpsc::Sender<()>),
+    /// Stay quiet this long, then send the rest and close.
+    Then(Duration, String),
 }
 
 impl Reply {
@@ -37,6 +46,7 @@ impl Reply {
             status: 200,
             body: body.into(),
             content_type: "application/json",
+            held: None,
         }
     }
 
@@ -45,6 +55,7 @@ impl Reply {
             status,
             body: body.into(),
             content_type: "application/json",
+            held: None,
         }
     }
 
@@ -53,6 +64,25 @@ impl Reply {
             status: 200,
             body: body.into(),
             content_type: "text/event-stream",
+            held: None,
+        }
+    }
+
+    /// An event stream that sends `body` and then stays open until the client
+    /// hangs up, which it reports on `closed`.
+    fn held_sse(body: impl Into<String>, closed: mpsc::Sender<()>) -> Self {
+        Self {
+            held: Some(Held::UntilClosed(closed)),
+            ..Self::sse(body)
+        }
+    }
+
+    /// An event stream that sends `body`, goes quiet for `gap`, then sends
+    /// `rest` and ends.
+    fn quiet_sse(body: impl Into<String>, gap: Duration, rest: impl Into<String>) -> Self {
+        Self {
+            held: Some(Held::Then(gap, rest.into())),
+            ..Self::sse(body)
         }
     }
 
@@ -61,6 +91,7 @@ impl Reply {
             status: 200,
             body: body.into(),
             content_type: "application/octet-stream",
+            held: None,
         }
     }
 }
@@ -163,6 +194,29 @@ fn serve(mut stream: TcpStream, routes: &HashMap<String, Route>, tx: &mpsc::Send
         })
         .map(|route| route(&request))
         .unwrap_or_else(|| Reply::status(404, r#"{"error":"no such route"}"#));
+
+    if let Some(held) = reply.held {
+        // No content-length: the body runs until the connection closes.
+        let head = format!(
+            "HTTP/1.1 200 OK\r\ncontent-type: {}\r\nconnection: close\r\n\r\n{}",
+            reply.content_type, reply.body
+        );
+        let _ = stream.write_all(head.as_bytes());
+        let _ = stream.flush();
+        match held {
+            Held::UntilClosed(closed) => {
+                let mut buf = [0u8; 64];
+                while matches!(reader.read(&mut buf), Ok(n) if n > 0) {}
+                let _ = closed.send(());
+            }
+            Held::Then(gap, rest) => {
+                thread::sleep(gap);
+                let _ = stream.write_all(rest.as_bytes());
+                let _ = stream.flush();
+            }
+        }
+        return;
+    }
 
     let response = format!(
         "HTTP/1.1 {} OK\r\ncontent-type: {}\r\ncontent-length: {}\r\nx-request-id: req-42\r\nconnection: close\r\n\r\n{}",
@@ -890,4 +944,246 @@ fn a_local_machine_cannot_be_asked_for_an_architecture_the_host_lacks() {
         // engine, so stop at the translation.
         assert!(config.arch.is_some());
     }
+}
+
+/// An exec route that answers like a control plane with per-command users:
+/// it echoes the requested user back.
+fn echoing_exec(req: &Request) -> Reply {
+    let body: serde_json::Value = serde_json::from_str(&req.body).unwrap();
+    let user = body.get("user").cloned().unwrap_or(serde_json::Value::Null);
+    Reply::json(serde_json::json!({ "exitCode": 0, "stdout": "ok", "user": user }).to_string())
+}
+
+fn exec_bodies(cloud: &MockCloud, id: &str) -> Vec<serde_json::Value> {
+    cloud
+        .requests()
+        .into_iter()
+        .filter(|r| r.path == format!("/v1/machines/{id}/exec"))
+        .map(|r| serde_json::from_str(&r.body).unwrap())
+        .collect()
+}
+
+#[test]
+fn a_per_command_user_is_proven_once_then_sent_with_each_command() {
+    let cloud = MockCloud::start(routes(vec![
+        (
+            "GET /v1/machines/m-u",
+            Box::new(|_| Reply::json(ready_machine("m-u"))),
+        ),
+        ("POST /v1/machines/m-u/exec", Box::new(echoing_exec)),
+    ]));
+    let machine = Machine::connect_with("m-u", &cloud.connect()).unwrap();
+    let as_nobody = ExecOptions::new().user("nobody");
+    machine.exec_with(["id"], as_nobody.clone()).unwrap();
+    machine.exec_with(["id"], as_nobody).unwrap();
+    machine.exec(["id"]).unwrap();
+
+    let bodies = exec_bodies(&cloud, "m-u");
+    let commands: Vec<_> = bodies.iter().map(|b| b["command"][0].clone()).collect();
+    // One harmless probe, then the real commands; the probe is not repeated.
+    assert_eq!(commands, ["true", "id", "id", "id"]);
+    assert_eq!(bodies[0]["user"], "nobody");
+    assert_eq!(bodies[1]["user"], "nobody");
+    assert_eq!(bodies[2]["user"], "nobody");
+    // No user asked for, none sent.
+    assert!(bodies[3].get("user").is_none(), "{}", bodies[3]);
+}
+
+#[test]
+fn a_control_plane_that_ignores_the_user_runs_nothing_as_anyone() {
+    let cloud = MockCloud::start(routes(vec![
+        (
+            "GET /v1/machines/m-old",
+            Box::new(|_| Reply::json(ready_machine("m-old"))),
+        ),
+        (
+            // An older control plane: runs the command, never echoes a user.
+            "POST /v1/machines/m-old/exec",
+            Box::new(|_| Reply::json(r#"{"exitCode":0,"stdout":"root"}"#)),
+        ),
+        (
+            "POST /v1/machines/m-old/exec/stream",
+            Box::new(|_| Reply::sse("event: exit\ndata: {\"exitCode\":0}\n\n")),
+        ),
+    ]));
+    let machine = Machine::connect_with("m-old", &cloud.connect()).unwrap();
+
+    let error = machine
+        .exec_with(["rm", "-rf", "/data"], ExecOptions::new().user("nobody"))
+        .expect_err("the user would have been ignored");
+    assert_eq!(error.kind(), ErrorKind::NotSupported);
+    assert!(error.message().contains("nobody"), "{error}");
+    let error = machine
+        .exec_stream(["rm", "-rf", "/data"], ExecOptions::new().user("nobody"))
+        .err()
+        .expect("the user would have been ignored");
+    assert_eq!(error.kind(), ErrorKind::NotSupported);
+
+    // Only the probes reached the machine; the real command never ran.
+    let sent = cloud.requests();
+    assert!(!sent.iter().any(|r| r.path.ends_with("/exec/stream")));
+    for body in exec_bodies_from(&sent, "m-old") {
+        assert_eq!(body["command"], serde_json::json!(["true"]));
+    }
+}
+
+fn exec_bodies_from(sent: &[Request], id: &str) -> Vec<serde_json::Value> {
+    sent.iter()
+        .filter(|r| r.path == format!("/v1/machines/{id}/exec"))
+        .map(|r| serde_json::from_str(&r.body).unwrap())
+        .collect()
+}
+
+#[test]
+fn a_timeout_is_rounded_up_to_whole_seconds_and_zero_is_refused() {
+    let cloud = MockCloud::start(routes(vec![
+        (
+            "GET /v1/machines/m-t",
+            Box::new(|_| Reply::json(ready_machine("m-t"))),
+        ),
+        ("POST /v1/machines/m-t/exec", Box::new(echoing_exec)),
+    ]));
+    let machine = Machine::connect_with("m-t", &cloud.connect()).unwrap();
+    machine
+        .exec_with(
+            ["true"],
+            ExecOptions::new().timeout(Duration::from_millis(1500)),
+        )
+        .unwrap();
+    machine
+        .exec_with(
+            ["true"],
+            ExecOptions::new().timeout(Duration::from_millis(200)),
+        )
+        .unwrap();
+    let zero = machine
+        .exec_with(["true"], ExecOptions::new().timeout(Duration::ZERO))
+        .expect_err("a zero timeout cannot mean anything useful");
+    assert_eq!(zero.kind(), ErrorKind::Config);
+
+    let bodies = exec_bodies(&cloud, "m-t");
+    assert_eq!(bodies.len(), 2, "the zero-timeout command was never sent");
+    assert_eq!(bodies[0]["timeoutSeconds"], 2);
+    assert_eq!(bodies[1]["timeoutSeconds"], 1);
+}
+
+#[test]
+fn killing_a_stream_closes_its_connection_even_while_it_waits() {
+    let (closed_tx, closed) = mpsc::channel();
+    let closed_tx = Mutex::new(closed_tx);
+    let cloud = MockCloud::start(routes(vec![
+        (
+            "GET /v1/machines/m-k",
+            Box::new(|_| Reply::json(ready_machine("m-k"))),
+        ),
+        (
+            "POST /v1/machines/m-k/exec/stream",
+            Box::new(move |_| {
+                Reply::held_sse(
+                    "event: stdout\ndata: started\n\n",
+                    closed_tx.lock().unwrap().clone(),
+                )
+            }),
+        ),
+    ]));
+    let machine = Machine::connect_with("m-k", &cloud.connect()).unwrap();
+    let mut stream = machine
+        .exec_stream(["sleep", "infinity"], ExecOptions::new())
+        .unwrap();
+    assert_eq!(stream.next(), Some(ExecEvent::Stdout(b"started".to_vec())));
+
+    // Kill from another thread while this one is blocked on the next event.
+    let handle = stream.kill_handle();
+    let killer = thread::spawn(move || {
+        thread::sleep(Duration::from_millis(200));
+        handle.kill();
+    });
+    let started = std::time::Instant::now();
+    assert_eq!(stream.next(), None, "a killed stream ends");
+    assert!(started.elapsed() < Duration::from_secs(5));
+    killer.join().unwrap();
+    closed
+        .recv_timeout(Duration::from_secs(5))
+        .expect("the connection closes at once, not at the next event");
+}
+
+// Slow by nature (it has to outlast the 30 s window), so run on demand:
+// cargo test --test cloud_mock -- --ignored
+#[test]
+#[ignore]
+fn a_quiet_stream_outlives_the_ordinary_request_window() {
+    // Streams used to inherit the HTTP client's 30 s whole-request deadline,
+    // which cut off any command that ran longer.
+    let cloud = MockCloud::start(routes(vec![
+        (
+            "GET /v1/machines/m-q",
+            Box::new(|_| Reply::json(ready_machine("m-q"))),
+        ),
+        (
+            "POST /v1/machines/m-q/exec/stream",
+            Box::new(|_| {
+                Reply::quiet_sse(
+                    "event: stdout\ndata: working\n\n",
+                    Duration::from_secs(35),
+                    "event: exit\ndata: {\"exitCode\":0}\n\n",
+                )
+            }),
+        ),
+    ]));
+    let machine = Machine::connect_with("m-q", &cloud.connect()).unwrap();
+    let events: Vec<_> = machine
+        .exec_stream(["make"], ExecOptions::new())
+        .unwrap()
+        .collect();
+    assert_eq!(
+        events,
+        vec![ExecEvent::Stdout(b"working".to_vec()), ExecEvent::Exit(0)]
+    );
+}
+
+#[test]
+fn network_off_is_sent_as_blocked_and_a_machine_user_is_refused() {
+    let cloud = MockCloud::start(routes(vec![
+        (
+            "POST /v1/machines",
+            Box::new(|_| Reply::json(ready_machine("m-n"))),
+        ),
+        (
+            "POST /v1/machines/m-n/start",
+            Box::new(|_| Reply::status(204, "")),
+        ),
+        (
+            "GET /v1/machines/m-n",
+            Box::new(|_| Reply::json(ready_machine("m-n"))),
+        ),
+    ]));
+    Machine::builder("offline")
+        .image("alpine:latest")
+        .network(false)
+        .create_with(&cloud.connect())
+        .unwrap();
+    Machine::builder("default")
+        .image("alpine:latest")
+        .create_with(&cloud.connect())
+        .unwrap();
+    let creates: Vec<serde_json::Value> = cloud
+        .requests()
+        .into_iter()
+        .filter(|r| r.method == "POST" && r.path == "/v1/machines")
+        .map(|r| serde_json::from_str(&r.body).unwrap())
+        .collect();
+    // Absent means open to the control plane, so "off" must say so.
+    assert_eq!(creates[0]["network"]["mode"], "blocked");
+    assert!(creates[1].get("network").is_none(), "{}", creates[1]);
+
+    let error = Machine::builder("as-user")
+        .image("alpine:latest")
+        .user("nobody")
+        .create_with(&cloud.connect())
+        .expect_err("the API has no machine-wide user");
+    assert_eq!(error.kind(), ErrorKind::NotSupported);
+    assert!(!cloud
+        .requests()
+        .iter()
+        .any(|r| r.method == "POST" && r.path == "/v1/machines"));
 }

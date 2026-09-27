@@ -606,22 +606,25 @@ impl Machine {
         self.exec_with(command, ExecOptions::new())
     }
 
-    /// Run a command with explicit environment, directory or timeout.
+    /// Run a command with explicit environment, directory, timeout or user.
     pub fn exec_with<I, S>(&self, command: I, options: ExecOptions) -> Result<ExecResult>
     where
         I: IntoIterator<Item = S>,
         S: Into<String>,
     {
+        options.validate()?;
         self.transport
             .exec(command.into_iter().map(Into::into).collect(), options)
     }
 
-    /// Run a command and read its output as it arrives.
+    /// Run a command and read its output as it arrives. The stream can kill
+    /// the command; see [`ExecStream::kill`].
     pub fn exec_stream<I, S>(&self, command: I, options: ExecOptions) -> Result<ExecStream>
     where
         I: IntoIterator<Item = S>,
         S: Into<String>,
     {
+        options.validate()?;
         self.transport
             .exec_stream(command.into_iter().map(Into::into).collect(), options)
     }
@@ -637,7 +640,7 @@ impl Machine {
         self.run_with(image, command, ExecOptions::new())
     }
 
-    /// [`Machine::run`] with explicit environment, directory or timeout.
+    /// [`Machine::run`] with explicit environment, directory, timeout or user.
     pub fn run_with<I, S>(
         &self,
         image: &str,
@@ -648,6 +651,7 @@ impl Machine {
         I: IntoIterator<Item = S>,
         S: Into<String>,
     {
+        options.validate()?;
         self.transport.run(
             image,
             command.into_iter().map(Into::into).collect(),
