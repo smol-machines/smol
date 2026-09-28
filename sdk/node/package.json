@@ -27,6 +27,17 @@
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./ai-sdk": {
+      "types": "./dist/ai-sdk.d.ts",
+      "default": "./dist/ai-sdk.js"
+    }
+  },
+  "typesVersions": {
+    "*": {
+      "ai-sdk": [
+        "dist/ai-sdk.d.ts"
+      ]
     }
   },
   "files": [
