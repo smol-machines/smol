@@ -194,7 +194,8 @@ export interface MachineConfig {
 
 /** An outbound network policy that can replace a stopped machine's own.
  *  `allowHosts` entries are exact host names (`api.github.com`) or subdomain
- *  wildcards (`*.github.com`, which does not match `github.com` itself). */
+ *  wildcards (`*.github.com`, which does not match `github.com` itself). An
+ *  allow list that names no hosts and no CIDRs allows nothing. */
 export type NetworkPolicy =
   | "allow-all"
   | "deny-all"
