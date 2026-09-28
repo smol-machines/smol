@@ -364,7 +364,9 @@ const { text } = await generateText({
   command in the machine.
 - Missing files read as `null`.
 - `createSandboxSession(machine, { user: 'agent' })` runs every command as another
-  user on an image machine.
+  user on an image machine, and files written through the session belong to that
+  user.
+- `env` sets variables for every command; a command's own `env` wins.
 
 The module has no dependency on `ai`; the returned object matches the AI SDK's
 `Experimental_SandboxSession` type.
