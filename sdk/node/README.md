@@ -189,6 +189,34 @@ Existing network connections may need to reconnect.
 
 Errors are typed: `SmolError` (with `.code`), `ExecutionError`, `NotSupportedError`, `InvalidConfigError`.
 
+### One prepared checkpoint, a network policy per session (local)
+
+Prepare an environment once with open egress, checkpoint it, and start every
+session from it with its own network policy, applied before the session first
+boots:
+
+```ts
+const prep = await Machine.create({
+  image: 'node:22',
+  branchable: true,
+  resources: { network: true, networkBackend: 'virtio-net' },
+});
+await prep.exec(['npm', 'install', '-g', 'pnpm']);
+await prep.checkpoint('prepared.smolcheckpoint');
+
+const session = await Machine.restoreCheckpoint('prepared.smolcheckpoint', 'session-1', undefined, {
+  networkPolicy: { allowHosts: ['registry.npmjs.org', '*.github.com'] }, // or 'deny-all' / 'allow-all'
+});
+```
+
+- `allowHosts` entries are exact names or `*.` subdomain wildcards, which don't
+  match the bare domain.
+- A stopped machine's policy can be replaced with
+  `machine.setNetworkPolicy(policy)`.
+- The prepared machine must use `networkBackend: 'virtio-net'`, which enforces
+  allow lists on the host. A restored machine keeps its checkpoint's backend, so
+  an allow list on a TSI checkpoint is refused rather than left unenforced.
+
 ## Building from source
 
 This package's native core lives alongside it (Rust, `src/*.rs`) and links the

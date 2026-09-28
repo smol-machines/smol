@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { wrapNativeError, SmolError } from '../errors';
 import { adapterSha256, RolloutClient } from '../rollout';
-import { cliConfigApiKey, encodePath, resolveNetwork, selectsCloud, toNativeConfig } from '../transport';
+import { cliConfigApiKey, egressPolicy, encodePath, resolveNetwork, selectsCloud, toNativeConfig } from '../transport';
 import { wireDefaultHardening } from '../assets';
 import { Machine } from '../machine';
 
@@ -92,6 +92,20 @@ check('an allowlist alone does not force unrestricted network', () => {
   // `network: true` here would request open egress instead.
   const nc = toNativeConfig('m', { resources: { allowHosts: ['api.example.com'] } });
   assert.strictEqual(nc.resources?.network, undefined);
+});
+check('network policies map onto the engine egress policy', () => {
+  assert.deepStrictEqual(egressPolicy('allow-all'), { network: true, cidrs: [], hosts: [] });
+  // deny-all keeps the network device (loopback only) instead of turning networking off
+  assert.deepStrictEqual(egressPolicy('deny-all'), { network: true, cidrs: ['127.0.0.0/8', '::1/128'], hosts: [] });
+  assert.deepStrictEqual(egressPolicy({ allowHosts: ['*.github.com'], allowCidrs: ['10.0.0.0/8'] }), {
+    network: true,
+    cidrs: ['10.0.0.0/8'],
+    hosts: ['*.github.com'],
+  });
+  assert.throws(() => egressPolicy('block-everything' as never), /network policy must be/);
+});
+check('networkBackend reaches the native config', () => {
+  assert.strictEqual(toNativeConfig('m', { resources: { networkBackend: 'virtio-net' } }).resources?.networkBackend, 'virtio-net');
 });
 check('user forwards to the native config', () => {
   assert.strictEqual(toNativeConfig('m', { user: '1000:1000' }).user, '1000:1000');

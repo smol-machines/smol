@@ -27,6 +27,8 @@ import {
 import type {
   CheckpointOptions,
   ConnectOptions,
+  NetworkPolicy,
+  RestoreCheckpointOptions,
   ExecEvent,
   ExecOptions,
   EgressInterceptor,
@@ -112,6 +114,7 @@ export interface Transport {
   listImages(): Promise<ImageInfo[]>;
   readonly machineId: string;
   sync(): Promise<void>;
+  setNetworkPolicy(policy: NetworkPolicy): Promise<void>;
   stop(): Promise<void>;
   pause(): Promise<void>;
   resume(): Promise<void>;
@@ -292,6 +295,18 @@ export function networkMode(
   return {};
 }
 
+/** The engine's form of a {@link NetworkPolicy}. */
+export function egressPolicy(policy: NetworkPolicy): { network: boolean; cidrs: string[]; hosts: string[] } {
+  if (policy === "allow-all") return { network: true, cidrs: [], hosts: [] };
+  // Loopback only keeps the network device a checkpointed machine expects,
+  // unlike turning networking off.
+  if (policy === "deny-all") return { network: true, cidrs: ["127.0.0.0/8", "::1/128"], hosts: [] };
+  if (typeof policy !== "object" || policy === null) {
+    throw new InvalidConfigError(`network policy must be "allow-all", "deny-all" or { allowHosts, allowCidrs }`);
+  }
+  return { network: true, cidrs: [...(policy.allowCidrs ?? [])], hosts: [...(policy.allowHosts ?? [])] };
+}
+
 /** Resolve the primary branch lifecycle name and its compatibility aliases. */
 export function resolveBranchable(config: MachineConfig): boolean | undefined {
   return config.branchable ?? config.forkable ?? config.checkpoint;
@@ -336,6 +351,7 @@ export function toNativeConfig(
             gpu: config.resources?.gpu,
             gpuVramMib: config.resources?.gpuVramMib,
             cuda: config.resources?.cuda,
+            networkBackend: config.resources?.networkBackend,
           }
         : undefined,
   };
@@ -564,6 +580,14 @@ class LocalTransport implements Transport {
   async sync(): Promise<void> {
     try {
       await this.inner.sync();
+    } catch (e) {
+      throw wrapNativeError(e);
+    }
+  }
+
+  async setNetworkPolicy(policy: NetworkPolicy): Promise<void> {
+    try {
+      this.inner.setEgressPolicy(egressPolicy(policy));
     } catch (e) {
       throw wrapNativeError(e);
     }
@@ -1293,6 +1317,10 @@ class CloudTransport implements Transport {
     );
   }
 
+  async setNetworkPolicy(): Promise<void> {
+    throw new NotSupportedError("setNetworkPolicy() is local-only.");
+  }
+
   async stop(): Promise<void> {
     await cloudFetch(this.conn, "POST", `/v1/machines/${this.id}/stop`);
   }
@@ -1876,6 +1904,7 @@ export async function restoreCheckpointTransport(
   checkpointId: string,
   name: string,
   conn?: ConnectOptions,
+  options?: RestoreCheckpointOptions,
 ): Promise<Transport> {
   if (!checkpointId || !name) {
     throw new InvalidConfigError("checkpoint id and restored machine name are required.");
@@ -1892,6 +1921,9 @@ export async function restoreCheckpointTransport(
         undefined,
         handleSignals,
       );
+      // Between install and first boot: the one moment a restored machine's
+      // policy can be its own rather than the checkpoint's.
+      if (options?.networkPolicy !== undefined) await restored.setNetworkPolicy(options.networkPolicy);
       await restored.start();
       return restored;
     } catch (error) {
