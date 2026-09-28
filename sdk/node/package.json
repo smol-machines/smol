@@ -1,7 +1,7 @@
 {
   "name": "smolmachines",
   "version": "1.19.3",
-  "description": "Embed isolated microVM sandboxes directly in your code — no server to run.",
+  "description": "Embed isolated microVM sandboxes directly in your code \u2014 no server to run.",
   "license": "Apache-2.0",
   "author": "smol-machines",
   "homepage": "https://github.com/smol-machines/smol",
@@ -27,6 +27,17 @@
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./ai-sdk": {
+      "types": "./dist/ai-sdk.d.ts",
+      "default": "./dist/ai-sdk.js"
+    }
+  },
+  "typesVersions": {
+    "*": {
+      "ai-sdk": [
+        "dist/ai-sdk.d.ts"
+      ]
     }
   },
   "files": [
