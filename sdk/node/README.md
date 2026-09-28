@@ -256,6 +256,51 @@ const { text } = await generateText({
 The module has no dependency on `ai`; the returned object matches the AI SDK's
 `Experimental_SandboxSession` type.
 
+### Use as an eve sandbox
+
+`smolmachines/eve` is a sandbox provider for [eve](https://www.npmjs.com/package/eve)
+agents, so every eve session gets its own microVM:
+
+```ts
+// agent/sandbox/sandbox.ts
+import { defineSandbox } from 'eve/sandbox';
+import { SmolmachinesSandbox } from 'smolmachines/eve';
+
+export const environment = SmolmachinesSandbox.environment({
+  prepare: async (sandbox) => {
+    await sandbox.run({ command: 'pip install pandas' });
+  },
+});
+
+export default defineSandbox(() =>
+  environment.open({ networkPolicy: { allow: ['pypi.org', '*.pythonhosted.org'] } }),
+);
+```
+
+```ts
+// agent/agent.ts: smolmachines loads a native addon, so keep it out of eve's bundle
+export default defineAgent({ model, build: { externalDependencies: ['smolmachines'] } });
+```
+
+- eve prepares the environment once. A machine boots from the image, receives the
+  workspace (`agent/sandbox/workspace/`) and skills (`$HOME/.agents/skills`), runs
+  `prepare` with open egress, and is saved as a checkpoint.
+- Each session restores its own machine from that checkpoint in about 2 seconds.
+  Its network policy is applied before the machine first boots.
+- The default image is eve's own, `ghcr.io/vercel/eve:<eve version>`. Use
+  `SmolmachinesSandbox.image('python:3.12')` for another image. Commands run as
+  `vercel-sandbox` in `/workspace`, as with eve's other providers.
+- `networkPolicy` is `'allow-all'` (the default), `'deny-all'`, or
+  `{ allow, subnets: { allow } }`:
+  - `allow` lists host names and `*.` subdomain wildcards;
+  - `subnets.allow` lists CIDRs;
+  - per-host request rules and `subnets.deny` are refused rather than ignored.
+- Machines last as long as the eve process. A stopped session resumes with its
+  files: eve stops machines cleanly on a production shutdown. The guest also
+  flushes writes to disk within a second, so an `eve dev` restart keeps them.
+- Needs eve 0.67.2 or later on Node 24, and a host that runs local machines
+  (Linux with KVM, or macOS on Apple Silicon).
+
 ## Building from source
 
 This package's native core lives alongside it (Rust, `src/*.rs`) and links the

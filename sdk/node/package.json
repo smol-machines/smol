@@ -31,12 +31,19 @@
     "./ai-sdk": {
       "types": "./dist/ai-sdk.d.ts",
       "default": "./dist/ai-sdk.js"
+    },
+    "./eve": {
+      "types": "./dist/eve.d.ts",
+      "default": "./dist/eve.js"
     }
   },
   "typesVersions": {
     "*": {
       "ai-sdk": [
         "dist/ai-sdk.d.ts"
+      ],
+      "eve": [
+        "dist/eve.d.ts"
       ]
     }
   },
@@ -69,8 +76,17 @@
   "devDependencies": {
     "@napi-rs/cli": "^2.18.4",
     "@types/node": "^20.11.0",
+    "eve": "^0.67.2",
     "openapi-typescript": "^7.13.0",
     "tsx": "^4.19.0",
     "typescript": "^5.6.0"
+  },
+  "peerDependencies": {
+    "eve": ">=0.67.2"
+  },
+  "peerDependenciesMeta": {
+    "eve": {
+      "optional": true
+    }
   }
 }
