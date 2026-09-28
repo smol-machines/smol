@@ -152,6 +152,7 @@ impl NapiMachine {
             .resources
             .as_ref()
             .map(|r| r.to_vm_resources())
+            .transpose()?
             .unwrap_or_default();
         // Hostname rules live on the spec, not in VmResources: the engine
         // persists them separately and its DNS filter enforces them at runtime.
@@ -216,6 +217,24 @@ impl NapiMachine {
             .restore_checkpoint_machine(&name, std::path::Path::new(&artifact))
             .into_napi()?;
         Ok(Self { name })
+    }
+
+    /// Replace this stopped machine's outbound network policy, e.g. to give a
+    /// machine just restored from a shared checkpoint its own allow list
+    /// before it first boots.
+    #[napi]
+    pub fn set_egress_policy(&self, policy: EgressPolicyConfig) -> napi::Result<()> {
+        runtime()
+            .into_napi()?
+            .set_egress_policy(
+                &self.name,
+                &smolvm::data::network::EgressPolicy {
+                    network: policy.network,
+                    cidrs: policy.cidrs.unwrap_or_default(),
+                    hosts: policy.hosts.unwrap_or_default(),
+                },
+            )
+            .into_napi()
     }
 
     /// Export a stored checkpoint directory as one portable checkpoint file.
@@ -437,9 +456,9 @@ impl NapiMachine {
 
         let result =
             tokio::task::spawn_blocking(move || runtime.exec_with_options(&name, command, options))
-        .await
-        .map_err(join_error)?
-        .into_napi()?;
+                .await
+                .map_err(join_error)?
+                .into_napi()?;
 
         Ok(ExecResult {
             exit_code: result.0,

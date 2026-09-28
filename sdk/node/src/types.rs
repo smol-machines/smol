@@ -119,6 +119,23 @@ pub struct VmResourcesConfig {
     /// remoting CUDA calls over vsock (distinct from `gpu`, which is Vulkan; no
     /// CUDA toolkit needed in the image). Local target only (default: false).
     pub cuda: Option<bool>,
+    /// Network backend: `"tsi"` (outbound-only, the default for plain network
+    /// access) or `"virtio-net"`. A machine that will be checkpointed and have
+    /// its egress policy changed later needs virtio-net, since the policy is
+    /// enforced by virtio-net's host-side stack and a restore keeps the backend.
+    pub network_backend: Option<String>,
+}
+
+/// A replacement outbound network policy for a stopped machine.
+#[napi(object)]
+#[derive(Debug, Clone)]
+pub struct EgressPolicyConfig {
+    /// Outbound network access at all.
+    pub network: bool,
+    /// Addresses the machine may reach; empty means no address restriction.
+    pub cidrs: Option<Vec<String>>,
+    /// Host names (`api.github.com`, or `*.github.com` for subdomains only).
+    pub hosts: Option<Vec<String>>,
 }
 
 /// Options for executing a command.
@@ -243,8 +260,19 @@ impl From<&PortMappingConfig> for PortMapping {
 }
 
 impl VmResourcesConfig {
-    pub fn to_vm_resources(&self) -> VmResources {
-        VmResources {
+    pub fn to_vm_resources(&self) -> napi::Result<VmResources> {
+        let network_backend = match self.network_backend.as_deref() {
+            None => None,
+            Some("tsi") => Some(smolvm::network::NetworkBackend::Tsi),
+            Some("virtio-net") => Some(smolvm::network::NetworkBackend::VirtioNet),
+            Some(other) => {
+                return Err(napi::Error::from_reason(format!(
+                    "[CONFIG_ERROR] networkBackend must be \"tsi\" or \"virtio-net\", not {other:?}"
+                )))
+            }
+        };
+        Ok(VmResources {
+            network_backend,
             cpus: self.cpus.unwrap_or(DEFAULT_MICROVM_CPU_COUNT),
             memory_mib: self.memory_mib.unwrap_or(DEFAULT_MICROVM_MEMORY_MIB),
             network: self.network.unwrap_or(false),
@@ -255,7 +283,7 @@ impl VmResourcesConfig {
             gpu_vram_mib: self.gpu_vram_mib,
             cuda: self.cuda.unwrap_or(false),
             ..Default::default()
-        }
+        })
     }
 }
 
