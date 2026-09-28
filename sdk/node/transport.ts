@@ -304,7 +304,12 @@ export function egressPolicy(policy: NetworkPolicy): { network: boolean; cidrs: 
   if (typeof policy !== "object" || policy === null) {
     throw new InvalidConfigError(`network policy must be "allow-all", "deny-all" or { allowHosts, allowCidrs }`);
   }
-  return { network: true, cidrs: [...(policy.allowCidrs ?? [])], hosts: [...(policy.allowHosts ?? [])] };
+  const cidrs = [...(policy.allowCidrs ?? [])];
+  const hosts = [...(policy.allowHosts ?? [])];
+  // An allow list that names nothing allows nothing; empty lists alone would
+  // read as unrestricted egress.
+  if (cidrs.length === 0 && hosts.length === 0) return egressPolicy("deny-all");
+  return { network: true, cidrs, hosts };
 }
 
 /** Resolve the primary branch lifecycle name and its compatibility aliases. */

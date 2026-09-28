@@ -102,6 +102,9 @@ check('network policies map onto the engine egress policy', () => {
     cidrs: ['10.0.0.0/8'],
     hosts: ['*.github.com'],
   });
+  // an allow list naming nothing allows nothing, never everything
+  assert.deepStrictEqual(egressPolicy({}), egressPolicy('deny-all'));
+  assert.deepStrictEqual(egressPolicy({ allowHosts: [], allowCidrs: [] }), egressPolicy('deny-all'));
   assert.throws(() => egressPolicy('block-everything' as never), /network policy must be/);
 });
 check('networkBackend reaches the native config', () => {
