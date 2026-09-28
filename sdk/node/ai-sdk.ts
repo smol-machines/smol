@@ -26,8 +26,12 @@ export interface SandboxSessionOptions {
   /** Directory relative paths resolve from, and the default working directory.
    *  Created on first use. Default: `/workspace`. */
   root?: string;
-  /** Run every command as this user (image machines only). */
+  /** Run every command as this user (image machines only). Files written
+   *  through the session, and the directories created for them, are owned by
+   *  this user. */
   user?: string;
+  /** Environment variables for every command; a command's own `env` wins. */
+  env?: Record<string, string>;
   /** Replaces the default description given to the model. */
   description?: string;
 }
@@ -143,6 +147,7 @@ function sliceLines(text: string, startLine?: number, endLine?: number): string 
 export function createSandboxSession(machine: Machine, options: SandboxSessionOptions = {}): SmolSandboxSession {
   const root = (options.root ?? "/workspace").replace(/\/+$/, "") || "/";
   const user = options.user;
+  const asUser = user !== undefined ? { user } : {};
   let rootReady: Promise<void> | undefined;
 
   const resolvePath = (path: string): string => {
@@ -155,7 +160,7 @@ export function createSandboxSession(machine: Machine, options: SandboxSessionOp
   // once, and try again on a later call if it failed.
   const ensureRoot = (): Promise<void> => {
     rootReady ??= machine
-      .exec(["mkdir", "-p", root])
+      .exec(["mkdir", "-p", root], asUser)
       .then((r) => {
         if (r.exitCode !== 0) throw new Error(`create ${root}: ${r.stderr.trim()}`);
       })
@@ -168,8 +173,8 @@ export function createSandboxSession(machine: Machine, options: SandboxSessionOp
 
   const execOptions = (opts: SandboxProcessOptions, signal: AbortSignal) => ({
     workdir: opts.workingDirectory ? resolvePath(opts.workingDirectory) : root,
-    ...(opts.env ? { env: opts.env } : {}),
-    ...(user !== undefined ? { user } : {}),
+    ...(options.env || opts.env ? { env: { ...options.env, ...opts.env } } : {}),
+    ...asUser,
     signal,
   });
 
@@ -187,9 +192,14 @@ export function createSandboxSession(machine: Machine, options: SandboxSessionOp
     throwIfAborted(abortSignal);
     const target = resolvePath(path);
     const parent = target.slice(0, target.lastIndexOf("/")) || "/";
-    const made = await machine.exec(["mkdir", "-p", parent], { ...(abortSignal ? { signal: abortSignal } : {}) });
+    const made = await machine.exec(["mkdir", "-p", parent], { ...asUser, ...(abortSignal ? { signal: abortSignal } : {}) });
     if (made.exitCode !== 0) throw new Error(`create ${parent}: ${made.stderr.trim()}`);
     await machine.writeFile(target, Buffer.from(content));
+    // File transfer writes as root; hand the file to the session's user.
+    if (user !== undefined) {
+      const owned = await machine.exec(["chown", user, target], { user: "root" });
+      if (owned.exitCode !== 0) throw new Error(`chown ${target}: ${owned.stderr.trim()}`);
+    }
   };
 
   const spawn = async (opts: SandboxProcessOptions): Promise<SandboxProcess> => {
@@ -307,6 +317,7 @@ export function createSandboxSession(machine: Machine, options: SandboxSessionOp
     async removePath({ path, force, recursive, abortSignal }) {
       const flags = `${recursive ? "r" : ""}${force ? "f" : ""}`;
       const r = await machine.exec(["sh", "-c", `rm ${flags ? `-${flags} ` : ""}-- ${shellQuote(resolvePath(path))}`], {
+        ...asUser,
         ...(abortSignal ? { signal: abortSignal } : {}),
       });
       if (r.exitCode !== 0) throw new Error(`remove ${resolvePath(path)}: ${r.stderr.trim()}`);

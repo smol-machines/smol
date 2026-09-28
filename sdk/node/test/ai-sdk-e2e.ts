@@ -117,6 +117,17 @@ async function main() {
 
     const asUser = createSandboxSession(machine, { user: "nobody" });
     check("a session can run every command as another user", (await asUser.run({ command: "id -u" })).stdout.trim() === "65534");
+
+    const owned = createSandboxSession(machine, { user: "nobody", root: "/tmp/nobody-ws", env: { GREETING: "hi", SHADOWED: "session" } });
+    await owned.writeTextFile({ path: "made/by/nobody.txt", content: "one\n" });
+    const appended = await owned.run({ command: "echo two >> made/by/nobody.txt && stat -c %u made/by/nobody.txt made/by" });
+    check(
+      "files a user's session writes, and their new directories, belong to that user",
+      appended.exitCode === 0 && appended.stdout.trim().split("\n").every((uid) => uid === "65534"),
+      JSON.stringify(appended),
+    );
+    const envRun = await owned.run({ command: 'echo "$GREETING $SHADOWED"', env: { SHADOWED: "command" } });
+    check("session env applies to every command, and a command's env wins", envRun.stdout.trim() === "hi command", envRun.stdout.trim());
   } finally {
     await machine.delete().catch(() => {});
   }
