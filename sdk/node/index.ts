@@ -43,6 +43,8 @@ export type {
   BranchOptions,
   BranchBatchOptions,
   CheckpointOptions,
+  ResizeOptions,
+  MachineResources,
   ForkOptions,
   ForkBatchOptions,
   AssignOptions,

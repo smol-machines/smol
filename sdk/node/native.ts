@@ -79,6 +79,20 @@ export interface NativeCheckpointResult {
   elapsedMs: number;
 }
 
+export interface NativeResizeConfig {
+  cpus?: number;
+  memoryMib?: number;
+  storageGib?: number;
+  overlayGib?: number;
+}
+
+export interface NativeMachineResources {
+  cpus: number;
+  memoryMib: number;
+  storageGib?: number;
+  overlayGib?: number;
+}
+
 export interface NativeExecStreamEvent {
   kind: string;
   data?: string;
@@ -103,6 +117,7 @@ export interface NapiMachine {
   start(interceptorAddress?: string, interceptorToken?: string): Promise<void>;
   startForkable(): Promise<void>;
   checkpoint(output: string, store?: string): Promise<NativeCheckpointResult>;
+  resize(spec: NativeResizeConfig): Promise<NativeMachineResources>;
   fork(
     name: string,
     ports?: NativePortMapping[],

@@ -184,6 +184,9 @@ Existing network connections may need to reconnect.
 - `machine.branch(name, options?)` / `machine.branchBatch(options)`.
 - `machine.checkpoint(output, { store? })`, `Machine.restoreCheckpoint(...)`,
   `Machine.exportCheckpoint(...)`, and `Machine.pruneCheckpointStore(...)`.
+- `machine.resize({ cpus?, memoryMb?, storageGb?, overlayGb? })` *(local)* —
+  add CPUs, RAM or disk to a running machine without rebooting it. Sizes are
+  totals; returns the new `MachineResources`.
 - `machine.stop()` / `machine.delete()` / `await machine.state()`. Cloud
   `"started"` means VM launched, not ready for work.
 

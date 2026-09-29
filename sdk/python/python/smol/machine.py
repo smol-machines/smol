@@ -35,6 +35,7 @@ from .types import (
     MachineUsageReport,
     ShareLink,
     PortableCheckpointInfo,
+    MachineResources,
     PortEndpoint,
     PortSpec,
 )
@@ -318,6 +319,21 @@ class Machine:
     def checkpoints(self) -> "list[PortableCheckpointInfo]":
         """List durable portable checkpoints captured from this machine."""
         return self._t.checkpoints()
+
+    def resize(
+        self,
+        *,
+        cpus: Optional[int] = None,
+        memory_mb: Optional[int] = None,
+        storage_gb: Optional[int] = None,
+        overlay_gb: Optional[int] = None,
+    ) -> MachineResources:
+        """Add CPUs, RAM or disk to this running machine without rebooting it.
+        Sizes are totals. CPUs, RAM and disks are applied in that order, each on
+        its own, so a failure leaves the earlier ones applied. Local target only."""
+        return self._t.resize(
+            cpus=cpus, memory_mb=memory_mb, storage_gb=storage_gb, overlay_gb=overlay_gb
+        )
 
     def fork(
         self,

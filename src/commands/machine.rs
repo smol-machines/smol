@@ -97,6 +97,9 @@ pub enum MachineSubcommand {
     /// Remove a machine's unused images and layers to free disk space
     Prune(crate::commands::prune::PruneCmd),
 
+    /// Add CPUs, RAM or disk to a running machine without rebooting it
+    Resize(crate::commands::resize::ResizeCmd),
+
     /// Modify settings on a stopped machine (mounts, ports, resources, disks)
     Update(crate::commands::update::UpdateCmd),
 
@@ -148,6 +151,7 @@ impl MachineCmd {
             // maintenance
             MachineSubcommand::Images(cmd) => cmd.run(),
             MachineSubcommand::Prune(cmd) => cmd.run(),
+            MachineSubcommand::Resize(cmd) => cmd.run(),
             MachineSubcommand::Update(cmd) => cmd.run(),
             MachineSubcommand::Monitor(cmd) => cmd.run(),
             MachineSubcommand::DataDir(cmd) => cmd.run(),

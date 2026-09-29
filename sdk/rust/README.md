@@ -216,6 +216,22 @@ let names: Vec<String> = (0..16).map(|i| format!("worker-{i}")).collect();
 let workers = source.branch_batch(names, BranchOptions::new().parallel(8))?;
 ```
 
+## Resizing
+
+Add CPUs, RAM or disk to a running local machine without rebooting it. Sizes
+are totals; RAM and disks only grow.
+
+```rust,no_run
+# fn main() -> smolmachines::Result<()> {
+use smolmachines::{Machine, Resize};
+
+let machine = Machine::attach("agent")?;
+let resources = machine.resize(&Resize::new().cpus(4).memory_mib(4096))?;
+println!("{} CPUs, {} MiB", resources.cpus, resources.memory_mib);
+# Ok(())
+# }
+```
+
 ## Checkpoints
 
 For a managed save under the same machine identity, use `machine.pause()?` and

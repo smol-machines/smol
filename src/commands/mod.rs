@@ -30,6 +30,7 @@ pub mod prune;
 pub mod pull;
 pub mod push;
 pub mod registry;
+pub mod resize;
 pub mod resolve;
 pub mod restore;
 pub mod rm;

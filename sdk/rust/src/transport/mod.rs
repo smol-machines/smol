@@ -18,8 +18,8 @@ use std::time::Duration;
 use crate::error::Result;
 use crate::exec::{ExecOptions, ExecResult, ExecStream};
 use crate::machine::{
-    BranchOptions, Checkpoint, CheckpointOptions, ImageInfo, MachineState, PortEndpoint, ShareLink,
-    UsageReport,
+    BranchOptions, Checkpoint, CheckpointOptions, ImageInfo, MachineResources, MachineState,
+    PortEndpoint, Resize, ShareLink, UsageReport,
 };
 
 /// How long to wait for a machine to become ready, and how often to look.
@@ -120,6 +120,14 @@ pub(crate) trait Transport: Send + Sync + std::fmt::Debug {
 
     fn checkpoint(&self, output: Option<&Path>, options: CheckpointOptions) -> Result<Checkpoint>;
     fn checkpoints(&self) -> Result<Vec<Checkpoint>>;
+
+    /// Grow the running machine without rebooting it.
+    fn resize(&self, _resize: &Resize) -> Result<MachineResources> {
+        Err(unsupported(
+            "resize()",
+            "live resize is a local target operation",
+        ))
+    }
 
     fn branch(&self, name: &str, options: &BranchOptions) -> Result<Box<dyn Transport>>;
     fn branch_batch(

@@ -37,6 +37,18 @@ export interface MachineConfig {
   /** If true, every start uses cloneable, memfd-backed guest RAM. */
   forkable?: boolean
 }
+/** Whether this host can run local machines, from the engine's own checks. */
+export interface HostAvailability {
+  /** True when a local machine can boot here. */
+  available: boolean
+  /**
+   * The `error.code` a failing `create()` would report (e.g.
+   * `KVM_UNAVAILABLE`, `HYPERVISOR_UNAVAILABLE`); unset when available.
+   */
+  code?: string
+  /** Human-readable cause and remedy; unset when available. */
+  reason?: string
+}
 /** A host directory mount specification. */
 export interface HostMountConfig {
   /** Absolute path on the host. */
@@ -55,6 +67,28 @@ export interface PortMappingConfig {
   /** Port inside the guest. */
   guest: number
 }
+/** Totals to grow a running machine to. Unset fields are left unchanged. */
+export interface ResizeConfig {
+  /** Total vCPUs. */
+  cpus?: number
+  /** Total RAM in MiB (grow only). */
+  memoryMib?: number
+  /** Storage disk size in GiB (grow only). */
+  storageGib?: number
+  /** Overlay disk size in GiB (grow only). */
+  overlayGib?: number
+}
+/** A machine's resources after a resize. */
+export interface MachineResources {
+  /** Online vCPUs. */
+  cpus: number
+  /** Guest RAM in MiB. */
+  memoryMib: number
+  /** Storage disk size in GiB, or unset while it has the default size. */
+  storageGib?: number
+  /** Overlay disk size in GiB, or unset while it has the default size. */
+  overlayGib?: number
+}
 /** VM resource allocation. */
 export interface VmResourcesConfig {
   /** Number of vCPUs (default: src/data/resources.rs default). */
@@ -63,6 +97,18 @@ export interface VmResourcesConfig {
   memoryMib?: number
   /** Enable outbound network access (default: false). */
   network?: boolean
+  /**
+   * Scope egress to these CIDR ranges. A non-empty list enables networking
+   * on its own and is enforced by the engine (mirrors the Python SDK and the
+   * CLI's `--allow-cidr`).
+   */
+  allowedCidrs?: Array<string>
+  /**
+   * Scope egress to these hostnames. A non-empty list enables networking on
+   * its own; the engine's DNS filter resolves and enforces it at runtime
+   * (mirrors the Python SDK and the CLI's `--allow-host`).
+   */
+  allowedHosts?: Array<string>
   /** Storage disk size in GiB (default: 20). */
   storageGib?: number
   /** Overlay disk size in GiB (default: 10). */
@@ -86,6 +132,11 @@ export interface ExecOptions {
   workdir?: string
   /** Timeout in seconds. */
   timeoutSecs?: number
+  /**
+   * Run the command as this user (image user name or `uid[:gid]`). Image
+   * machines only; a bare VM rejects it rather than run as root.
+   */
+  user?: string
 }
 /** Options for writing a file into the VM. */
 export interface FileWriteOptions {
@@ -150,6 +201,15 @@ export interface ExecStreamEvent {
  */
 export declare function configureRuntimeAssets(assets: RuntimeAssets): void
 export declare class NapiMachine {
+  /**
+   * Probe whether this host can run local machines, without booting one.
+   *
+   * Runs the same checks a local `create()` fails on — `/dev/kvm` access on
+   * Linux, and a locatable libkrun on every platform — and reports the same
+   * error code, so a caller can pick a sandbox up front instead of paying
+   * for a failed boot. Never throws.
+   */
+  static checkHost(): HostAvailability
   /** Create a new machine. Does not start the VM yet — call `start()`. */
   constructor(config: MachineConfig)
   /**
@@ -157,7 +217,7 @@ export declare class NapiMachine {
    * (start-or-reconnect). Lets a persisted machine be re-opened in a new
    * process — backs the SDK's local `Machine.connect()`.
    */
-  static connect(name: string): NapiMachine
+  static connect(name: string, interceptorAddress?: string | undefined | null, interceptorToken?: string | undefined | null): NapiMachine
   /** Create a stopped machine from a portable live checkpoint on disk. */
   static restoreCheckpoint(name: string, artifact: string): NapiMachine
   /** Export a stored checkpoint directory as one portable checkpoint file. */
@@ -186,7 +246,7 @@ export declare class NapiMachine {
    * Start the machine VM. Boots via fork + libkrun, waits for agent ready,
    * then connects the vsock client.
    */
-  start(): Promise<void>
+  start(interceptorAddress?: string | undefined | null, interceptorToken?: string | undefined | null): Promise<void>
   /**
    * Start this machine as a forkable fork base (memfd-backed guest RAM +
    * control socket) so it can later be `fork()`-ed.
@@ -194,6 +254,12 @@ export declare class NapiMachine {
   startForkable(): Promise<void>
   /** Capture this running checkpointable machine to local disk. */
   checkpoint(output: string, store?: string | undefined | null): Promise<LocalCheckpointResult>
+  /**
+   * Grow this running machine without rebooting it. Sizes are totals.
+   * CPUs, RAM and disks are applied in that order, each on its own, so a
+   * failure leaves the earlier ones applied.
+   */
+  resize(spec: ResizeConfig): Promise<MachineResources>
   /**
    * Fork this running, forkable machine into a new clone via copy-on-write
    * live RAM + disks (same host). `ports` are `{ host, guest }` inbound
@@ -241,4 +307,10 @@ export declare class NapiMachine {
  */
 export declare class ExecStream {
   next(): Promise<ExecStreamEvent | null>
+  /**
+   * Kill the command: its connection closes and the guest agent kills it.
+   * Pending `next()` calls then resolve `null`. Idempotent, and a no-op
+   * once the command has exited.
+   */
+  kill(): void
 }

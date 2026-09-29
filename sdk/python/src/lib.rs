@@ -681,6 +681,63 @@ impl Machine {
         })
     }
 
+    /// Grow this running machine without rebooting it. Sizes are totals;
+    /// CPUs, RAM and disks are applied in that order, each on its own.
+    /// Returns `(cpus, memory_mib, storage_gib, overlay_gib)` afterwards.
+    #[pyo3(signature = (cpus=None, memory_mib=None, storage_gib=None, overlay_gib=None))]
+    fn resize(
+        &self,
+        py: Python<'_>,
+        cpus: Option<u8>,
+        memory_mib: Option<u32>,
+        storage_gib: Option<u64>,
+        overlay_gib: Option<u64>,
+    ) -> PyResult<(u8, u32, Option<u64>, Option<u64>)> {
+        use smolvm::embedded::ResizeSpec;
+        let mut steps = Vec::new();
+        if let Some(cpus) = cpus {
+            steps.push(ResizeSpec {
+                cpus: Some(cpus),
+                ..Default::default()
+            });
+        }
+        if let Some(memory_mib) = memory_mib {
+            steps.push(ResizeSpec {
+                memory_mib: Some(memory_mib),
+                ..Default::default()
+            });
+        }
+        if storage_gib.is_some() || overlay_gib.is_some() {
+            steps.push(ResizeSpec {
+                storage_gib,
+                overlay_gib,
+                ..Default::default()
+            });
+        }
+        if steps.is_empty() {
+            return Err(PyRuntimeError::new_err(
+                "resize needs at least one of cpus, memory_mb, storage_gb or overlay_gb",
+            ));
+        }
+        let runtime = runtime().map_err(err)?;
+        let record = py
+            .allow_threads(|| {
+                let mut record = None;
+                for step in steps {
+                    record = Some(runtime.resize_machine(&self.name, step)?);
+                }
+                Ok::<_, SmolvmError>(record)
+            })
+            .map_err(err)?
+            .expect("at least one resize step");
+        Ok((
+            record.cpus,
+            record.mem,
+            record.storage_gb,
+            record.overlay_gb,
+        ))
+    }
+
     /// Copy guest-local staged mounts back to their host sources.
     fn sync(&self, py: Python<'_>) -> PyResult<()> {
         let runtime = runtime().map_err(err)?;

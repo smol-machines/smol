@@ -40,6 +40,7 @@ from .types import (
     MachineUsageReport,
     ShareLink,
     PortableCheckpointInfo,
+    MachineResources,
     PortEndpoint,
     PortSpec,
 )
@@ -142,6 +143,14 @@ class Transport(Protocol):
         self, output: Optional[str] = None, *, store: Optional[str] = None
     ) -> PortableCheckpointInfo: ...
     def checkpoints(self) -> "list[PortableCheckpointInfo]": ...
+    def resize(
+        self,
+        *,
+        cpus: Optional[int] = None,
+        memory_mb: Optional[int] = None,
+        storage_gb: Optional[int] = None,
+        overlay_gb: Optional[int] = None,
+    ) -> MachineResources: ...
     def fork(
         self,
         name: str,
@@ -795,6 +804,24 @@ class LocalTransport:
             "durable portable checkpoint listing is currently available on the cloud target."
         )
 
+    def resize(
+        self,
+        *,
+        cpus: Optional[int] = None,
+        memory_mb: Optional[int] = None,
+        storage_gb: Optional[int] = None,
+        overlay_gb: Optional[int] = None,
+    ) -> MachineResources:
+        try:
+            cpus_now, mem, storage, overlay = self._inner.resize(
+                cpus, memory_mb, storage_gb, overlay_gb
+            )
+        except Exception as e:  # noqa: BLE001
+            raise wrap_native_error(e) from e
+        return MachineResources(
+            cpus=cpus_now, memory_mb=mem, storage_gb=storage, overlay_gb=overlay
+        )
+
     def fork(
         self,
         name: str,
@@ -1254,6 +1281,16 @@ class CloudTransport:
             self._base, self._key, "GET", f"/v1/machines/{self._id}/checkpoints"
         ) or []
         return [_checkpoint_from(row) for row in rows]
+
+    def resize(
+        self,
+        *,
+        cpus: Optional[int] = None,
+        memory_mb: Optional[int] = None,
+        storage_gb: Optional[int] = None,
+        overlay_gb: Optional[int] = None,
+    ) -> MachineResources:
+        raise NotSupportedError("live resize is currently available on the local target.")
 
     def fork(
         self,
