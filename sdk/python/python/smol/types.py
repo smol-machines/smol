@@ -18,6 +18,7 @@ __all__ = [
     "MachineState",
     "MachineUsageReport",
     "PortableCheckpointInfo",
+    "MachineResources",
     "PortEndpoint",
 ]
 
@@ -289,6 +290,20 @@ class PortableCheckpointInfo:
     path: Optional[str] = None
     source_pause_ms: Optional[float] = None
     elapsed_ms: Optional[float] = None
+
+
+@dataclass
+class MachineResources:
+    """A machine's resources after a resize."""
+
+    cpus: int
+    """Online vCPUs."""
+    memory_mb: int
+    """Memory in MB."""
+    storage_gb: Optional[int] = None
+    """Storage disk size in GB, or None while it has the default size."""
+    overlay_gb: Optional[int] = None
+    """Overlay disk size in GB, or None while it has the default size."""
 
 
 @dataclass

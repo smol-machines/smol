@@ -14,6 +14,7 @@ import { join, resolve as resolvePath } from "node:path";
 import {
   getNapiMachine,
   type NapiMachine as NapiInstance,
+  type NativeResizeConfig,
   type NativeExecOptions,
   type NativeExecStream,
   type NativeMachineConfig,
@@ -26,6 +27,8 @@ import {
 } from "./errors";
 import type {
   CheckpointOptions,
+  MachineResources,
+  ResizeOptions,
   ConnectOptions,
   ExecEvent,
   ExecOptions,
@@ -128,6 +131,8 @@ export interface Transport {
   unshare(): Promise<void>;
   checkpoint(output?: string, options?: CheckpointOptions): Promise<PortableCheckpointInfo>;
   checkpoints(): Promise<PortableCheckpointInfo[]>;
+  /** Local only: grow the running machine without rebooting it. */
+  resize(options: ResizeOptions): Promise<MachineResources>;
   fork(name: string, options?: PortSpec[] | ForkOptions): Promise<Transport>;
   forkBatch(opts: ForkBatchOptions): Promise<Transport[]>;
   assign(
@@ -666,6 +671,29 @@ class LocalTransport implements Transport {
     throw new NotSupportedError(
       "durable portable checkpoint listing is currently available on the cloud target.",
     );
+  }
+
+  async resize(options: ResizeOptions): Promise<MachineResources> {
+    for (const [field, value] of Object.entries(options)) {
+      if (value !== undefined && (!Number.isInteger(value) || value < 1)) {
+        throw new InvalidConfigError(`resize ${field} must be a positive whole number`);
+      }
+    }
+    const spec: NativeResizeConfig = {};
+    if (options.cpus !== undefined) spec.cpus = options.cpus;
+    if (options.memoryMb !== undefined) spec.memoryMib = options.memoryMb;
+    if (options.storageGb !== undefined) spec.storageGib = options.storageGb;
+    if (options.overlayGb !== undefined) spec.overlayGib = options.overlayGb;
+    let r;
+    try {
+      r = await this.inner.resize(spec);
+    } catch (e) {
+      throw wrapNativeError(e);
+    }
+    const resources: MachineResources = { cpus: r.cpus, memoryMb: r.memoryMib };
+    if (r.storageGib != null) resources.storageGb = r.storageGib;
+    if (r.overlayGib != null) resources.overlayGb = r.overlayGib;
+    return resources;
   }
 
   async fork(name: string, options?: PortSpec[] | ForkOptions): Promise<Transport> {
@@ -1384,6 +1412,12 @@ class CloudTransport implements Transport {
       this.conn,
       "GET",
       `/v1/machines/${this.id}/checkpoints`,
+    );
+  }
+
+  async resize(_options: ResizeOptions): Promise<MachineResources> {
+    throw new NotSupportedError(
+      "live resize is currently available on the local target.",
     );
   }
 

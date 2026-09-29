@@ -138,8 +138,8 @@ pub use error::{Error, ErrorKind, Result};
 pub use exec::{ExecEvent, ExecOptions, ExecResult, ExecStream, KillHandle};
 pub use machine::{
     list_cloud_machines, BranchOptions, Checkpoint, CheckpointOptions, CheckpointResult,
-    CloudCheckpoint, CostBreakdown, ImageInfo, Machine, MachineState, PortEndpoint, ShareLink,
-    UsageReport, UsageTotals,
+    CloudCheckpoint, CostBreakdown, ImageInfo, Machine, MachineResources, MachineState,
+    PortEndpoint, Resize, ShareLink, UsageReport, UsageTotals,
 };
 pub use transport::ReadyOptions;
 pub use tunnel::Tunnel;

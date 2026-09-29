@@ -205,6 +205,64 @@ impl CheckpointOptions {
     }
 }
 
+/// Totals to grow a running machine to. Unset fields stay unchanged. RAM and
+/// disks only grow; CPUs can also shrink on Linux x86_64.
+#[derive(Debug, Clone, Default)]
+pub struct Resize {
+    /// Total vCPUs.
+    pub cpus: Option<u8>,
+    /// Total guest RAM in MiB.
+    pub memory_mib: Option<u32>,
+    /// Storage disk size in GiB.
+    pub storage_gib: Option<u64>,
+    /// Overlay disk size in GiB.
+    pub overlay_gib: Option<u64>,
+}
+
+impl Resize {
+    /// A resize with nothing set.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Grow or shrink to this many vCPUs.
+    pub fn cpus(mut self, cpus: u8) -> Self {
+        self.cpus = Some(cpus);
+        self
+    }
+
+    /// Grow guest RAM to this many MiB.
+    pub fn memory_mib(mut self, mib: u32) -> Self {
+        self.memory_mib = Some(mib);
+        self
+    }
+
+    /// Grow the storage disk to this many GiB.
+    pub fn storage_gib(mut self, gib: u64) -> Self {
+        self.storage_gib = Some(gib);
+        self
+    }
+
+    /// Grow the overlay disk to this many GiB.
+    pub fn overlay_gib(mut self, gib: u64) -> Self {
+        self.overlay_gib = Some(gib);
+        self
+    }
+}
+
+/// A machine's resources after a resize.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MachineResources {
+    /// Online vCPUs.
+    pub cpus: u8,
+    /// Guest RAM in MiB.
+    pub memory_mib: u32,
+    /// Storage disk size in GiB, or `None` while it has the default size.
+    pub storage_gib: Option<u64>,
+    /// Overlay disk size in GiB, or `None` while it has the default size.
+    pub overlay_gib: Option<u64>,
+}
+
 /// What a local capture cost and produced.
 #[derive(Debug, Clone)]
 pub struct CheckpointResult {
@@ -770,6 +828,14 @@ impl Machine {
     /// Shut the machine down, keeping its disks.
     pub fn stop(&self) -> Result<()> {
         self.transport.stop()
+    }
+
+    /// Add CPUs, RAM or disk to this running machine without rebooting it.
+    ///
+    /// Sizes are totals. CPUs, RAM and disks are applied in that order, each
+    /// on its own, so a failure leaves the earlier ones applied. Local only.
+    pub fn resize(&self, resize: &Resize) -> Result<MachineResources> {
+        self.transport.resize(resize)
     }
 
     /// Save RAM and disk durably, then stop at that boundary.

@@ -108,6 +108,31 @@ export interface BranchBatchOptions {
 /** Backwards-compatible name for {@link BranchBatchOptions}. */
 export type ForkBatchOptions = BranchBatchOptions;
 
+/** Totals to grow a running machine to. Unset fields stay unchanged. RAM
+ * and disks only grow; CPUs can also shrink on Linux x86_64. */
+export interface ResizeOptions {
+  /** Total vCPUs. */
+  cpus?: number;
+  /** Total memory in MB. */
+  memoryMb?: number;
+  /** Storage disk size in GB. */
+  storageGb?: number;
+  /** Overlay disk size in GB. */
+  overlayGb?: number;
+}
+
+/** A machine's resources after a resize. */
+export interface MachineResources {
+  /** Online vCPUs. */
+  cpus: number;
+  /** Memory in MB. */
+  memoryMb: number;
+  /** Storage disk size in GB, or unset while it has the default size. */
+  storageGb?: number;
+  /** Overlay disk size in GB, or unset while it has the default size. */
+  overlayGb?: number;
+}
+
 /** Options for a local checkpoint capture. A store reuses unchanged chunks
  * across periodic captures; cloud checkpoints are deduplicated server-side. */
 export interface CheckpointOptions {

@@ -341,6 +341,7 @@ connections may need to reconnect. Both methods are awaitable on `AsyncMachine`.
 - `machine.ready()` / `machine.ready_at()` / `machine.wait_until_ready(timeout_s=120, interval_s=1)`  *(cloud)*
 - `machine.endpoint(port, path=None)` → `PortEndpoint` / `machine.request(port, path=None, method="GET", data=None)` → `bytes`  *(cloud connect bridge)*
 - `machine.pull_image(image)` / `machine.list_images()`  *(local)*
+- `machine.resize(cpus=None, memory_mb=None, storage_gb=None, overlay_gb=None)` → `MachineResources`  *(local)* — add CPUs, RAM or disk to a running machine without rebooting it; sizes are totals
 - `machine.stop()` / `machine.delete()` / `machine.state()`
 - Use it as a context manager to auto-`delete()` on exit.
 - Errors are typed: `SmolError` (with `.code`), `ExecutionError`,

@@ -21,6 +21,8 @@ import {
   type Transport,
 } from "./transport";
 import type {
+  MachineResources,
+  ResizeOptions,
   AssignOptions,
   BranchBatchOptions,
   BranchOptions,
@@ -343,6 +345,13 @@ export class Machine {
   /** List durable portable checkpoints captured from this machine. */
   checkpoints(): Promise<PortableCheckpointInfo[]> {
     return this.transport.checkpoints();
+  }
+
+  /** Add CPUs, RAM or disk to this running machine without rebooting it.
+   *  Sizes are totals. CPUs, RAM and disks are applied in that order, each on
+   *  its own, so a failure leaves the earlier ones applied. Local target only. */
+  resize(options: ResizeOptions): Promise<MachineResources> {
+    return this.transport.resize(options);
   }
 
   /** Branch an independent child from this running source. The child inherits

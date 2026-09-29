@@ -89,6 +89,34 @@ pub struct PortMappingConfig {
     pub guest: u16,
 }
 
+/// Totals to grow a running machine to. Unset fields are left unchanged.
+#[napi(object)]
+#[derive(Debug, Clone, Default)]
+pub struct ResizeConfig {
+    /// Total vCPUs.
+    pub cpus: Option<u8>,
+    /// Total RAM in MiB (grow only).
+    pub memory_mib: Option<u32>,
+    /// Storage disk size in GiB (grow only).
+    pub storage_gib: Option<f64>,
+    /// Overlay disk size in GiB (grow only).
+    pub overlay_gib: Option<f64>,
+}
+
+/// A machine's resources after a resize.
+#[napi(object)]
+#[derive(Debug, Clone)]
+pub struct MachineResources {
+    /// Online vCPUs.
+    pub cpus: u32,
+    /// Guest RAM in MiB.
+    pub memory_mib: u32,
+    /// Storage disk size in GiB, or unset while it has the default size.
+    pub storage_gib: Option<f64>,
+    /// Overlay disk size in GiB, or unset while it has the default size.
+    pub overlay_gib: Option<f64>,
+}
+
 /// VM resource allocation.
 #[napi(object)]
 #[derive(Debug, Clone)]

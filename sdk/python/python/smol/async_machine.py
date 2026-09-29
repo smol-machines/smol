@@ -40,6 +40,7 @@ from .types import (
     MachineUsageReport,
     ShareLink,
     PortableCheckpointInfo,
+    MachineResources,
     PortEndpoint,
     PortSpec,
 )
@@ -282,6 +283,22 @@ class AsyncMachine:
     async def checkpoints(self) -> "list[PortableCheckpointInfo]":
         """List durable portable checkpoints captured from this machine."""
         return await asyncio.to_thread(self._m.checkpoints)
+
+    async def resize(
+        self,
+        *,
+        cpus: Optional[int] = None,
+        memory_mb: Optional[int] = None,
+        storage_gb: Optional[int] = None,
+        overlay_gb: Optional[int] = None,
+    ) -> MachineResources:
+        """Add CPUs, RAM or disk to this running machine without rebooting it.
+        Sizes are totals, applied in order (CPUs, RAM, disks). Local target only."""
+        return await asyncio.to_thread(
+            lambda: self._m.resize(
+                cpus=cpus, memory_mb=memory_mb, storage_gb=storage_gb, overlay_gb=overlay_gb
+            )
+        )
 
     async def fork(
         self,

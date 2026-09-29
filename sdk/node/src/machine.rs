@@ -16,6 +16,47 @@ fn join_error(err: tokio::task::JoinError) -> napi::Error {
     napi::Error::from_reason(format!("Task join error: {}", err))
 }
 
+/// Split a resize into the one-resource requests the engine applies.
+fn resize_steps(spec: &ResizeConfig) -> napi::Result<Vec<smolvm::embedded::ResizeSpec>> {
+    let gib = |value: Option<f64>, field: &str| -> napi::Result<Option<u64>> {
+        match value {
+            Some(g) if g.fract() != 0.0 || g < 1.0 || g > u64::MAX as f64 => Err(
+                napi::Error::from_reason(format!("{field} must be a positive whole number")),
+            ),
+            Some(g) => Ok(Some(g as u64)),
+            None => Ok(None),
+        }
+    };
+    let storage_gib = gib(spec.storage_gib, "storageGb")?;
+    let overlay_gib = gib(spec.overlay_gib, "overlayGb")?;
+    let mut steps = Vec::new();
+    if let Some(cpus) = spec.cpus {
+        steps.push(smolvm::embedded::ResizeSpec {
+            cpus: Some(cpus),
+            ..Default::default()
+        });
+    }
+    if let Some(memory_mib) = spec.memory_mib {
+        steps.push(smolvm::embedded::ResizeSpec {
+            memory_mib: Some(memory_mib),
+            ..Default::default()
+        });
+    }
+    if storage_gib.is_some() || overlay_gib.is_some() {
+        steps.push(smolvm::embedded::ResizeSpec {
+            storage_gib,
+            overlay_gib,
+            ..Default::default()
+        });
+    }
+    if steps.is_empty() {
+        return Err(napi::Error::from_reason(
+            "resize needs at least one of cpus, memoryMb, storageGb or overlayGb",
+        ));
+    }
+    Ok(steps)
+}
+
 fn parse_interceptor(
     address: Option<String>,
     token: Option<String>,
@@ -363,6 +404,33 @@ impl NapiMachine {
             reused_bytes: result.reused_bytes as f64,
             source_pause_ms: result.source_pause.as_secs_f64() * 1000.0,
             elapsed_ms: result.elapsed.as_secs_f64() * 1000.0,
+        })
+    }
+
+    /// Grow this running machine without rebooting it. Sizes are totals.
+    /// CPUs, RAM and disks are applied in that order, each on its own, so a
+    /// failure leaves the earlier ones applied.
+    #[napi]
+    pub async fn resize(&self, spec: ResizeConfig) -> napi::Result<MachineResources> {
+        let steps = resize_steps(&spec)?;
+        let runtime = runtime().into_napi()?;
+        let name = self.name.clone();
+        let record = tokio::task::spawn_blocking(move || {
+            let mut record = None;
+            for step in steps {
+                record = Some(runtime.resize_machine(&name, step)?);
+            }
+            Ok::<_, smolvm::Error>(record)
+        })
+        .await
+        .map_err(join_error)?
+        .into_napi()?
+        .ok_or_else(|| napi::Error::from_reason("resize needs at least one resource"))?;
+        Ok(MachineResources {
+            cpus: u32::from(record.cpus),
+            memory_mib: record.mem,
+            storage_gib: record.storage_gb.map(|g| g as f64),
+            overlay_gib: record.overlay_gb.map(|g| g as f64),
         })
     }
 

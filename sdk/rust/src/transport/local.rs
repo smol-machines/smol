@@ -23,7 +23,7 @@ use crate::error::{Error, ErrorKind, Result};
 use crate::exec::{ExecEvent, ExecOptions, ExecResult, ExecStream, KillHandle};
 use crate::machine::{
     BranchOptions, Checkpoint, CheckpointOptions, CheckpointResult, CloudCheckpoint, ImageInfo,
-    MachineState, PortEndpoint, ShareLink, UsageReport,
+    MachineResources, MachineState, PortEndpoint, Resize, ShareLink, UsageReport,
 };
 
 /// How many branches boot at once when a batch does not say.
@@ -788,6 +788,50 @@ impl Transport for LocalTransport {
         }))
     }
 
+    fn resize(&self, resize: &Resize) -> Result<MachineResources> {
+        // The engine applies one resource kind per request.
+        let mut steps: Vec<Vec<String>> = Vec::new();
+        if let Some(cpus) = resize.cpus {
+            steps.push(vec!["--cpus".into(), cpus.to_string()]);
+        }
+        if let Some(mib) = resize.memory_mib {
+            steps.push(vec!["--mem".into(), mib.to_string()]);
+        }
+        let mut disks = Vec::new();
+        if let Some(gib) = resize.storage_gib {
+            disks.extend(["--storage".to_string(), gib.to_string()]);
+        }
+        if let Some(gib) = resize.overlay_gib {
+            disks.extend(["--overlay".to_string(), gib.to_string()]);
+        }
+        if !disks.is_empty() {
+            steps.push(disks);
+        }
+        if steps.is_empty() {
+            return Err(Error::new(
+                ErrorKind::Config,
+                "resize needs at least one of cpus, memory_mib, storage_gib or overlay_gib",
+            ));
+        }
+        for step in &steps {
+            let mut args = vec!["machine", "resize", "--name", &self.name];
+            args.extend(step.iter().map(String::as_str));
+            self.run(&args)?;
+        }
+        let record = self.record()?;
+        let number = |key: &str| record.get(key).and_then(serde_json::Value::as_u64);
+        Ok(MachineResources {
+            cpus: number("cpus")
+                .and_then(|n| u8::try_from(n).ok())
+                .unwrap_or_default(),
+            memory_mib: number("memory_mib")
+                .and_then(|n| u32::try_from(n).ok())
+                .unwrap_or_default(),
+            storage_gib: number("storage_gb"),
+            overlay_gib: number("overlay_gb"),
+        })
+    }
+
     fn checkpoints(&self) -> Result<Vec<Checkpoint>> {
         Err(unsupported(
             "checkpoints()",
@@ -1111,6 +1155,56 @@ mod io_tests {
         }
         assert_eq!(out, b"\nlast\n");
         assert_eq!(err, b"error\n");
+    }
+
+    #[test]
+    fn resize_sends_one_resource_kind_per_call_then_reads_the_record() {
+        let dir = tempfile::tempdir().unwrap();
+        let log = dir.path().join("calls");
+        let transport = cli(
+            dir.path(),
+            &format!(
+                "echo \"$*\" >> {log}\n\
+                 [ \"$2\" = ls ] && printf '%s' '[{{\"name\":\"test\",\"cpus\":4,\"memory_mib\":2048,\"storage_gb\":40,\"overlay_gb\":null}}]'\n\
+                 exit 0",
+                log = log.display()
+            ),
+        );
+        let resources = transport
+            .resize(
+                &Resize::new()
+                    .cpus(4)
+                    .memory_mib(2048)
+                    .storage_gib(40)
+                    .overlay_gib(12),
+            )
+            .unwrap();
+        assert_eq!(
+            resources,
+            MachineResources {
+                cpus: 4,
+                memory_mib: 2048,
+                storage_gib: Some(40),
+                overlay_gib: None,
+            }
+        );
+        let calls = std::fs::read_to_string(&log).unwrap();
+        let calls: Vec<_> = calls
+            .lines()
+            .filter(|line| !line.starts_with("--version"))
+            .collect();
+        assert_eq!(
+            calls,
+            [
+                "machine resize --name test --cpus 4",
+                "machine resize --name test --mem 2048",
+                "machine resize --name test --storage 40 --overlay 12",
+                "machine ls --json",
+            ]
+        );
+
+        let error = transport.resize(&Resize::new()).unwrap_err();
+        assert_eq!(error.kind(), ErrorKind::Config);
     }
 
     #[test]
