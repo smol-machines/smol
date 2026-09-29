@@ -16,6 +16,7 @@ import { localAvailability, type LocalAvailability } from "./availability";
 import {
   makeTransport,
   connectTransport,
+  listMachines,
   restoreCheckpointTransport,
   type RawExec,
   type Transport,
@@ -34,7 +35,9 @@ import type {
   ForkBatchOptions,
   ForkOptions,
   ImageInfo,
+  ListOptions,
   MachineConfig,
+  MachineSummary,
   NetworkPolicy,
   RestoreCheckpointOptions,
   StartOptions,
@@ -109,6 +112,23 @@ export class Machine {
     conn: ConnectOptions = {},
   ): Promise<Machine> {
     return new Machine(await connectTransport(id, conn));
+  }
+
+  /**
+   * List every machine the target knows about — including ones created by
+   * other processes, or by this one before it last restarted. Locally that is
+   * the engine's database (`smol machine ls` reads the same one); on the cloud,
+   * the account's machines. Pass `labels` to keep only your own, then
+   * `Machine.connect(name)` to pick one up.
+   *
+   * @param conn     backend selection, as for `connect`
+   * @param options  `labels`: keep machines carrying every one of these
+   */
+  static async list(
+    conn: ConnectOptions = {},
+    options: ListOptions = {},
+  ): Promise<MachineSummary[]> {
+    return listMachines(conn, options);
   }
 
   /** Restore a local `.smolcheckpoint` path or durable cloud checkpoint id into

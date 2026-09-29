@@ -233,6 +233,8 @@ impl NapiMachine {
             image: config.image.clone(),
             persistent: config.persistent.unwrap_or(false),
             forkable: config.forkable.unwrap_or(false),
+            detached: config.detached.unwrap_or(false),
+            labels: config.labels.unwrap_or_default().into_iter().collect(),
             runtime_managed: false,
             remote_volumes,
             allowed_hosts,
@@ -262,6 +264,42 @@ impl NapiMachine {
             .connect_or_start_machine_with_interceptor(&name, interceptor)
             .into_napi()?;
         Ok(Self { name })
+    }
+
+    /// Every machine in this host's shared machine database, in name order.
+    /// The database is shared with the CLI and every other embedder on the
+    /// host, so machines other processes made are listed too — `labels` tell
+    /// a process's own apart after it restarts.
+    #[napi]
+    pub async fn list() -> napi::Result<Vec<MachineSummary>> {
+        let runtime = runtime().into_napi()?;
+        tokio::task::spawn_blocking(move || {
+            let summaries = runtime
+                .list_machines()?
+                .into_iter()
+                .map(|record| {
+                    let state = runtime.state(&record.name);
+                    // The record keeps its last PID after the process is gone;
+                    // report one only while the state says it is alive.
+                    let pid = record.pid.filter(|_| state == "running");
+                    MachineSummary {
+                        state,
+                        pid,
+                        image: record.image.clone(),
+                        labels: record.labels.iter().map(|(k, v)| (k.clone(), v.clone())).collect(),
+                        persistent: !record.ephemeral,
+                        detached: record.detached,
+                        branchable: record.forkable_on_start(),
+                        created_at: record.created_at as f64,
+                        name: record.name,
+                    }
+                })
+                .collect();
+            Ok(summaries)
+        })
+        .await
+        .map_err(join_error)?
+        .into_napi()
     }
 
     /// Create a stopped machine from a portable live checkpoint on disk.

@@ -58,6 +58,8 @@ export type {
   MachineUsageTotals,
   MachineCostBreakdown,
   ImageInfo,
+  MachineSummary,
+  ListOptions,
   ExecEvent,
   ConnectOptions,
   EgressInterceptor,
