@@ -121,8 +121,16 @@ if [ "$OS" = "Darwin" ]; then
   fi
   echo "smol-vmm: hypervisor entitlement verified"
 else
-  cp -p "$LIB_DIR"/libkrun*.so* "$DEST/" 2>/dev/null || true
-  cp -p "$LIB_DIR"/libkrunfw*.so* "$DEST/" 2>/dev/null || true
+  # Only the two names that are ever opened: the engine dlopens
+  # `$SMOLVM_LIB_DIR/libkrun.so` (smolvm `libkrun_filename()`), and libkrun
+  # dlopens `libkrunfw.so.5` (its KRUNFW_NAME). npm tarballs cannot hold
+  # symlinks, so copying the whole soname chain (`.so`, `.so.5`, `.so.5.5.0`)
+  # shipped each library three times over. `-L` copies the real file behind a
+  # symlink under the name that is opened.
+  for lib in libkrun.so libkrunfw.so.5; do
+    [ -e "$LIB_DIR/$lib" ] || { echo "bundle-native: FATAL — $LIB_DIR/$lib not found" >&2; exit 1; }
+    cp -pL "$LIB_DIR/$lib" "$DEST/$lib"
+  done
   # Strip the hard libvirglrenderer.so.1 NEEDED from the GPU-enabled libkrun
   # (mirrors the engine's build-dist.sh) so it loads on non-GPU Linux hosts via
   # RTLD_LAZY. GPU is loaded by soname at runtime only — unused by the SDK.

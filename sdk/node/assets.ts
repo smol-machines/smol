@@ -15,7 +15,32 @@
  */
 
 import { existsSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+
+/** The per-platform npm package that carries the native addon, boot helper,
+ *  hypervisor libraries and guest rootfs for each supported
+ *  `${process.platform}-${process.arch}`. npm installs only the one matching
+ *  the host (they are `optionalDependencies` gated by `os`/`cpu`/`libc`), so a
+ *  user downloads one platform's runtime instead of all of them. Names follow
+ *  the napi-rs triples `binding.js` already falls back to. */
+export const PLATFORM_PACKAGES: Readonly<Record<string, string>> = {
+  'darwin-arm64': 'smolmachines-darwin-arm64',
+  'linux-x64': 'smolmachines-linux-x64-gnu',
+  'linux-arm64': 'smolmachines-linux-arm64-gnu',
+};
+
+/** `native/` inside the installed platform package, or undefined when it is not
+ *  installed (unsupported platform, `--omit=optional`, or a lockfile written on
+ *  another platform that dropped it). */
+function platformPackageNativeDir(platformArch: string): string | undefined {
+  const pkg = PLATFORM_PACKAGES[platformArch];
+  if (!pkg) return undefined;
+  try {
+    return join(dirname(require.resolve(`${pkg}/package.json`)), 'native');
+  } catch {
+    return undefined;
+  }
+}
 
 export interface RuntimeAssets {
   bootBinary?: string;
@@ -37,12 +62,15 @@ export function wireBundledAssets(): RuntimeAssets {
   const platformArch = `${process.platform}-${process.arch}`;
   const helperName = process.platform === 'win32' ? 'smol-vmm.exe' : 'smol-vmm';
 
-  // `__dirname` is the package root from source (tsx) and `dist/` when built —
-  // check both layouts.
+  // A source checkout / CI build keeps the assets next to the package
+  // (`__dirname` is the package root from source (tsx) and `dist/` when built —
+  // check both layouts); a published install gets them from the per-platform
+  // package.
   const candidates = [
     join(__dirname, 'native', platformArch),
     join(__dirname, '..', 'native', platformArch),
-  ];
+    platformPackageNativeDir(platformArch),
+  ].filter((dir): dir is string => dir !== undefined);
 
   for (const nativeDir of candidates) {
     if (!existsSync(nativeDir)) continue;

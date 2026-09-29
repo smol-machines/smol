@@ -31,7 +31,6 @@
   },
   "files": [
     "dist",
-    "native",
     "LICENSE",
     "README.md"
   ],
