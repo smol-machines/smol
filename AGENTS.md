@@ -60,10 +60,11 @@ m = Machine.create(MachineConfig(image="alpine:3.20"), ConnectOptions(target="cl
 
 ```bash
 smol run python:3.12 -- python -c "print(2**10)"   # ephemeral one-shot
-smol machine create mybox --image alpine:3.20      # persistent machine
+smol machine create --name mybox --image alpine:3.20 --net   # persistent machine
+smol machine start --name mybox
 smol machine exec --name mybox -- apk add curl
 smol machine ls                                    # local + cloud
-smol machine rm mybox
+smol machine rm --name mybox
 
 smol auth login                                    # cloud
 smol cloud deploy --image alpine:3.20

@@ -219,6 +219,14 @@ impl CreateCmd {
         record.labels = smolvm::util::parse_labels(&self.label)?;
         record.cuda = self.cuda;
 
+        // A registry image with no network can never be pulled (the guest runs
+        // the pull), so refuse here rather than deferring to a `start` that
+        // must fail.
+        record.validate_image_fetchable()?;
+        // Remote volumes mount into the workload container's namespace and
+        // need network to reach the bucket; refuse at create, not every start.
+        record.validate_remote_volumes()?;
+
         let mut config = SmolvmConfig::load()?;
         config.insert_vm(name.clone(), record)?;
 
