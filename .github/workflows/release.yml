@@ -468,8 +468,11 @@ jobs:
     # The Rust SDK is source-only and self-contained, so it needs no build
     # matrix — but it must go out at the SAME version as npm and PyPI, or the
     # three SDKs drift. Publishing it by hand from main is how it ended up at
-    # main's stale baseline instead of the release version.
-    needs: [python-publish]
+    # main's stale baseline instead of the release version. It waits for npm,
+    # whose pre-publish checks gate the release, but not for PyPI: a PyPI
+    # failure after npm is live (e.g. the project size limit) would otherwise
+    # leave only the Rust SDK behind.
+    needs: [node-publish]
     if: github.event_name == 'push' || inputs.publish
     runs-on: ubuntu-latest
     steps:
