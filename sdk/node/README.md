@@ -181,6 +181,8 @@ Existing network connections may need to reconnect.
   `ready === true` before returning.
 - `Machine.connect(id, conn?)` — attach to an existing machine without waiting;
   call `waitUntilReady()` before use.
+- `Machine.list(conn?, { labels? })` — every machine the target knows about,
+  including ones other processes created, as `MachineSummary` rows.
 - `machine.ready()` / `machine.readyAt()` /
   `machine.waitUntilReady({ timeoutMs, intervalMs })` *(cloud)*.
 - `machine.exec(command, opts?)` / `machine.run(image, command, opts?)` → `ExecResult`.
@@ -197,6 +199,27 @@ Existing network connections may need to reconnect.
   `"started"` means VM launched, not ready for work.
 
 Errors are typed: `SmolError` (with `.code`), `ExecutionError`, `NotSupportedError`, `InvalidConfigError`.
+
+### Machines that outlive the process (local)
+
+A local machine normally dies with the process that started it: the engine
+arms a parent-death watchdog, and the SDK stops the machines it owns on
+SIGINT/SIGTERM. A long-running host service whose own restarts must not take
+its machines down opts out with `detach`, labels its machines so it can tell
+them from anyone else's, and reclaims them after a restart with `list` +
+`connect`:
+
+```ts
+await Machine.create({ name: 'worker-1', detach: true, labels: { owner: 'hostd' } });
+// … this process is killed and starts again …
+for (const m of await Machine.list({}, { labels: { owner: 'hostd' } })) {
+  const machine = await Machine.connect(m.name); // still running; no reboot
+}
+```
+
+`detach` implies `persistent` and is remembered by the machine, so later
+starts and branches are detached too. `smol machine ls` shows the same
+machines. Nothing reaps a detached machine but `delete()`.
 
 ### One prepared checkpoint, a network policy per session (local)
 

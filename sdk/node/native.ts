@@ -57,6 +57,20 @@ export interface NativeMachineConfig {
   resources?: NativeResources | undefined;
   persistent?: boolean | undefined;
   forkable?: boolean | undefined;
+  detached?: boolean | undefined;
+  labels?: Record<string, string> | undefined;
+}
+
+export interface NativeMachineSummary {
+  name: string;
+  state: string;
+  image?: string | undefined;
+  labels: Record<string, string>;
+  pid?: number | undefined;
+  persistent: boolean;
+  detached: boolean;
+  branchable: boolean;
+  createdAt: number;
 }
 
 export interface NativeExecResult {
@@ -158,6 +172,7 @@ export interface NapiMachine {
 export interface NapiMachineCtor {
   new (config: NativeMachineConfig): NapiMachine;
   connect(name: string, interceptorAddress?: string, interceptorToken?: string): NapiMachine;
+  list(): Promise<NativeMachineSummary[]>;
   restoreCheckpoint(name: string, artifact: string): NapiMachine;
   exportCheckpoint(source: string, output: string): number;
   pruneCheckpointStore(store: string): number;

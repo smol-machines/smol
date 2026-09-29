@@ -3,6 +3,8 @@
 //! These structs are exposed to JavaScript via `#[napi(object)]` and include
 //! conversion impls to/from the corresponding smolvm types.
 
+use std::collections::HashMap;
+
 use napi_derive::napi;
 use smolvm::agent::{ExecEvent as AgentExecEvent, HostMount, VmResources};
 use smolvm::data::network::PortMapping;
@@ -50,6 +52,39 @@ pub struct MachineConfig {
     pub persistent: Option<bool>,
     /// If true, every start uses cloneable, memfd-backed guest RAM.
     pub forkable: Option<bool>,
+    /// If true, the VM outlives this process: its boot subprocess does not
+    /// watch the parent, so it keeps running when this process exits or
+    /// crashes, and a later process reattaches with `connect`. Remembered by
+    /// the machine, so later starts are detached too.
+    pub detached: Option<bool>,
+    /// Caller metadata stored with the machine and returned by `list`; the
+    /// engine never interprets it.
+    pub labels: Option<HashMap<String, String>>,
+}
+
+/// One machine from this host's shared machine database.
+#[napi(object)]
+#[derive(Debug, Clone)]
+pub struct MachineSummary {
+    /// Machine name.
+    pub name: String,
+    /// Lifecycle state as `state()` reports it: `running`, `stopped`,
+    /// `frozen`, `paused`, `failed`, ...
+    pub state: String,
+    /// OCI image the machine boots, when it is an image machine.
+    pub image: Option<String>,
+    /// Caller metadata given at create.
+    pub labels: HashMap<String, String>,
+    /// Host PID of the VM process while it is running.
+    pub pid: Option<i32>,
+    /// Whether the record outlives the process that created it.
+    pub persistent: bool,
+    /// Whether the VM outlives the process that starts it.
+    pub detached: bool,
+    /// Whether it starts as a live branch source.
+    pub branchable: bool,
+    /// Creation time, seconds since the Unix epoch.
+    pub created_at: f64,
 }
 
 /// Whether this host can run local machines, from the engine's own checks.

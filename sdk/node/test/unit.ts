@@ -107,6 +107,17 @@ check('network policies map onto the engine egress policy', () => {
   assert.deepStrictEqual(egressPolicy({ allowHosts: [], allowCidrs: [] }), egressPolicy('deny-all'));
   assert.throws(() => egressPolicy('block-everything' as never), /network policy must be/);
 });
+check('detach forwards to the native config and implies persistent', () => {
+  // A machine meant to outlive this process must outlive its record too, so
+  // `Machine.connect(name)` can find it afterwards.
+  const nc = toNativeConfig('m', { detach: true, labels: { owner: 'hostd' } });
+  assert.strictEqual(nc.detached, true);
+  assert.strictEqual(nc.persistent, true);
+  assert.deepStrictEqual(nc.labels, { owner: 'hostd' });
+  // Without it, persistence stays whatever the caller asked for.
+  assert.strictEqual(toNativeConfig('m', { persistent: false }).persistent, false);
+  assert.strictEqual(toNativeConfig('m', {}).detached, undefined);
+});
 check('networkBackend reaches the native config', () => {
   assert.strictEqual(toNativeConfig('m', { resources: { networkBackend: 'virtio-net' } }).resources?.networkBackend, 'virtio-net');
 });

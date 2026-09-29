@@ -39,7 +39,9 @@ import type {
   ForkBatchOptions,
   ForkOptions,
   ImageInfo,
+  ListOptions,
   MachineConfig,
+  MachineSummary,
   MachineUsageReport,
   ShareLink,
   PortableCheckpointInfo,
@@ -334,8 +336,11 @@ export function toNativeConfig(
       Object.entries(config.env).map(([key, value]) => ({ key, value })),
     workdir: config.workdir,
     user: config.user,
-    persistent: config.persistent,
+    // A machine meant to outlive this process has to outlive its record too.
+    persistent: config.detach ? true : config.persistent,
     forkable: resolveBranchable(config),
+    detached: config.detach,
+    labels: config.labels,
     mounts: config.mounts?.map((m) => ({
       source: m.source,
       target: m.target,
@@ -1841,8 +1846,10 @@ export async function makeTransport(
   let transport: LocalTransport | undefined;
   try {
     const inner = new (getNapiMachine())(toNativeConfig(name, config));
-    const handleSignals = conn.handleSignals ?? true;
-    transport = new LocalTransport(inner, handleSignals, interceptor, handleSignals);
+    // A detached machine is nobody's to stop on a signal — it was created to
+    // survive this process — and its branches inherit that.
+    const owned = !config.detach && (conn.handleSignals ?? true);
+    transport = new LocalTransport(inner, owned, interceptor, owned);
     // A forkable golden boots with memfd-backed guest RAM + a control socket so
     // it can be cloned with Machine.fork (local live-RAM fork).
     if (resolveBranchable(config)) {
@@ -1857,6 +1864,75 @@ export async function makeTransport(
     await transport?.delete().catch(() => {});
     throw wrapNativeError(e);
   }
+}
+
+/**
+ * List the machines the selected target knows about — not only this process's:
+ * locally every record in the engine's database, on the cloud every machine of
+ * the account. Labels tell one owner's machines from another's.
+ */
+export async function listMachines(
+  conn: ConnectOptions,
+  options: ListOptions = {},
+): Promise<MachineSummary[]> {
+  const explicitKey = conn.apiKey ?? process.env.SMOL_CLOUD_TOKEN;
+  let all: MachineSummary[];
+  if (!selectsCloud(conn)) {
+    let rows;
+    try {
+      rows = await getNapiMachine().list();
+    } catch (e) {
+      throw wrapNativeError(e);
+    }
+    all = rows.map((r) => ({
+      name: r.name,
+      id: r.name,
+      state: r.state,
+      ...(r.image != null && { image: r.image }),
+      labels: r.labels,
+      ...(r.pid != null && { pid: r.pid }),
+      persistent: r.persistent,
+      detached: r.detached,
+      branchable: r.branchable,
+      createdAt: new Date(r.createdAt * 1000).toISOString(),
+    }));
+  } else {
+    // As in connectTransport: the CLI-login fallback applies only once the
+    // cloud target is already selected.
+    const { apiKey: cliKey, endpoint: cliUrl } = cliSession(conn.target);
+    const key = explicitKey ?? cliKey ?? cliConfigApiKey();
+    if (!key) {
+      throw new InvalidConfigError(`list requires an API key — ${NO_KEY_HINT}.`);
+    }
+    const baseUrl = (
+      conn.baseUrl ??
+      process.env.SMOL_CLOUD_URL ??
+      cliUrl ??
+      DEFAULT_CLOUD_URL
+    ).replace(/\/+$/, "");
+    const listed = await cloudFetch<{ machines?: MachineInfo[] } | MachineInfo[]>(
+      { baseUrl, apiKey: key },
+      "GET",
+      "/v1/machines",
+    );
+    const rows = Array.isArray(listed) ? listed : (listed.machines ?? []);
+    all = rows.map((m) => ({
+      name: m.name ?? m.id,
+      id: m.id,
+      state: m.state,
+      ...(m.source?.type === "image" && { image: m.source.reference }),
+      // The cloud API carries no caller labels yet.
+      labels: {},
+      persistent: !m.ephemeral,
+      // Remote machines never depend on a client process.
+      detached: true,
+      branchable: m.branchable ?? m.forkable ?? false,
+      createdAt: m.createdAt,
+    }));
+  }
+  const want = Object.entries(options.labels ?? {});
+  if (want.length === 0) return all;
+  return all.filter((m) => want.every(([k, v]) => m.labels[k] === v));
 }
 
 /**

@@ -194,6 +194,27 @@ export interface MachineConfig {
   network?: boolean;
   /** Keep the machine record after the process exits (default: false). (local) */
   persistent?: boolean;
+  /**
+   * Let the machine outlive this process (default: false). A local machine is
+   * normally tied to the process that created it: the engine reaps its VM
+   * moments after that process dies, however it dies, and the SDK stops it on
+   * SIGINT/SIGTERM. A detached machine keeps running through both — an exit,
+   * a crash, a restart — and a later process picks it up again with
+   * `Machine.connect(name)`, so give it a `name` you can find again (or record
+   * `machine.name`). Implies `persistent`, and is remembered by the machine,
+   * so later starts and branches are detached too. The machine then belongs
+   * to whoever calls `stop()` or `delete()`; `Machine.list()` finds the ones
+   * a process left behind. (local)
+   */
+  detach?: boolean;
+  /**
+   * Caller metadata stored with the machine and returned by `Machine.list()`,
+   * e.g. `{ owner: "hostd", tenant: "acme" }`. Never interpreted by the
+   * engine. This is how a process tells its own machines from everyone
+   * else's after it restarts, since the shared machine database lists them
+   * all. (local)
+   */
+  labels?: Record<string, string>;
   /** Auto-stop the machine after N idle seconds. (cloud) */
   autoStopSeconds?: number;
   /** Delete the machine after N seconds. (cloud) */
@@ -215,6 +236,37 @@ export interface MachineConfig {
    *  owner of a mounted host directory. Local target only; the cloud target
    *  rejects it with `NotSupportedError`. */
   user?: string;
+}
+
+/** One machine as reported by `Machine.list()`. */
+export interface MachineSummary {
+  /** Machine name. */
+  name: string;
+  /** The cloud `mach-…` id, or the name on local. */
+  id: string;
+  /** Lifecycle state as `state()` would report it. */
+  state: string;
+  /** Base image, when the machine boots one. */
+  image?: string;
+  /** Caller metadata given at create. (local; empty on cloud) */
+  labels: Record<string, string>;
+  /** Host PID of the VM process while it is running. (local) */
+  pid?: number;
+  /** Whether the record outlives the process that created it. */
+  persistent: boolean;
+  /** Whether the VM outlives the process that starts it. Always true on
+   *  cloud, where machines are remote. */
+  detached: boolean;
+  /** Whether it starts as a live branch source. */
+  branchable: boolean;
+  /** When the machine was created (RFC3339). */
+  createdAt: string;
+}
+
+/** Filters for `Machine.list()`. */
+export interface ListOptions {
+  /** Only machines carrying every one of these labels with these values. */
+  labels?: Record<string, string>;
 }
 
 /** An outbound network policy that can replace a stopped machine's own.
