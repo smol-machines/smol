@@ -43,6 +43,7 @@ export interface NativeResources {
   gpu?: boolean | undefined;
   gpuVramMib?: number | undefined;
   cuda?: boolean | undefined;
+  networkBackend?: string | undefined;
 }
 
 export interface NativeMachineConfig {
@@ -147,6 +148,7 @@ export interface NapiMachine {
   readFile(path: string): Promise<Buffer>;
   execStream(command: string[], options?: NativeExecOptions): NativeExecStream;
   sync(): Promise<void>;
+  setEgressPolicy(policy: { network: boolean; cidrs?: string[]; hosts?: string[] }): void;
   stop(): Promise<void>;
   pause(): Promise<void>;
   resume(): Promise<void>;

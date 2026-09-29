@@ -35,6 +35,8 @@ import type {
   ForkOptions,
   ImageInfo,
   MachineConfig,
+  NetworkPolicy,
+  RestoreCheckpointOptions,
   StartOptions,
   MachineUsageReport,
   ShareLink,
@@ -115,8 +117,9 @@ export class Machine {
     checkpointId: string,
     name: string,
     conn?: ConnectOptions,
+    options?: RestoreCheckpointOptions,
   ): Promise<Machine> {
-    return new Machine(await restoreCheckpointTransport(checkpointId, name, conn));
+    return new Machine(await restoreCheckpointTransport(checkpointId, name, conn, options));
   }
 
   /** Export a local stored checkpoint directory as one portable file. */
@@ -278,6 +281,13 @@ export class Machine {
   /** Copy guest-local staged mounts back to their host directories without stopping. */
   sync(): Promise<void> {
     return this.transport.sync();
+  }
+
+  /** Replace this stopped machine's outbound network policy. A machine that
+   *  resumes saved memory (restored or paused) keeps its network backend, so a
+   *  policy that would need a different one is refused. (local) */
+  setNetworkPolicy(policy: NetworkPolicy): Promise<void> {
+    return this.transport.setNetworkPolicy(policy);
   }
 
   /** Stop the machine. */

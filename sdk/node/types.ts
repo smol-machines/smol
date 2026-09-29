@@ -50,6 +50,14 @@ export interface ResourceSpec {
    * backend. Local target only. Default: false.
    */
   cuda?: boolean;
+  /** Network backend: `"tsi"` (outbound-only; the default for plain network
+   *  access) or `"virtio-net"` (the default when a port, allow list or
+   *  credential needs it). Choose `"virtio-net"` for a machine you will
+   *  checkpoint and restore with a different network policy
+   *  (`Machine.restoreCheckpoint(..., { networkPolicy })`): the policy is
+   *  enforced by virtio-net's host-side stack, and a restore keeps the backend
+   *  the checkpoint was taken with. Local target only. */
+  networkBackend?: "tsi" | "virtio-net";
 }
 
 /** Host directory mounted into the machine. */
@@ -207,6 +215,23 @@ export interface MachineConfig {
    *  owner of a mounted host directory. Local target only; the cloud target
    *  rejects it with `NotSupportedError`. */
   user?: string;
+}
+
+/** An outbound network policy that can replace a stopped machine's own.
+ *  `allowHosts` entries are exact host names (`api.github.com`) or subdomain
+ *  wildcards (`*.github.com`, which does not match `github.com` itself). An
+ *  allow list that names no hosts and no CIDRs allows nothing. */
+export type NetworkPolicy =
+  | "allow-all"
+  | "deny-all"
+  | { allowHosts?: string[]; allowCidrs?: string[] };
+
+/** Options for `Machine.restoreCheckpoint`. */
+export interface RestoreCheckpointOptions {
+  /** Apply this network policy to the restored machine before it boots.
+   *  The checkpoint must have been taken on the `"virtio-net"` backend for an
+   *  allow list or `deny-all`. Local target only. */
+  networkPolicy?: NetworkPolicy;
 }
 
 /** Per-call execution options. */
