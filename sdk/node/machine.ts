@@ -348,8 +348,8 @@ export class Machine {
   }
 
   /** Add CPUs, RAM or disk to this running machine without rebooting it.
-   *  Sizes are totals. CPUs, RAM and disks are applied in that order, each on
-   *  its own, so a failure leaves the earlier ones applied. Local target only. */
+   *  Sizes are totals. Every target is checked before anything changes, then
+   *  RAM, CPUs and disks are applied in that order. Local target only. */
   resize(options: ResizeOptions): Promise<MachineResources> {
     return this.transport.resize(options);
   }

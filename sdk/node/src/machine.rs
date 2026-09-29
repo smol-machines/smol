@@ -16,6 +16,18 @@ fn join_error(err: tokio::task::JoinError) -> napi::Error {
     napi::Error::from_reason(format!("Task join error: {}", err))
 }
 
+/// Check every step's target before any of them is applied.
+fn check_resize_targets(name: &str, steps: &[smolvm::embedded::ResizeSpec]) -> smolvm::Result<()> {
+    smolvm::agent::live_resize::check_targets(
+        &smolvm::db::SmolvmDb::open()?,
+        name,
+        steps.iter().find_map(|s| s.cpus),
+        steps.iter().find_map(|s| s.memory_mib),
+        steps.iter().find_map(|s| s.storage_gib),
+        steps.iter().find_map(|s| s.overlay_gib),
+    )
+}
+
 /// Split a resize into the one-resource requests the engine applies.
 fn resize_steps(spec: &ResizeConfig) -> napi::Result<Vec<smolvm::embedded::ResizeSpec>> {
     let gib = |value: Option<f64>, field: &str| -> napi::Result<Option<u64>> {
@@ -29,16 +41,18 @@ fn resize_steps(spec: &ResizeConfig) -> napi::Result<Vec<smolvm::embedded::Resiz
     };
     let storage_gib = gib(spec.storage_gib, "storageGb")?;
     let overlay_gib = gib(spec.overlay_gib, "overlayGb")?;
+    // RAM first: its host headroom check is the likeliest refusal, and it
+    // refuses before anything changes.
     let mut steps = Vec::new();
-    if let Some(cpus) = spec.cpus {
-        steps.push(smolvm::embedded::ResizeSpec {
-            cpus: Some(cpus),
-            ..Default::default()
-        });
-    }
     if let Some(memory_mib) = spec.memory_mib {
         steps.push(smolvm::embedded::ResizeSpec {
             memory_mib: Some(memory_mib),
+            ..Default::default()
+        });
+    }
+    if let Some(cpus) = spec.cpus {
+        steps.push(smolvm::embedded::ResizeSpec {
+            cpus: Some(cpus),
             ..Default::default()
         });
     }
@@ -408,14 +422,15 @@ impl NapiMachine {
     }
 
     /// Grow this running machine without rebooting it. Sizes are totals.
-    /// CPUs, RAM and disks are applied in that order, each on its own, so a
-    /// failure leaves the earlier ones applied.
+    /// Every target is checked before anything changes, then RAM, CPUs and
+    /// disks are applied in that order.
     #[napi]
     pub async fn resize(&self, spec: ResizeConfig) -> napi::Result<MachineResources> {
         let steps = resize_steps(&spec)?;
         let runtime = runtime().into_napi()?;
         let name = self.name.clone();
         let record = tokio::task::spawn_blocking(move || {
+            check_resize_targets(&name, &steps)?;
             let mut record = None;
             for step in steps {
                 record = Some(runtime.resize_machine(&name, step)?);

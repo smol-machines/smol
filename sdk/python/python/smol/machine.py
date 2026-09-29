@@ -329,8 +329,8 @@ class Machine:
         overlay_gb: Optional[int] = None,
     ) -> MachineResources:
         """Add CPUs, RAM or disk to this running machine without rebooting it.
-        Sizes are totals. CPUs, RAM and disks are applied in that order, each on
-        its own, so a failure leaves the earlier ones applied. Local target only."""
+        Sizes are totals. Every target is checked before anything changes, then
+        RAM, CPUs and disks are applied in that order. Local target only."""
         return self._t.resize(
             cpus=cpus, memory_mb=memory_mb, storage_gb=storage_gb, overlay_gb=overlay_gb
         )

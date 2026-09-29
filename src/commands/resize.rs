@@ -7,9 +7,9 @@ use smolvm::db::SmolvmDb;
 /// Add CPUs, RAM or disk to a running machine without rebooting it.
 ///
 /// Sizes are totals, not increments. RAM and disks only grow; CPUs can also
-/// shrink on Linux x86_64. Several resources in one command are applied in
-/// order (CPUs, RAM, disks), each on its own, so a failure leaves the earlier
-/// ones applied. Use `smol machine update` to change a stopped machine.
+/// shrink on Linux x86_64. Several resources in one command are checked
+/// together before anything changes, then applied RAM first, CPUs, then
+/// disks. Use `smol machine update` to change a stopped machine.
 ///
 /// Examples:
 ///   smol machine resize -n agent --cpus 4
@@ -72,14 +72,24 @@ impl ResizeCmd {
             );
         }
 
+        smolvm::agent::live_resize::check_targets(
+            &db,
+            &name,
+            self.cpus,
+            self.mem,
+            self.storage,
+            self.overlay,
+        )?;
+        // RAM first: its host headroom check is the likeliest refusal, and it
+        // refuses before anything changes.
         let mut resized = record;
-        if let Some(cpus) = self.cpus {
-            resized = smolvm::agent::live_resize::grow_cpus(&db, &name, cpus)?;
-            println!("CPUs: {}", resized.cpus);
-        }
         if let Some(mem) = self.mem {
             resized = smolvm::agent::live_resize::grow_memory(&db, &name, mem)?;
             println!("RAM: {} MiB", resized.mem);
+        }
+        if let Some(cpus) = self.cpus {
+            resized = smolvm::agent::live_resize::grow_cpus(&db, &name, cpus)?;
+            println!("CPUs: {}", resized.cpus);
         }
         if self.storage.is_some() || self.overlay.is_some() {
             resized =

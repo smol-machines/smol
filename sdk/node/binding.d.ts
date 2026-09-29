@@ -256,8 +256,8 @@ export declare class NapiMachine {
   checkpoint(output: string, store?: string | undefined | null): Promise<LocalCheckpointResult>
   /**
    * Grow this running machine without rebooting it. Sizes are totals.
-   * CPUs, RAM and disks are applied in that order, each on its own, so a
-   * failure leaves the earlier ones applied.
+   * Every target is checked before anything changes, then RAM, CPUs and
+   * disks are applied in that order.
    */
   resize(spec: ResizeConfig): Promise<MachineResources>
   /**

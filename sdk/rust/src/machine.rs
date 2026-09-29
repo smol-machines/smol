@@ -832,8 +832,8 @@ impl Machine {
 
     /// Add CPUs, RAM or disk to this running machine without rebooting it.
     ///
-    /// Sizes are totals. CPUs, RAM and disks are applied in that order, each
-    /// on its own, so a failure leaves the earlier ones applied. Local only.
+    /// Sizes are totals. Every target is checked before anything changes, then
+    /// RAM, CPUs and disks are applied in that order. Local only.
     pub fn resize(&self, resize: &Resize) -> Result<MachineResources> {
         self.transport.resize(resize)
     }
