@@ -164,10 +164,11 @@ finally:
 
 ```bash
 smol run python:3.12 -- python -c "print(2**10)"   # ephemeral one-shot
-smol machine create mybox --image alpine:3.20      # persistent machine
+smol machine create --name mybox --image alpine:3.20 --net   # persistent machine
+smol machine start --name mybox
 smol machine exec --name mybox -- apk add curl
 smol machine ls                                    # lists local + cloud
-smol machine rm mybox
+smol machine rm --name mybox
 
 # smol cloud
 smol auth login
