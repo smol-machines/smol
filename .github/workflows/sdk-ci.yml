@@ -169,6 +169,7 @@ jobs:
           bun test/fork-service-e2e.ts
           bun test/checkpoint-branch-e2e.ts
           bun test/exec-control-e2e.ts
+          bun test/credentials-e2e.ts
           bun test/staged-mount-e2e.ts
       - name: Run Rust SDK exec control on the same engine
         working-directory: ${{ github.workspace }}/monorepo/smol/sdk/rust

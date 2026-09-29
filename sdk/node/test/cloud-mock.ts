@@ -496,6 +496,28 @@ async function main(): Promise<void> {
   }
   check("cloud create rejects host mounts as NotSupported", mountsGated);
 
+  let credentialsGated = false;
+  const createsBefore = seen.createBody;
+  try {
+    await Machine.create(
+      { image: "alpine", credentials: [{ name: "git", allowedHosts: ["github.com"], setHeader: "authorization", value: "Basic x" }] },
+      { target: "cloud", baseUrl, apiKey: "smk_test123" },
+    );
+  } catch (e) {
+    credentialsGated = e instanceof NotSupportedError;
+  }
+  check(
+    "cloud create rejects credentials as NotSupported before sending anything",
+    credentialsGated && seen.createBody === createsBefore,
+  );
+  let credentialValuesGated = false;
+  try {
+    await m.setCredentialValues({ git: "Basic x" });
+  } catch (e) {
+    credentialValuesGated = e instanceof NotSupportedError;
+  }
+  check("cloud setCredentialValues is gated as NotSupported", credentialValuesGated);
+
   let syncGated = false;
   try {
     await m.sync();

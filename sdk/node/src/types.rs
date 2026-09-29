@@ -50,6 +50,25 @@ pub struct MachineConfig {
     pub persistent: Option<bool>,
     /// If true, every start uses cloneable, memfd-backed guest RAM.
     pub forkable: Option<bool>,
+    /// Credentials HTTPS requests may carry to named hosts, held by the host.
+    pub credentials: Option<Vec<CredentialBindingConfig>>,
+}
+
+/// One credential binding. Never carries the value; see
+/// `NapiMachine::set_credential_values`.
+#[napi(object)]
+#[derive(Debug, Clone)]
+pub struct CredentialBindingConfig {
+    /// Binding name the values are keyed by.
+    pub name: String,
+    /// Hosts the credential may be sent to (`api.example.com`, `*.example.com`).
+    pub allowed_hosts: Vec<String>,
+    /// Set this request header to the value on every allowed request.
+    pub set_header: Option<String>,
+    /// Guest variable that receives a placeholder the host swaps for the value.
+    pub environment_variable: Option<String>,
+    /// HTTP methods the credential may be used with (default: all).
+    pub methods: Option<Vec<String>>,
 }
 
 /// Whether this host can run local machines, from the engine's own checks.

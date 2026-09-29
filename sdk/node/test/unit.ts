@@ -97,6 +97,21 @@ check('user forwards to the native config', () => {
   assert.strictEqual(toNativeConfig('m', { user: '1000:1000' }).user, '1000:1000');
   assert.strictEqual(toNativeConfig('m', {}).user, undefined);
 });
+check('credential bindings reach the native config without their values', () => {
+  const nc = toNativeConfig('m', {
+    credentials: [
+      { name: 'git', allowedHosts: ['github.com', '*.github.com'], setHeader: 'authorization', value: 'Basic c2VjcmV0' },
+      { name: 'api', allowedHosts: ['api.example.com'], environmentVariable: 'API_KEY', methods: ['GET'] },
+    ],
+  });
+  assert.deepStrictEqual(nc.credentials, [
+    { name: 'git', allowedHosts: ['github.com', '*.github.com'], setHeader: 'authorization', environmentVariable: undefined, methods: undefined },
+    { name: 'api', allowedHosts: ['api.example.com'], setHeader: undefined, environmentVariable: 'API_KEY', methods: ['GET'] },
+  ]);
+  // The value never enters the native config, which the engine persists.
+  assert.ok(!JSON.stringify(nc).includes('c2VjcmV0'));
+  assert.strictEqual(toNativeConfig('m', {}).credentials, undefined);
+});
 
 // --- toNativeConfig: GPU resources map to the native (snake→camel) field ---
 check('forwards gpu + gpuVramMib to native resources', () => {

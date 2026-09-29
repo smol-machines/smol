@@ -192,6 +192,37 @@ Existing network connections may need to reconnect.
 
 Errors are typed: `SmolError` (with `.code`), `ExecutionError`, `NotSupportedError`, `InvalidConfigError`.
 
+### Credentials the machine never holds (local)
+
+A machine can use a credential over HTTPS without holding it. The host
+terminates TLS for the binding's hosts, using a per-machine CA the guest
+trusts, and sets the header itself:
+
+```ts
+const m = await Machine.create({
+  image: 'alpine/git',
+  network: true,
+  credentials: [{
+    name: 'github',
+    allowedHosts: ['github.com', '*.github.com'],
+    setHeader: 'authorization',
+    value: `Basic ${Buffer.from(`x-access-token:${token}`).toString('base64')}`,
+  }],
+});
+await m.exec(['git', 'clone', 'https://github.com/acme/private.git']); // no token inside
+```
+
+- Values are held in this process's memory only. They are never written to
+  the machine record, a checkpoint or the guest.
+- `machine.setCredentialValues({ github: … })` replaces the values; they take
+  effect on the next start.
+- A branch uses its golden's values unless it is given its own.
+- `environmentVariable` instead hands the guest an opaque placeholder, which
+  the host swaps for the value when the guest sends it in a request header.
+
+The full rules are in
+[credential substitution](https://github.com/smol-machines/smolvm/blob/main/docs/credential-substitution.md).
+
 ## Building from source
 
 This package's native core lives alongside it (Rust, `src/*.rs`) and links the

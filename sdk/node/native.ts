@@ -56,6 +56,15 @@ export interface NativeMachineConfig {
   resources?: NativeResources | undefined;
   persistent?: boolean | undefined;
   forkable?: boolean | undefined;
+  credentials?: NativeCredentialBinding[] | undefined;
+}
+
+export interface NativeCredentialBinding {
+  name: string;
+  allowedHosts: string[];
+  setHeader?: string | undefined;
+  environmentVariable?: string | undefined;
+  methods?: string[] | undefined;
 }
 
 export interface NativeExecResult {
@@ -147,6 +156,7 @@ export interface NapiMachine {
   readFile(path: string): Promise<Buffer>;
   execStream(command: string[], options?: NativeExecOptions): NativeExecStream;
   sync(): Promise<void>;
+  setCredentialValues(values: Record<string, string>): void;
   stop(): Promise<void>;
   pause(): Promise<void>;
   resume(): Promise<void>;
