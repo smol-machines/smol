@@ -293,7 +293,7 @@ class AsyncMachine:
         overlay_gb: Optional[int] = None,
     ) -> MachineResources:
         """Add CPUs, RAM or disk to this running machine without rebooting it.
-        Sizes are totals, applied in order (CPUs, RAM, disks). Local target only."""
+        Sizes are totals, checked together, then applied RAM first. Local target only."""
         return await asyncio.to_thread(
             lambda: self._m.resize(
                 cpus=cpus, memory_mb=memory_mb, storage_gb=storage_gb, overlay_gb=overlay_gb

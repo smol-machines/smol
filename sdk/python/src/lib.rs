@@ -681,8 +681,9 @@ impl Machine {
         })
     }
 
-    /// Grow this running machine without rebooting it. Sizes are totals;
-    /// CPUs, RAM and disks are applied in that order, each on its own.
+    /// Grow this running machine without rebooting it. Sizes are totals.
+    /// Every target is checked before anything changes, then RAM, CPUs and
+    /// disks are applied in that order.
     /// Returns `(cpus, memory_mib, storage_gib, overlay_gib)` afterwards.
     #[pyo3(signature = (cpus=None, memory_mib=None, storage_gib=None, overlay_gib=None))]
     fn resize(
@@ -694,16 +695,18 @@ impl Machine {
         overlay_gib: Option<u64>,
     ) -> PyResult<(u8, u32, Option<u64>, Option<u64>)> {
         use smolvm::embedded::ResizeSpec;
+        // RAM first: its host headroom check is the likeliest refusal, and it
+        // refuses before anything changes.
         let mut steps = Vec::new();
-        if let Some(cpus) = cpus {
-            steps.push(ResizeSpec {
-                cpus: Some(cpus),
-                ..Default::default()
-            });
-        }
         if let Some(memory_mib) = memory_mib {
             steps.push(ResizeSpec {
                 memory_mib: Some(memory_mib),
+                ..Default::default()
+            });
+        }
+        if let Some(cpus) = cpus {
+            steps.push(ResizeSpec {
+                cpus: Some(cpus),
                 ..Default::default()
             });
         }
@@ -722,6 +725,14 @@ impl Machine {
         let runtime = runtime().map_err(err)?;
         let record = py
             .allow_threads(|| {
+                smolvm::agent::live_resize::check_targets(
+                    &smolvm::db::SmolvmDb::open()?,
+                    &self.name,
+                    cpus,
+                    memory_mib,
+                    storage_gib,
+                    overlay_gib,
+                )?;
                 let mut record = None;
                 for step in steps {
                     record = Some(runtime.resize_machine(&self.name, step)?);

@@ -789,35 +789,28 @@ impl Transport for LocalTransport {
     }
 
     fn resize(&self, resize: &Resize) -> Result<MachineResources> {
-        // The engine applies one resource kind per request.
-        let mut steps: Vec<Vec<String>> = Vec::new();
-        if let Some(cpus) = resize.cpus {
-            steps.push(vec!["--cpus".into(), cpus.to_string()]);
+        // The engine checks every target first, then applies RAM, CPUs and
+        // disks in that order.
+        let mut flags: Vec<String> = Vec::new();
+        for (flag, value) in [
+            ("--cpus", resize.cpus.map(u64::from)),
+            ("--mem", resize.memory_mib.map(u64::from)),
+            ("--storage", resize.storage_gib),
+            ("--overlay", resize.overlay_gib),
+        ] {
+            if let Some(value) = value {
+                flags.extend([flag.to_string(), value.to_string()]);
+            }
         }
-        if let Some(mib) = resize.memory_mib {
-            steps.push(vec!["--mem".into(), mib.to_string()]);
-        }
-        let mut disks = Vec::new();
-        if let Some(gib) = resize.storage_gib {
-            disks.extend(["--storage".to_string(), gib.to_string()]);
-        }
-        if let Some(gib) = resize.overlay_gib {
-            disks.extend(["--overlay".to_string(), gib.to_string()]);
-        }
-        if !disks.is_empty() {
-            steps.push(disks);
-        }
-        if steps.is_empty() {
+        if flags.is_empty() {
             return Err(Error::new(
                 ErrorKind::Config,
                 "resize needs at least one of cpus, memory_mib, storage_gib or overlay_gib",
             ));
         }
-        for step in &steps {
-            let mut args = vec!["machine", "resize", "--name", &self.name];
-            args.extend(step.iter().map(String::as_str));
-            self.run(&args)?;
-        }
+        let mut args = vec!["machine", "resize", "--name", &self.name];
+        args.extend(flags.iter().map(String::as_str));
+        self.run(&args)?;
         let record = self.record()?;
         let number = |key: &str| record.get(key).and_then(serde_json::Value::as_u64);
         Ok(MachineResources {
@@ -1158,7 +1151,7 @@ mod io_tests {
     }
 
     #[test]
-    fn resize_sends_one_resource_kind_per_call_then_reads_the_record() {
+    fn resize_sends_every_target_in_one_call_then_reads_the_record() {
         let dir = tempfile::tempdir().unwrap();
         let log = dir.path().join("calls");
         let transport = cli(
@@ -1196,9 +1189,7 @@ mod io_tests {
         assert_eq!(
             calls,
             [
-                "machine resize --name test --cpus 4",
-                "machine resize --name test --mem 2048",
-                "machine resize --name test --storage 40 --overlay 12",
+                "machine resize --name test --cpus 4 --mem 2048 --storage 40 --overlay 12",
                 "machine ls --json",
             ]
         );
