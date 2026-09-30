@@ -1,7 +1,7 @@
 /** Pure-unit tests — no VM boot, no network. Covers the error-parsing seam and
  *  cloud path encoding, the two places most likely to silently regress. */
 import assert from 'node:assert';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -543,4 +543,18 @@ check('the canonical resources.network is unchanged', () => {
 check('asking for neither leaves network unset', () => {
   assert.strictEqual(resolveNetwork({ image: 'alpine' }), undefined);
   assert.strictEqual(toNativeConfig('m', { image: 'alpine' }).resources, undefined);
+});
+
+// --- bundlers: nothing they can trace may lead into the native addon ---
+// webpack and Turbopack follow every visible require/require.resolve; following
+// ./binding.js reaches the `.node` addon and fails the app's build.
+check('the native loaders make no require a bundler can follow', () => {
+  for (const file of ['native.ts', 'assets.ts', 'runtime-require.ts']) {
+    const source = readFileSync(join(__dirname, '..', file), 'utf8')
+      .split('\n')
+      .filter((line) => !/^\s*(\/\/|\*|\/\*)/.test(line))
+      .join('\n');
+    assert.doesNotMatch(source, /\brequire\s*\(\s*['"]/, `${file} has a literal require()`);
+    assert.doesNotMatch(source, /\brequire\.resolve\s*\(/, `${file} calls require.resolve()`);
+  }
 });

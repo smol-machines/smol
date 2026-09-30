@@ -17,6 +17,8 @@
 import { existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
+import { requireFrom, sdkDir } from './runtime-require';
+
 /** The per-platform npm package that carries the native addon, boot helper,
  *  hypervisor libraries and guest rootfs for each supported
  *  `${process.platform}-${process.arch}`. npm installs only the one matching
@@ -32,11 +34,11 @@ export const PLATFORM_PACKAGES: Readonly<Record<string, string>> = {
 /** `native/` inside the installed platform package, or undefined when it is not
  *  installed (unsupported platform, `--omit=optional`, or a lockfile written on
  *  another platform that dropped it). */
-function platformPackageNativeDir(platformArch: string): string | undefined {
+function platformPackageNativeDir(platformArch: string, dir: string): string | undefined {
   const pkg = PLATFORM_PACKAGES[platformArch];
   if (!pkg) return undefined;
   try {
-    return join(dirname(require.resolve(`${pkg}/package.json`)), 'native');
+    return join(dirname(requireFrom(dir).resolve(`${pkg}/package.json`)), 'native');
   } catch {
     return undefined;
   }
@@ -62,15 +64,19 @@ export function wireBundledAssets(): RuntimeAssets {
   const platformArch = `${process.platform}-${process.arch}`;
   const helperName = process.platform === 'win32' ? 'smol-vmm.exe' : 'smol-vmm';
 
-  // A source checkout / CI build keeps the assets next to the package
-  // (`__dirname` is the package root from source (tsx) and `dist/` when built —
+  // A source checkout / CI build keeps the assets next to the package (the SDK
+  // directory is the package root from source (tsx) and `dist/` when built —
   // check both layouts); a published install gets them from the per-platform
-  // package.
-  const candidates = [
-    join(__dirname, 'native', platformArch),
-    join(__dirname, '..', 'native', platformArch),
-    platformPackageNativeDir(platformArch),
-  ].filter((dir): dir is string => dir !== undefined);
+  // package. `sdkDir()` finds the package on disk even when the SDK's
+  // JavaScript was bundled, where `__dirname` is the bundler's output.
+  const dir = sdkDir();
+  const candidates = dir
+    ? [
+        join(dir, 'native', platformArch),
+        join(dir, '..', 'native', platformArch),
+        platformPackageNativeDir(platformArch, dir),
+      ].filter((d): d is string => d !== undefined)
+    : [];
 
   for (const nativeDir of candidates) {
     if (!existsSync(nativeDir)) continue;
