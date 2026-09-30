@@ -186,6 +186,7 @@ export interface NativeHostAvailability {
 }
 
 import { PLATFORM_PACKAGES, wireBundledAssets, type RuntimeAssets } from "./assets";
+import { requireFrom, sdkDir } from "./runtime-require";
 
 /** Explain a failed addon load in terms of the per-platform package that
  *  carries it. The usual causes are an unsupported platform, an install with
@@ -228,8 +229,11 @@ export function getNapiMachine(): NapiMachineCtor {
     const assets = wireBundledAssets();
     let binding: NativeBinding;
     try {
-      // eslint-disable-next-line @typescript-eslint/no-var-requires
-      binding = require("./binding.js") as NativeBinding;
+      // Loaded through Node's own loader so a bundler never follows it into
+      // the `.node` addon (see runtime-require.ts).
+      const dir = sdkDir();
+      if (!dir) throw new Error("the smolmachines package was not found on disk");
+      binding = requireFrom(dir)("./binding.js") as NativeBinding;
     } catch (error) {
       throw missingPlatformPackageError(error);
     }
