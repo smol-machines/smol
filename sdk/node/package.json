@@ -27,6 +27,11 @@
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./openai-agents": {
+      "types": "./dist/openai-agents.d.ts",
+      "import": "./dist/openai-agents.mjs",
+      "require": "./dist/openai-agents.js"
     }
   },
   "files": [
@@ -45,7 +50,7 @@
   },
   "scripts": {
     "build:native": "napi build --platform --release --js binding.js --dts binding.d.ts",
-    "build:ts": "tsc -p tsconfig.json",
+    "build:ts": "tsc -p tsconfig.json && tsc -p tsconfig.esm.json && node scripts/finalize-esm-entry.mjs",
     "build": "npm run build:native && npm run build:ts && npm run bundle:native",
     "bundle:native": "cp binding.js binding.d.ts *.node dist/ 2>/dev/null || true",
     "test:e2e": "napi build --platform --js binding.js --dts binding.d.ts && tsx test/e2e.ts",
@@ -56,9 +61,26 @@
   },
   "devDependencies": {
     "@napi-rs/cli": "^2.18.4",
+    "@openai/agents-core": "^0.18.0",
     "@types/node": "^20.11.0",
     "openapi-typescript": "^7.13.0",
     "tsx": "^4.19.0",
-    "typescript": "^5.6.0"
+    "typescript": "^5.6.0",
+    "zod": "^4.6.5"
+  },
+  "typesVersions": {
+    "*": {
+      "openai-agents": [
+        "dist/openai-agents.d.ts"
+      ]
+    }
+  },
+  "peerDependencies": {
+    "@openai/agents-core": ">=0.18.0 <0.19.0"
+  },
+  "peerDependenciesMeta": {
+    "@openai/agents-core": {
+      "optional": true
+    }
   }
 }
