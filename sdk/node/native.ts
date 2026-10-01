@@ -173,7 +173,7 @@ export interface NapiMachineCtor {
   new (config: NativeMachineConfig): NapiMachine;
   connect(name: string, interceptorAddress?: string, interceptorToken?: string): NapiMachine;
   list(): Promise<NativeMachineSummary[]>;
-  restoreCheckpoint(name: string, artifact: string): NapiMachine;
+  restoreCheckpoint(name: string, artifact: string, keepIdentity?: boolean): NapiMachine;
   exportCheckpoint(source: string, output: string): number;
   pruneCheckpointStore(store: string): number;
   checkHost(): NativeHostAvailability;

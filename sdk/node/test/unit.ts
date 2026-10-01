@@ -509,6 +509,24 @@ async function finish() {
     }
   });
 
+  await checkAsync('keepIdentity is refused for a cloud restore before any request', async () => {
+    let requested = false;
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = (async () => {
+      requested = true;
+      throw new Error('no request expected');
+    }) as typeof fetch;
+    try {
+      await assert.rejects(
+        Machine.restoreCheckpoint('chk_123', 'restored', { target: 'cloud', apiKey: 'smk_test' }, { keepIdentity: true }),
+        /keepIdentity is local-only/,
+      );
+      assert.strictEqual(requested, false);
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+  });
+
   console.log(`\n${passed} passed, ${failed} failed`);
   if (failed > 0) process.exitCode = 1;
 }

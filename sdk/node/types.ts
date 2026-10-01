@@ -284,6 +284,12 @@ export interface RestoreCheckpointOptions {
    *  The checkpoint must have been taken on the `"virtio-net"` backend for an
    *  allow list or `deny-all`. Local target only. */
   networkPolicy?: NetworkPolicy;
+  /** Restore the machine as itself going back in time rather than as a clone:
+   *  it keeps the hostname and machine ID it was saved with, which skips about
+   *  a second of identity reset on its first start. For rewinding a machine to
+   *  an earlier save point; do not run two machines from one checkpoint with
+   *  it. Local target only. */
+  keepIdentity?: boolean;
 }
 
 /** Per-call execution options. */
