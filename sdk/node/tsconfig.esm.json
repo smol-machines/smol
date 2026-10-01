@@ -1,0 +1,14 @@
+{
+  // The ESM half of the dual-format `smolmachines/openai-agents` entry: an app
+  // that imports @openai/agents as ESM must get the ESM copy of its core, or
+  // class-identity checks such as `instanceof Manifest` fail across copies.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "module": "ES2022",
+    "moduleResolution": "Bundler",
+    "declaration": false,
+    "outDir": "dist/esm"
+  },
+  "include": [],
+  "files": ["openai-agents.ts"]
+}
