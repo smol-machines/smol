@@ -303,11 +303,23 @@ impl NapiMachine {
     }
 
     /// Create a stopped machine from a portable live checkpoint on disk.
+    /// `keep_identity` restores it as the same machine going back in time, so
+    /// its first start skips the identity reset a clone needs.
     #[napi(factory)]
-    pub fn restore_checkpoint(name: String, artifact: String) -> napi::Result<Self> {
+    pub fn restore_checkpoint(
+        name: String,
+        artifact: String,
+        keep_identity: Option<bool>,
+    ) -> napi::Result<Self> {
         runtime()
             .into_napi()?
-            .restore_checkpoint_machine(&name, std::path::Path::new(&artifact))
+            .restore_checkpoint_machine_with(
+                &name,
+                std::path::Path::new(&artifact),
+                smolvm::embedded::RestoreOptions {
+                    keep_identity: keep_identity.unwrap_or(false),
+                },
+            )
             .into_napi()?;
         Ok(Self { name })
     }

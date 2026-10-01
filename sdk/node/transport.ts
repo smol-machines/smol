@@ -2031,7 +2031,7 @@ export async function restoreCheckpointTransport(
     try {
       const handleSignals = conn.handleSignals ?? true;
       restored = new LocalTransport(
-        getNapiMachine().restoreCheckpoint(name, path),
+        getNapiMachine().restoreCheckpoint(name, path, options?.keepIdentity),
         handleSignals,
         undefined,
         handleSignals,
@@ -2045,6 +2045,11 @@ export async function restoreCheckpointTransport(
       if (restored) await restored.delete().catch(() => {});
       throw wrapNativeError(error);
     }
+  }
+  if (options?.keepIdentity) {
+    throw new InvalidConfigError(
+      "keepIdentity is local-only: a cloud restore always gives the new machine its own identity.",
+    );
   }
   const explicitKey = conn.apiKey ?? process.env.SMOL_CLOUD_TOKEN;
   const { apiKey: cliKey, endpoint: cliUrl } = cliSession(conn.target);

@@ -219,7 +219,7 @@ export declare class NapiMachine {
    */
   static connect(name: string, interceptorAddress?: string | undefined | null, interceptorToken?: string | undefined | null): NapiMachine
   /** Create a stopped machine from a portable live checkpoint on disk. */
-  static restoreCheckpoint(name: string, artifact: string): NapiMachine
+  static restoreCheckpoint(name: string, artifact: string, keepIdentity?: boolean | undefined | null): NapiMachine
   /** Export a stored checkpoint directory as one portable checkpoint file. */
   static exportCheckpoint(source: string, output: string): number
   /** Remove objects that no retained checkpoint in a local store references. */
