@@ -842,6 +842,28 @@ const NO_PORT_READY_PROBE_GRACE_MS = 2_000;
  *  the client never aborts before the server has had a chance to finish. */
 const CLOUD_EXEC_TIMEOUT_HEADROOM_MS = 30_000;
 
+/** The sentence a person should read from a failed response's body. The
+ *  control plane answers errors as RFC 9457 problem+json, whose `detail` is the
+ *  sentence; older builds sent `{"error": …}` or plain text. A JSON object
+ *  yields its first string among detail, error, message and title, so a message
+ *  never pastes JSON; anything else is returned trimmed, as before. */
+export function errorSentence(body: string): string {
+  const trimmed = body.trim();
+  try {
+    const parsed: unknown = JSON.parse(trimmed);
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      const fields = parsed as Record<string, unknown>;
+      for (const key of ["detail", "error", "message", "title"]) {
+        const value = fields[key];
+        if (typeof value === "string") return value.trim();
+      }
+    }
+  } catch {
+    // Not JSON: the text is the message.
+  }
+  return trimmed;
+}
+
 /** Percent-encode each path segment but keep the `/` separators — the smolfleet
  *  files route is a wildcard (`/files/<path>`), so slashes are meaningful while
  *  spaces/?/#/% in a filename must be escaped. */
@@ -908,7 +930,7 @@ async function cloudFetch<T = unknown>(
     opts.signal?.removeEventListener("abort", onAbort);
   }
   if (!res.ok) {
-    const text = await res.text().catch(() => "");
+    const text = errorSentence(await res.text().catch(() => ""));
     // Surface the server's correlation id (every response carries `x-request-id`)
     // in the error message — clients see the error body but not headers, so
     // without this the id is invisible and support can't correlate the call.
@@ -1229,7 +1251,7 @@ class CloudTransport implements Transport {
       );
     }
     if (!res.ok) {
-      const text = await res.text().catch(() => "");
+      const text = errorSentence(await res.text().catch(() => ""));
       const rid = res.headers.get("x-request-id");
       throw new SmolError(
         res.status === 404

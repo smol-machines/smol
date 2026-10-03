@@ -658,8 +658,9 @@ fn status_error(
     text: &str,
 ) -> Error {
     let mut message = format!("{method} {path} → {status}");
-    if !text.is_empty() {
-        message.push_str(&format!(": {text}"));
+    let sentence = crate::error::body_sentence(text);
+    if !sentence.is_empty() {
+        message.push_str(&format!(": {sentence}"));
     }
     Error::new(ErrorKind::from_status(status.as_u16()), message)
 }
@@ -861,6 +862,46 @@ fn sse_event(kind: &str, data: &str) -> Option<StreamEvent> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_status_error_shows_the_sentence_not_the_problem_json() {
+        let post = reqwest::Method::POST;
+        let problem = r#"{"type":"about:blank","title":"Payment Required","status":402,"detail":"this organization has no credit yet","code":"payment_required"}"#;
+        let err = status_error(
+            reqwest::StatusCode::PAYMENT_REQUIRED,
+            &post,
+            "/v1/machines",
+            problem,
+        );
+        assert_eq!(
+            err.message(),
+            "POST /v1/machines → 402 Payment Required: this organization has no credit yet"
+        );
+        let old = r#"{"error":"API key has expired","code":"expired_key"}"#;
+        let err = status_error(
+            reqwest::StatusCode::UNAUTHORIZED,
+            &post,
+            "/v1/machines",
+            old,
+        );
+        assert_eq!(
+            err.message(),
+            "POST /v1/machines → 401 Unauthorized: API key has expired"
+        );
+        assert_eq!(err.kind(), ErrorKind::from_status(401));
+        let text = status_error(
+            reqwest::StatusCode::CONFLICT,
+            &post,
+            "/v1/machines",
+            "name taken",
+        );
+        assert_eq!(
+            text.message(),
+            "POST /v1/machines → 409 Conflict: name taken"
+        );
+        let empty = status_error(reqwest::StatusCode::BAD_GATEWAY, &post, "/v1/machines", "");
+        assert_eq!(empty.message(), "POST /v1/machines → 502 Bad Gateway");
+    }
 
     #[test]
     fn a_files_path_keeps_its_separators_and_escapes_the_rest() {

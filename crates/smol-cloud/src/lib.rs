@@ -35,4 +35,4 @@ pub mod error;
 pub mod types;
 
 pub use credentials::{CliSession, Credentials, DEFAULT_BASE_URL};
-pub use error::{Error, ErrorKind, Result};
+pub use error::{body_sentence, Error, ErrorKind, Result};
