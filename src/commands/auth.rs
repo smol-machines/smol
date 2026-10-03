@@ -41,11 +41,11 @@ impl AuthCmd {
     }
 }
 
-/// Default OIDC issuer for smolmachines.
-const DEFAULT_ISSUER: &str = "https://smolmachines.us.auth0.com";
+/// Default OIDC issuer for smolmachines, shared with the SDKs that renew the session.
+const DEFAULT_ISSUER: &str = smol_cloud::credentials::DEFAULT_ISSUER;
 
 /// OAuth client ID for the smol CLI (public client, no secret).
-const CLIENT_ID: &str = "Df3M6TXvVVMmTTzfyo0mjaLl9rhaI7nZ";
+const CLIENT_ID: &str = smol_cloud::credentials::CLIENT_ID;
 
 /// Scopes requested during device flow. Includes the smolfleet machine/feature
 /// scopes so a `smol auth login` token can actually drive the cloud — without them
@@ -67,7 +67,7 @@ const SCOPES: &str = "openid offline_access \
 const AUDIENCE: &str = "https://api.smolmachines.com";
 
 /// Environment variable to override the OIDC issuer.
-const OIDC_ISSUER_ENV: &str = "OIDC_ISSUER";
+const OIDC_ISSUER_ENV: &str = smol_cloud::credentials::ISSUER_ENV;
 
 // ============================================================================
 // Device Flow

@@ -62,30 +62,10 @@ where
 pub fn cloud_client() -> Result<(reqwest::Client, CloudSection)> {
     let mut settings = SmolSettings::load()?;
 
-    // Attempt token refresh if expired
     if settings.cloud.is_token_expired() {
         tracing::debug!("cloud token expired, attempting silent refresh");
-        if let Some(ref refresh_token) = settings.cloud.refresh_token.clone() {
-            match try_refresh(refresh_token) {
-                Ok(new_tokens) => {
-                    // The smolmachines JWT lives in two places ([cloud] and the
-                    // smolmachines registry entry under [machines]). Update both
-                    // atomically; otherwise one side silently expires on next use.
-                    auth::apply_refreshed_smolmachines_tokens(&mut settings, &new_tokens);
-                    let _ = settings.save();
-                    tracing::info!("cloud token refreshed");
-                    eprintln!("(token refreshed)");
-                }
-                Err(e) => {
-                    anyhow::bail!(
-                        "Session expired and refresh failed: {}. Run `smol auth login` to re-authenticate.",
-                        e
-                    );
-                }
-            }
-        } else {
-            anyhow::bail!("Session expired. Run `smol auth login` to re-authenticate.");
-        }
+        renew_cloud_session(&mut settings)?;
+        eprintln!("(token refreshed)");
     }
 
     let mut headers = reqwest::header::HeaderMap::new();
@@ -214,6 +194,28 @@ pub async fn list_machines(http: &reqwest::Client, endpoint: &str) -> Result<Vec
     let machines: Vec<CloudMachine> = resp.json().await?;
     tracing::debug!(count = machines.len(), "cloud response: machines listed");
     Ok(machines)
+}
+
+/// Trade the stored refresh token for a new session and save it.
+///
+/// The smolmachines JWT lives in two places ([cloud] and the smolmachines
+/// registry entry under [machines]); both are updated together, otherwise one
+/// side silently expires on next use. Must run outside any tokio runtime, like
+/// [`try_refresh`].
+pub fn renew_cloud_session(settings: &mut SmolSettings) -> Result<()> {
+    let Some(refresh_token) = settings.cloud.refresh_token.clone() else {
+        anyhow::bail!("Session expired. Run `smol auth login` to re-authenticate.");
+    };
+    let new_tokens = try_refresh(&refresh_token).map_err(|e| {
+        anyhow::anyhow!(
+            "Session expired and refresh failed: {}. Run `smol auth login` to re-authenticate.",
+            e
+        )
+    })?;
+    auth::apply_refreshed_smolmachines_tokens(settings, &new_tokens);
+    let _ = settings.save();
+    tracing::info!("cloud token refreshed");
+    Ok(())
 }
 
 /// Attempt a synchronous token refresh using a short-lived tokio runtime.
