@@ -97,5 +97,51 @@ impl fmt::Display for Error {
 
 impl std::error::Error for Error {}
 
+/// The sentence a person should read from a failed response's body.
+///
+/// The control plane answers errors as RFC 9457 `application/problem+json`,
+/// whose `detail` is the sentence; older builds sent `{"error": …}` or plain
+/// text. Pasting the body whole would show JSON, so a JSON object yields its
+/// first string among `detail`, `error`, `message` and `title`, and anything
+/// else is returned trimmed, as before.
+pub fn body_sentence(body: &str) -> String {
+    let trimmed = body.trim();
+    if let Ok(serde_json::Value::Object(fields)) = serde_json::from_str(trimmed) {
+        for key in ["detail", "error", "message", "title"] {
+            if let Some(serde_json::Value::String(sentence)) = fields.get(key) {
+                return sentence.trim().to_string();
+            }
+        }
+    }
+    trimmed.to_string()
+}
+
 /// This crate's result alias.
 pub type Result<T> = std::result::Result<T, Error>;
+
+#[cfg(test)]
+mod tests {
+    use super::body_sentence;
+
+    #[test]
+    fn a_problem_document_yields_its_detail() {
+        let body = r#"{"type":"about:blank","title":"Payment Required","status":402,"detail":"this organization has no credit yet","code":"payment_required"}"#;
+        assert_eq!(body_sentence(body), "this organization has no credit yet");
+    }
+
+    #[test]
+    fn the_older_error_shape_and_plain_text_still_read() {
+        assert_eq!(
+            body_sentence(r#"{"error":"API key has expired","code":"expired_key"}"#),
+            "API key has expired"
+        );
+        assert_eq!(
+            body_sentence("machine count quota exceeded\n"),
+            "machine count quota exceeded"
+        );
+        // JSON with no sentence field, and text that only looks like JSON, pass through.
+        assert_eq!(body_sentence(r#"{"code":"x"}"#), r#"{"code":"x"}"#);
+        assert_eq!(body_sentence("{not json"), "{not json");
+        assert_eq!(body_sentence("  "), "");
+    }
+}

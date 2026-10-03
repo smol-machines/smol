@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { wrapNativeError, SmolError } from '../errors';
 import { adapterSha256, RolloutClient } from '../rollout';
-import { cliConfigApiKey, egressPolicy, encodePath, resolveNetwork, selectsCloud, toNativeConfig } from '../transport';
+import { cliConfigApiKey, egressPolicy, encodePath, errorSentence, resolveNetwork, selectsCloud, toNativeConfig } from '../transport';
 import { wireDefaultHardening } from '../assets';
 import { Machine } from '../machine';
 
@@ -575,4 +575,27 @@ check('the native loaders make no require a bundler can follow', () => {
     assert.doesNotMatch(source, /\brequire\s*\(\s*['"]/, `${file} has a literal require()`);
     assert.doesNotMatch(source, /\brequire\.resolve\s*\(/, `${file} calls require.resolve()`);
   }
+});
+
+// --- cloud errors: show the problem+json sentence, never the JSON ---
+check('a problem+json body reads as its detail', () => {
+  const body = JSON.stringify({
+    type: 'about:blank',
+    title: 'Payment Required',
+    status: 402,
+    detail: 'this organization has no credit yet',
+    code: 'payment_required',
+  });
+  assert.strictEqual(errorSentence(body), 'this organization has no credit yet');
+});
+
+check('the older error shape, plain text and empty bodies still read', () => {
+  assert.strictEqual(
+    errorSentence(JSON.stringify({ error: 'API key has expired', code: 'expired_key' })),
+    'API key has expired',
+  );
+  assert.strictEqual(errorSentence('machine count quota exceeded\n'), 'machine count quota exceeded');
+  assert.strictEqual(errorSentence('{not json'), '{not json');
+  assert.strictEqual(errorSentence(JSON.stringify({ code: 'x' })), '{"code":"x"}');
+  assert.strictEqual(errorSentence(''), '');
 });

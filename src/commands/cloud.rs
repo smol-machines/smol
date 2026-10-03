@@ -140,11 +140,12 @@ pub async fn check_response(resp: reqwest::Response, context: &str) -> Result<re
         return Ok(resp);
     }
     let status = resp.status();
-    let body = resp.text().await.unwrap_or_default();
-    let detail = if body.trim().is_empty() {
+    // The sentence from a problem+json body, not the JSON itself.
+    let sentence = smol_cloud::body_sentence(&resp.text().await.unwrap_or_default());
+    let detail = if sentence.is_empty() {
         String::new()
     } else {
-        format!(": {}", body.trim())
+        format!(": {sentence}")
     };
     match status.as_u16() {
         401 => anyhow::bail!(
@@ -225,6 +226,58 @@ fn try_refresh(refresh_token: &str) -> Result<auth::TokenResponse> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Serve one raw HTTP response on a local port and hand back what
+    /// `check_response` makes of it.
+    async fn checked(status: &str, content_type: &str, body: &str) -> String {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let reply = format!(
+            "HTTP/1.1 {status}\r\ncontent-type: {content_type}\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+            body.len()
+        );
+        tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut request = [0u8; 1024];
+            let _ = socket.read(&mut request).await;
+            socket.write_all(reply.as_bytes()).await.unwrap();
+        });
+        let resp = reqwest::get(format!("http://{addr}/v1/machines"))
+            .await
+            .unwrap();
+        check_response(resp, "create machine")
+            .await
+            .unwrap_err()
+            .to_string()
+    }
+
+    #[tokio::test]
+    async fn a_problem_body_reads_as_its_sentence() {
+        let problem = r#"{"type":"about:blank","title":"Payment Required","status":402,"detail":"this organization has no credit yet","code":"payment_required"}"#;
+        assert_eq!(
+            checked("402 Payment Required", "application/problem+json", problem).await,
+            "create machine: request failed (402 Payment Required): this organization has no credit yet."
+        );
+        assert_eq!(
+            checked(
+                "401 Unauthorized",
+                "application/json",
+                r#"{"error":"API key has expired","code":"expired_key"}"#
+            )
+            .await,
+            "create machine: not authenticated (401 Unauthorized): API key has expired. \
+             Run `smol auth login` to re-authenticate."
+        );
+        assert_eq!(
+            checked("409 Conflict", "text/plain", "name taken").await,
+            "create machine: request failed (409 Conflict): name taken."
+        );
+        assert_eq!(
+            checked("502 Bad Gateway", "text/plain", "").await,
+            "create machine: control plane error (502 Bad Gateway)."
+        );
+    }
 
     /// Documents a load-bearing constraint: `try_refresh` (and the
     /// `cloud_client()` path that calls it) must NOT be invoked from inside
