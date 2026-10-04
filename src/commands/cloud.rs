@@ -124,6 +124,16 @@ pub fn cloud_api() -> Result<smol_cloud::blocking::Client> {
 
 /// Upload a local `.checkpoint` file to the cloud, showing progress on stderr.
 pub fn upload_checkpoint_file(path: &std::path::Path) -> Result<PortableCheckpoint> {
+    upload_checkpoint_named(path, &path.display().to_string(), None)
+}
+
+/// Upload a checkpoint file, calling it `label` in the progress line and
+/// naming the image its machine was created from when that is known.
+pub fn upload_checkpoint_named(
+    path: &std::path::Path,
+    label: &str,
+    image: Option<&str>,
+) -> Result<PortableCheckpoint> {
     if !path.is_file() {
         anyhow::bail!(
             "{} is not a checkpoint file (a --store checkpoint is a directory; export it first with `smol machine checkpoint --export-from`)",
@@ -134,13 +144,12 @@ pub fn upload_checkpoint_file(path: &std::path::Path) -> Result<PortableCheckpoi
     let gib = |bytes: u64| bytes as f64 / (1024.0 * 1024.0 * 1024.0);
     let mut shown = None;
     let checkpoint = client
-        .upload_checkpoint(path, &mut |sent, total| {
+        .upload_checkpoint_of_image(path, image, &mut |sent, total| {
             let percent = (sent * 100).checked_div(total).unwrap_or(100);
             if shown != Some(percent) {
                 shown = Some(percent);
                 eprint!(
-                    "\rUploading {} {percent:>3}% ({:.2}/{:.2} GiB)",
-                    path.display(),
+                    "\rUploading {label} {percent:>3}% ({:.2}/{:.2} GiB)",
                     gib(sent),
                     gib(total)
                 );
