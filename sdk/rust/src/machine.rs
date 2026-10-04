@@ -558,6 +558,61 @@ impl Machine {
         Ok(Self::from_transport(Box::new(transport)))
     }
 
+    /// Upload a `.checkpoint` file taken on this computer, such as one from
+    /// [`Machine::checkpoint`], so it can be restored in the cloud with
+    /// [`Machine::restore_cloud_checkpoint`]. Returns the cloud checkpoint id.
+    ///
+    /// The bytes go straight to object storage; the cloud then reads the
+    /// checkpoint's own manifest and refuses a file it cannot run.
+    pub fn upload_checkpoint(
+        artifact: impl AsRef<Path>,
+        connect: &ConnectOptions,
+    ) -> Result<String> {
+        if connect.target() != Target::Cloud {
+            return Err(Error::new(
+                ErrorKind::NotSupported,
+                "uploading a checkpoint is a cloud operation; connect with the cloud target",
+            ));
+        }
+        let client = connect.client()?;
+        Ok(client
+            .upload_checkpoint(artifact.as_ref(), &mut |_, _| {})?
+            .id)
+    }
+
+    /// Resume a checkpoint file taken on this computer as a running cloud
+    /// machine: upload it, restore it with outbound network access when
+    /// `network` is set, start it and wait for it.
+    pub fn restore_checkpoint_in_cloud(
+        name: impl Into<String>,
+        artifact: impl AsRef<Path>,
+        connect: &ConnectOptions,
+        network: bool,
+    ) -> Result<Self> {
+        let checkpoint = Self::upload_checkpoint(artifact, connect)?;
+        let name = name.into();
+        let client = connect.client()?;
+        let policy = smol_cloud::types::Network {
+            mode: Some(if network { "open" } else { "blocked" }.to_string()),
+            cidrs: Vec::new(),
+            hosts: Vec::new(),
+        };
+        let restored = client.restore_checkpoint_with_network(&checkpoint, &name, &policy)?;
+        let transport = crate::transport::cloud::CloudTransport::new(
+            client.clone(),
+            restored.display_name(),
+            restored.id.clone(),
+        );
+        if let Err(error) = client
+            .start(&restored.id, false)
+            .and_then(|()| client.wait_until_ready(&restored.id, READY_TIMEOUT, READY_INTERVAL))
+        {
+            let _ = client.delete(&restored.id);
+            return Err(error.into());
+        }
+        Ok(Self::from_transport(Box::new(transport)))
+    }
+
     /// The machine's name.
     pub fn name(&self) -> &str {
         self.transport.name()

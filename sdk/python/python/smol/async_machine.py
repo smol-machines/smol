@@ -93,12 +93,22 @@ class AsyncMachine:
         checkpoint_id: str,
         name: str,
         conn: Optional[ConnectOptions] = None,
+        network: Optional[bool] = None,
     ) -> "AsyncMachine":
-        """Restore a local artifact or durable cloud checkpoint and await readiness."""
+        """Restore a local artifact or durable cloud checkpoint and await readiness.
+        With a cloud target, a local checkpoint file is uploaded first."""
         machine = await asyncio.to_thread(
-            Machine.restore_checkpoint, checkpoint_id, name, conn
+            Machine.restore_checkpoint, checkpoint_id, name, conn, network
         )
         return cls(machine)
+
+    @staticmethod
+    async def upload_checkpoint(
+        path: str,
+        conn: Optional[ConnectOptions] = None,
+    ) -> dict:
+        """Upload a ``.checkpoint`` file taken on this computer to the cloud."""
+        return await asyncio.to_thread(Machine.upload_checkpoint, path, conn)
 
     @classmethod
     async def restore(

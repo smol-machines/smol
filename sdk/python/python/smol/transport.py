@@ -2040,12 +2040,143 @@ def connect_transport(machine_id: str, conn: Optional[ConnectOptions] = None) ->
     return CloudTransport(base_url, api_key, str(m.get("id", machine_id)), str(m.get("name", machine_id)))
 
 
+_UPLOAD_PARALLELISM = 4
+_UPLOAD_PART_ATTEMPTS = 4
+
+
+class _PartReader:
+    """Reads one slice of a file for an upload request, counting bytes sent."""
+
+    def __init__(self, path: str, start: int, length: int, on_read: Callable[[int], None]):
+        self._file = open(path, "rb")
+        self._file.seek(start)
+        self._left = length
+        self._on_read = on_read
+
+    def read(self, size: int = -1) -> bytes:
+        if self._left <= 0:
+            return b""
+        if size < 0 or size > self._left:
+            size = self._left
+        chunk = self._file.read(size)
+        self._left -= len(chunk)
+        self._on_read(len(chunk))
+        return chunk
+
+    def close(self) -> None:
+        self._file.close()
+
+
+def _put_part(url: str, path: str, start: int, length: int, on_read: Callable[[int], None]) -> None:
+    reader = _PartReader(path, start, length, on_read)
+    try:
+        req = urllib.request.Request(
+            url, data=reader, method="PUT", headers={"content-length": str(length)}
+        )
+        with urllib.request.urlopen(req, timeout=6 * 60 * 60) as resp:
+            resp.read()
+    except urllib.error.HTTPError as e:
+        body = e.read().decode(errors="replace")[:300]
+        raise SmolError("CONNECTION", f"upload part at byte {start} failed: {e.code} {body}") from e
+    except urllib.error.URLError as e:
+        raise SmolError("CONNECTION", f"upload part at byte {start} failed: {e.reason}") from e
+    finally:
+        reader.close()
+
+
+def _cloud_upload_checkpoint(
+    base_url: str,
+    api_key: str,
+    path: str,
+    on_progress: Optional[Callable[[int, int], None]] = None,
+) -> dict:
+    """Upload a checkpoint file straight to object storage in parallel parts,
+    then have the control plane read its manifest and make it restorable."""
+    size = os.path.getsize(path)
+    upload = _cloud_fetch(base_url, api_key, "POST", "/v1/checkpoints", json_body={"sizeBytes": size})
+    urls = upload["uploadUrls"]
+    part_size = int(upload["partSizeBytes"])
+    sent = [0] * len(urls)
+    lock = threading.Lock()
+    errors: list = []
+    next_part = [0]
+
+    def worker() -> None:
+        while True:
+            with lock:
+                if errors or next_part[0] >= len(urls):
+                    return
+                part = next_part[0]
+                next_part[0] += 1
+            start = part * part_size
+            length = min(part_size, size - start)
+            for attempt in range(_UPLOAD_PART_ATTEMPTS):
+                sent[part] = 0
+
+                def count(n: int, part: int = part) -> None:
+                    sent[part] += n
+
+                try:
+                    _put_part(urls[part], path, start, length, count)
+                    break
+                except Exception as e:  # noqa: BLE001 - retried, then surfaced
+                    if attempt + 1 >= _UPLOAD_PART_ATTEMPTS:
+                        with lock:
+                            errors.append(e)
+                        return
+                    time.sleep(2 * 2**attempt)
+
+    threads = [threading.Thread(target=worker, daemon=True) for _ in range(min(_UPLOAD_PARALLELISM, len(urls)))]
+    for t in threads:
+        t.start()
+    while any(t.is_alive() for t in threads):
+        if on_progress is not None:
+            on_progress(min(sum(sent), size), size)
+        time.sleep(0.25)
+    if errors:
+        raise errors[0]
+    if on_progress is not None:
+        on_progress(size, size)
+    checkpoint_id = quote(str(upload["checkpoint"]["id"]), safe="")
+    return _cloud_fetch(
+        base_url, api_key, "POST", f"/v1/checkpoints/{checkpoint_id}/complete", timeout=30 * 60
+    )
+
+
+def _cloud_credentials(conn: ConnectOptions, operation: str) -> tuple:
+    explicit_key = conn.api_key or os.environ.get("SMOL_CLOUD_TOKEN")
+    cli_key, cli_url = _cli_session()
+    api_key = explicit_key or cli_key or _cli_config_api_key()
+    if not api_key:
+        raise InvalidConfigError(f"{operation} requires an api_key — {_NO_KEY_HINT}.")
+    base_url = (
+        conn.base_url or os.environ.get("SMOL_CLOUD_URL") or cli_url or DEFAULT_CLOUD_URL
+    ).rstrip("/")
+    return base_url, api_key
+
+
+def upload_checkpoint(
+    path: str,
+    conn: Optional[ConnectOptions] = None,
+    on_progress: Optional[Callable[[int, int], None]] = None,
+) -> dict:
+    """Upload a ``.checkpoint`` file taken on this computer so it can be
+    restored in the cloud. Returns the checkpoint as the cloud describes it."""
+    base_url, api_key = _cloud_credentials(conn or ConnectOptions(target="cloud"), "upload_checkpoint")
+    return _cloud_upload_checkpoint(base_url, api_key, os.path.abspath(os.fspath(path)), on_progress)
+
+
 def restore_checkpoint_transport(
     checkpoint_id: str,
     name: str,
     conn: Optional[ConnectOptions] = None,
+    network: Optional[bool] = None,
 ) -> Transport:
-    """Restore one local artifact or durable cloud checkpoint and return it ready."""
+    """Restore one local artifact or durable cloud checkpoint and return it ready.
+
+    With a cloud target, a checkpoint file on this computer is uploaded first.
+    ``network`` opens or blocks a cloud machine's network (blocked when unset).
+    """
     if not checkpoint_id or not name:
         raise InvalidConfigError("checkpoint id and restored machine name are required.")
     if conn is None:
@@ -2078,25 +2209,20 @@ def restore_checkpoint_transport(
             if isinstance(e, Exception):
                 raise wrap_native_error(e) from e
             raise
-    cli_key, cli_url = _cli_session()
-    api_key = explicit_key or cli_key or _cli_config_api_key()
-    if not api_key:
-        raise InvalidConfigError(
-            f"restore_checkpoint requires an api_key — {_NO_KEY_HINT}."
-        )
-    base_url = (
-        conn.base_url
-        or os.environ.get("SMOL_CLOUD_URL")
-        or cli_url
-        or DEFAULT_CLOUD_URL
-    ).rstrip("/")
+    base_url, api_key = _cloud_credentials(conn, "restore_checkpoint")
+    if os.path.isfile(os.fspath(checkpoint_id)):
+        uploaded = _cloud_upload_checkpoint(base_url, api_key, os.path.abspath(os.fspath(checkpoint_id)))
+        checkpoint_id = str(uploaded["id"])
     checkpoint_path = quote(checkpoint_id, safe="")
+    body: dict = {"name": name}
+    if network is not None:
+        body["network"] = {"mode": "open" if network else "blocked"}
     created = _cloud_fetch(
         base_url,
         api_key,
         "POST",
         f"/v1/checkpoints/{checkpoint_path}/restore",
-        json_body={"name": name},
+        json_body=body,
     ) or {}
     machine_id = str(created["id"])
     try:

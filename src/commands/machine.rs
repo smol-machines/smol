@@ -90,6 +90,9 @@ pub enum MachineSubcommand {
     /// Restore a portable rollback point as a running fork source
     Restore(crate::commands::restore::RestoreCmd),
 
+    /// Move a running local machine to Smol Cloud, processes and all
+    Move(crate::commands::move_machine::MoveCmd),
+
     // --- maintenance / introspection --------------------------------------
     /// List a machine's cached images and storage usage
     Images(crate::commands::images::ImagesCmd),
@@ -146,6 +149,7 @@ impl MachineCmd {
             MachineSubcommand::Branch(cmd) => cmd.run(),
             MachineSubcommand::BranchBatch(cmd) => cmd.run(),
             MachineSubcommand::Checkpoint(cmd) => cmd.run(),
+            MachineSubcommand::Move(cmd) => cmd.run(),
             MachineSubcommand::CheckpointPrune(cmd) => cmd.run(),
             MachineSubcommand::Restore(cmd) => cmd.run(),
             // maintenance

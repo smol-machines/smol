@@ -109,6 +109,57 @@ pub fn cloud_client() -> Result<(reqwest::Client, CloudSection)> {
     Ok((client, settings.cloud))
 }
 
+/// A synchronous cloud API client signed in the same way as the rest of the
+/// CLI (refreshing an expired session first).
+pub fn cloud_api() -> Result<smol_cloud::blocking::Client> {
+    let (_, cloud) = cloud_client()?;
+    let key = cloud
+        .api_key
+        .clone()
+        .filter(|key| !key.is_empty())
+        .ok_or_else(|| anyhow::anyhow!("Not signed in. Run `smol auth login`."))?;
+    let credentials = smol_cloud::Credentials::new(cloud.endpoint()?.to_string(), key);
+    Ok(smol_cloud::blocking::Client::new(credentials)?)
+}
+
+/// Upload a local `.checkpoint` file to the cloud, showing progress on stderr.
+pub fn upload_checkpoint_file(path: &std::path::Path) -> Result<PortableCheckpoint> {
+    if !path.is_file() {
+        anyhow::bail!(
+            "{} is not a checkpoint file (a --store checkpoint is a directory; export it first with `smol machine checkpoint --export-from`)",
+            path.display()
+        );
+    }
+    let client = cloud_api()?;
+    let gib = |bytes: u64| bytes as f64 / (1024.0 * 1024.0 * 1024.0);
+    let mut shown = None;
+    let checkpoint = client
+        .upload_checkpoint(path, &mut |sent, total| {
+            let percent = (sent * 100).checked_div(total).unwrap_or(100);
+            if shown != Some(percent) {
+                shown = Some(percent);
+                eprint!(
+                    "\rUploading {} {percent:>3}% ({:.2}/{:.2} GiB)",
+                    path.display(),
+                    gib(sent),
+                    gib(total)
+                );
+            }
+        })
+        .with_context(|| format!("upload {}", path.display()))?;
+    eprintln!();
+    Ok(checkpoint)
+}
+
+/// The body of a checkpoint restore, opening the network when asked.
+pub fn restore_body(name: &str, net: bool) -> serde_json::Value {
+    if net {
+        serde_json::json!({ "name": name, "network": { "mode": "open" } })
+    } else {
+        serde_json::json!({ "name": name })
+    }
+}
+
 /// Resolve a machine name or ID to an ID.
 ///
 /// Tries exact ID match first, then name match. This lets users pass either
@@ -576,6 +627,15 @@ pub enum CloudCheckpointSubcommand {
         /// Name for the restored machine.
         #[arg(short, long)]
         name: String,
+        /// Give the restored machine outbound network access (blocked by default).
+        #[arg(long)]
+        net: bool,
+    },
+    /// Upload a `.checkpoint` file taken on this computer so it can be
+    /// restored in the cloud.
+    Upload {
+        /// The `.checkpoint` file, e.g. from `smol machine checkpoint`.
+        file: std::path::PathBuf,
     },
     /// Delete an unused portable checkpoint.
     Rm {
@@ -861,6 +921,15 @@ fn print_checkpoint(checkpoint: &PortableCheckpoint) {
 }
 
 fn checkpoint(args: CloudCheckpointArgs) -> Result<()> {
+    if let CloudCheckpointSubcommand::Upload { file } = &args.command {
+        let checkpoint = upload_checkpoint_file(file)?;
+        print_checkpoint(&checkpoint);
+        println!(
+            "Restore it with: smol cloud checkpoint restore {} --name <name> --net",
+            checkpoint.id
+        );
+        return Ok(());
+    }
     let (http, cloud_config) = cloud_client()?;
     let endpoint = cloud_config.endpoint()?.to_string();
     tokio::runtime::Runtime::new()?.block_on(async move {
@@ -936,10 +1005,17 @@ fn checkpoint(args: CloudCheckpointArgs) -> Result<()> {
                     .with_context(|| format!("publish {}", output.display()))?;
                 println!("Downloaded {}", output.display());
             }
-            CloudCheckpointSubcommand::Restore { checkpoint, name } => {
+            CloudCheckpointSubcommand::Upload { .. } => {
+                unreachable!("uploads run before the async runtime starts")
+            }
+            CloudCheckpointSubcommand::Restore {
+                checkpoint,
+                name,
+                net,
+            } => {
                 let response = http
                     .post(format!("{endpoint}/v1/checkpoints/{checkpoint}/restore"))
-                    .json(&serde_json::json!({ "name": name }))
+                    .json(&restore_body(&name, net))
                     .send()
                     .await?;
                 let machine: CloudMachine = check_response(response, "restore checkpoint")

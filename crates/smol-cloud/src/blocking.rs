@@ -13,7 +13,8 @@ use serde::de::DeserializeOwned;
 use crate::credentials::Credentials;
 use crate::error::{Error, ErrorKind, Result};
 use crate::types::{
-    BranchBatch, Checkpoint, Command, CommandOutput, CreateMachine, Machine, Port, Share, Usage,
+    BranchBatch, Checkpoint, CheckpointUpload, Command, CommandOutput, CreateMachine, Machine,
+    Network, Port, Share, Usage,
 };
 
 /// Ordinary calls are short: a hung request must not block a caller forever.
@@ -22,6 +23,12 @@ pub const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 pub const START_TIMEOUT: Duration = Duration::from_secs(30 * 60);
 /// Capture can take minutes on a large machine.
 pub const CHECKPOINT_TIMEOUT: Duration = Duration::from_secs(30 * 60);
+/// Parts of a checkpoint upload in flight at once.
+const UPLOAD_PARALLELISM: usize = 4;
+/// Tries per part before an upload gives up.
+const UPLOAD_PART_ATTEMPTS: u32 = 4;
+/// One part is at most a few GiB; allow for a slow home uplink.
+const UPLOAD_PART_TIMEOUT: Duration = Duration::from_secs(6 * 60 * 60);
 /// Grace before the agent probe stands in for `ready`, so the flag keeps first
 /// refusal and the probe never preempts a machine about to flip.
 const NO_PORT_PROBE_GRACE: Duration = Duration::from_secs(2);
@@ -547,6 +554,161 @@ impl Client {
         )
     }
 
+    /// Create a machine from a stored capture with a network policy. Without
+    /// one the control plane restores it with networking blocked.
+    pub fn restore_checkpoint_with_network(
+        &self,
+        checkpoint_id: &str,
+        name: &str,
+        network: &Network,
+    ) -> Result<Machine> {
+        self.json(
+            reqwest::Method::POST,
+            &format!("/v1/checkpoints/{}/restore", encode_path(checkpoint_id)),
+            Body::Json(serde_json::json!({ "name": name, "network": network })),
+            CHECKPOINT_TIMEOUT,
+        )
+    }
+
+    /// Upload a `.checkpoint` file captured outside the cloud, such as a
+    /// machine checkpointed on a laptop, and make it restorable.
+    ///
+    /// The bytes go straight to object storage in parallel parts, never
+    /// through the control plane. `on_progress` is called with the bytes sent
+    /// so far and the total. The control plane then reads the checkpoint's
+    /// own manifest; a file that is not a restorable checkpoint is refused.
+    pub fn upload_checkpoint(
+        &self,
+        path: &std::path::Path,
+        on_progress: &mut dyn FnMut(u64, u64),
+    ) -> Result<Checkpoint> {
+        let size = std::fs::metadata(path)
+            .map_err(|e| Error::new(ErrorKind::Other, format!("read {}: {e}", path.display())))?
+            .len();
+        let upload: CheckpointUpload = self.json(
+            reqwest::Method::POST,
+            "/v1/checkpoints",
+            Body::Json(serde_json::json!({ "sizeBytes": size })),
+            REQUEST_TIMEOUT,
+        )?;
+        let sent = Arc::new(std::sync::atomic::AtomicU64::new(0));
+        let parts: Vec<(usize, u64, u64)> = upload
+            .upload_urls
+            .iter()
+            .enumerate()
+            .map(|(index, _)| {
+                let start = index as u64 * upload.part_size_bytes;
+                (index, start, upload.part_size_bytes.min(size - start))
+            })
+            .collect();
+        let next = std::sync::atomic::AtomicUsize::new(0);
+        let finished = std::sync::atomic::AtomicUsize::new(0);
+        let failure: std::sync::Mutex<Option<Error>> = std::sync::Mutex::new(None);
+        let workers = UPLOAD_PARALLELISM.min(parts.len());
+        std::thread::scope(|scope| {
+            for _ in 0..workers {
+                scope.spawn(|| {
+                    loop {
+                        let index = next.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                        let Some(&(part, start, len)) = parts.get(index) else {
+                            break;
+                        };
+                        if failure.lock().unwrap().is_some() {
+                            break;
+                        }
+                        if let Err(error) =
+                            self.put_part(path, &upload.upload_urls[part], start, len, &sent)
+                        {
+                            failure.lock().unwrap().get_or_insert(error);
+                            break;
+                        }
+                    }
+                    finished.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                });
+            }
+            while finished.load(std::sync::atomic::Ordering::SeqCst) < workers {
+                on_progress(
+                    sent.load(std::sync::atomic::Ordering::SeqCst).min(size),
+                    size,
+                );
+                std::thread::sleep(Duration::from_millis(250));
+            }
+        });
+        if let Some(error) = failure.into_inner().unwrap() {
+            return Err(error);
+        }
+        on_progress(size, size);
+        self.json(
+            reqwest::Method::POST,
+            &format!(
+                "/v1/checkpoints/{}/complete",
+                encode_path(&upload.checkpoint.id)
+            ),
+            Body::None,
+            CHECKPOINT_TIMEOUT,
+        )
+    }
+
+    /// Send one slice of the file to its pre-signed URL, retrying a few times:
+    /// a multi-gigabyte upload over a home connection will see a dropped
+    /// request now and then.
+    fn put_part(
+        &self,
+        path: &std::path::Path,
+        url: &str,
+        start: u64,
+        len: u64,
+        sent: &Arc<std::sync::atomic::AtomicU64>,
+    ) -> Result<()> {
+        use std::io::Seek;
+        let mut last = None;
+        for attempt in 0..UPLOAD_PART_ATTEMPTS {
+            if attempt > 0 {
+                std::thread::sleep(Duration::from_secs(2 << attempt));
+            }
+            let mut file = std::fs::File::open(path).map_err(|e| {
+                Error::new(ErrorKind::Other, format!("open {}: {e}", path.display()))
+            })?;
+            file.seek(std::io::SeekFrom::Start(start))
+                .map_err(|e| Error::new(ErrorKind::Other, format!("read the checkpoint: {e}")))?;
+            let counted = CountingReader {
+                inner: file.take(len),
+                sent: Arc::clone(sent),
+                counted: 0,
+            };
+            let result = self
+                .http
+                .put(url)
+                .header(reqwest::header::CONTENT_LENGTH, len)
+                .body(reqwest::blocking::Body::sized(counted, len))
+                .timeout(UPLOAD_PART_TIMEOUT)
+                .send();
+            match result {
+                Ok(response) if response.status().is_success() => {
+                    // The body's reader has been dropped, taking back what it
+                    // counted; the part is now sent for good.
+                    sent.fetch_add(len, std::sync::atomic::Ordering::SeqCst);
+                    return Ok(());
+                }
+                Ok(response) => {
+                    let status = response.status();
+                    let body = response.text().unwrap_or_default();
+                    last = Some(Error::new(
+                        ErrorKind::Connection,
+                        format!("upload part at byte {start} failed: {status} {body}"),
+                    ));
+                }
+                Err(e) => {
+                    last = Some(Error::new(
+                        ErrorKind::Connection,
+                        format!("upload part at byte {start} failed: {e}"),
+                    ));
+                }
+            }
+        }
+        Err(last.expect("at least one attempt"))
+    }
+
     /// Delete a machine and take a final, settled usage reading.
     ///
     /// The control plane samples usage synchronously before the teardown, so
@@ -948,5 +1110,32 @@ mod tests {
         let raw = "event: stdout\ndata: partial\n";
         let events: Vec<_> = SseEvents::new(raw.as_bytes()).collect();
         assert_eq!(events, vec![StreamEvent::Stdout("partial".into())]);
+    }
+}
+
+/// Counts bytes as the HTTP client reads them, for upload progress. A retried
+/// part takes back what it had counted.
+struct CountingReader<R> {
+    inner: R,
+    sent: Arc<std::sync::atomic::AtomicU64>,
+    counted: u64,
+}
+
+impl<R: Read> Read for CountingReader<R> {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        let n = self.inner.read(buf)?;
+        self.counted += n as u64;
+        self.sent
+            .fetch_add(n as u64, std::sync::atomic::Ordering::SeqCst);
+        Ok(n)
+    }
+}
+
+impl<R> Drop for CountingReader<R> {
+    fn drop(&mut self) {
+        // Whatever this attempt sent is resent by the next one. A successful
+        // part is added back in full once its request returns.
+        self.sent
+            .fetch_sub(self.counted, std::sync::atomic::Ordering::SeqCst);
     }
 }

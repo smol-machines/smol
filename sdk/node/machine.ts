@@ -18,6 +18,8 @@ import {
   connectTransport,
   listMachines,
   restoreCheckpointTransport,
+  uploadCheckpoint,
+  type CloudCheckpointInfo,
   type RawExec,
   type Transport,
 } from "./transport";
@@ -131,8 +133,20 @@ export class Machine {
     return listMachines(conn, options);
   }
 
+  /** Upload a `.checkpoint` file taken on this computer to the cloud, so it
+   *  can be restored there by the returned id. Restoring the file with a cloud
+   *  target uploads it for you. */
+  static async uploadCheckpoint(
+    path: string,
+    conn: ConnectOptions = {},
+    onProgress?: (sent: number, total: number) => void,
+  ): Promise<CloudCheckpointInfo> {
+    return uploadCheckpoint(path, conn, onProgress);
+  }
+
   /** Restore a local `.smolcheckpoint` path or durable cloud checkpoint id into
-   * a ready, immediately forkable machine. */
+   * a ready, immediately forkable machine. With a cloud target, a local file is
+   * uploaded first, so a machine checkpointed here resumes in the cloud. */
   static async restoreCheckpoint(
     checkpointId: string,
     name: string,

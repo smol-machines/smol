@@ -33,6 +33,7 @@ export type {
   RolloutSampling,
 } from './rollout';
 export { SmolError, NotSupportedError, InvalidConfigError, ExecutionError } from './errors';
+export type { CloudCheckpointInfo } from './transport';
 export type { LocalAvailability, LocalUnavailableCode } from './availability';
 export type {
   MachineConfig,

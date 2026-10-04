@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import os
 import uuid
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 from .transport import (
     ExecStream,
@@ -23,6 +23,7 @@ from .transport import (
     connect_transport,
     make_transport,
     restore_checkpoint_transport,
+    upload_checkpoint,
 )
 from .errors import wrap_native_error
 from .types import (
@@ -99,15 +100,36 @@ class Machine:
         checkpoint_id: str,
         name: str,
         conn: Optional[ConnectOptions] = None,
+        network: Optional[bool] = None,
     ) -> "Machine":
-        """Restore a local artifact or durable cloud checkpoint and await readiness."""
+        """Restore a local artifact or durable cloud checkpoint and await readiness.
+
+        With a cloud target, a checkpoint file on this computer is uploaded
+        first, so a machine checkpointed here resumes in the cloud.
+        ``network`` gives a cloud machine outbound access (blocked when unset).
+        """
         return cls(
             restore_checkpoint_transport(
                 checkpoint_id,
                 name,
                 conn,
+                network,
             )
         )
+
+    @staticmethod
+    def upload_checkpoint(
+        path: str,
+        conn: Optional[ConnectOptions] = None,
+        on_progress: Optional[Callable[[int, int], None]] = None,
+    ) -> dict:
+        """Upload a ``.checkpoint`` file taken on this computer to the cloud.
+
+        Returns the checkpoint (``id``, ``status``, ``sizeBytes``, ``arch``);
+        restore it by id with a cloud target. ``on_progress(sent, total)``
+        reports bytes uploaded so far.
+        """
+        return upload_checkpoint(path, conn, on_progress)
 
     @staticmethod
     def export_checkpoint(source: str, output: str) -> int:
