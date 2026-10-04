@@ -13,10 +13,14 @@ pub struct SavedExecutionCmd {
 impl SavedExecutionCmd {
     pub fn run(self, resume: bool) -> anyhow::Result<()> {
         use super::resolve::{self, Location, Target};
-        let (location, name) = resolve::route(
-            Some(&self.name),
-            Target::from_flags(self.local, self.cloud)?,
-        )?;
+        // Pausing a moved machine pauses it where it runs now; resuming one
+        // brings the paused copy here back.
+        let target = Target::from_flags(self.local, self.cloud)?;
+        let (location, name) = if resume {
+            resolve::route_here(Some(&self.name), target)?
+        } else {
+            resolve::route(Some(&self.name), target)?
+        };
         let operation = if resume { "resume" } else { "pause" };
         if location == Location::Cloud {
             return super::cloud::run_cloud_command(
@@ -35,6 +39,13 @@ impl SavedExecutionCmd {
         let runtime = smolvm::embedded::EmbeddedRuntime::new()?;
         if resume {
             runtime.resume_machine_detached(&name)?;
+            if let Some(moved) = super::moved::clear(&name)? {
+                eprintln!(
+                    "note: '{name}' runs here again, and its cloud copy cloud/{} ({}) is still \
+                     running; stop it with `smol machine stop --name cloud/{}` if you no longer need it.",
+                    moved.name, moved.id, moved.name
+                );
+            }
         } else {
             runtime.pause_machine(&name)?;
         }

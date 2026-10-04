@@ -81,11 +81,13 @@ impl MoveCmd {
             "Moved '{name}' to Smol Cloud as '{cloud_name}' ({machine_id}), from checkpoint {checkpoint_id}"
         );
         if self.keep_local {
-            println!("'{name}' is still running here.");
+            println!("'{name}' is still running here; the cloud copy is cloud/{cloud_name}.");
         } else {
+            super::moved::record(name, &cloud_name, &machine_id)?;
             println!(
-                "'{name}' is paused here; `smol machine rm --name {name}` removes it, \
-                 `smol machine resume --name {name}` runs it here again."
+                "Commands on '{name}' now reach the cloud machine. The paused copy here is \
+                 'local/{name}': `smol machine resume --name {name}` runs it here again, \
+                 `smol machine rm --name {name}` removes it."
             );
         }
         Ok(())

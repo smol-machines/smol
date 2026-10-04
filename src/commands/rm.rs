@@ -29,7 +29,7 @@ impl RmCmd {
         // A machine's location is an attribute, not a command path: resolve it
         // from the reference (+ optional --local/--cloud), then route.
         let target = Target::from_flags(self.local, self.cloud)?;
-        let (location, handle) = resolve::route(Some(&self.name), target)?;
+        let (location, handle) = resolve::route_here(Some(&self.name), target)?;
 
         // Confirm once, regardless of where the machine lives.
         if !self.force && !confirm_delete(&handle)? {
