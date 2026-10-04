@@ -195,6 +195,19 @@ impl Client {
         )
     }
 
+    /// Start a machine and return once it is ready: its published port
+    /// accepts connections or, without one, its guest agent answers. The
+    /// control plane bounds the wait; follow with [`Self::wait_until_ready`]
+    /// for anything slower.
+    pub fn start_ready(&self, id: &str) -> Result<()> {
+        self.empty(
+            reqwest::Method::POST,
+            &format!("/v1/machines/{id}/start?waitReady=true"),
+            Body::None,
+            START_TIMEOUT,
+        )
+    }
+
     /// Start a machine. `branchable` asks for cloneable guest RAM.
     pub fn start(&self, id: &str, branchable: bool) -> Result<()> {
         let path = if branchable {
