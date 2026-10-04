@@ -43,6 +43,8 @@ impl LsCmd {
                         // Without this labels are write-only: a caller could set
                         // them and never read them back.
                         "labels": m.labels,
+                        "movedTo": super::moved::from_labels(&m.labels)
+                            .map(|moved| serde_json::json!({ "name": moved.name, "id": moved.id })),
                     })
                 })
                 .collect();
@@ -59,6 +61,17 @@ impl LsCmd {
             );
             println!("{}", "-".repeat(96));
             for m in &listing.machines {
+                // A local machine that moved shows where it went instead of
+                // its paused state.
+                let moved = super::moved::from_labels(&m.labels);
+                let state = if moved.is_some() {
+                    "moved"
+                } else {
+                    m.state.as_str()
+                };
+                let source = moved
+                    .map(|moved| format!("-> cloud/{}", moved.name))
+                    .or_else(|| m.source.clone());
                 let id_short = if m.location == Location::Cloud {
                     truncate(&m.id, 14)
                 } else {
@@ -70,12 +83,12 @@ impl LsCmd {
                     m.location.as_str(),
                     truncate(m.name.as_deref().unwrap_or("(unnamed)"), 18),
                     id_short,
-                    truncate(&m.state, 10),
+                    truncate(state, 10),
                     m.cpus.map(|c| c.to_string()).unwrap_or_else(|| "-".into()),
                     m.memory_mib
                         .map(|mb| format!("{mb} MiB"))
                         .unwrap_or_else(|| "-".into()),
-                    truncate(m.source.as_deref().unwrap_or("-"), 22),
+                    truncate(source.as_deref().unwrap_or("-"), 22),
                 );
             }
         }

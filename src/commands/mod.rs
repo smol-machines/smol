@@ -25,6 +25,7 @@ pub mod machine;
 pub mod machines;
 pub mod monitor;
 pub mod move_machine;
+pub mod moved;
 pub mod new;
 pub mod pack;
 pub mod prune;

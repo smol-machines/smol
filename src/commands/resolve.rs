@@ -347,6 +347,20 @@ fn hint_and_bare(
     Ok((hint, bare))
 }
 
+/// Follow a bare local name to the cloud machine it moved to, telling the user
+/// so. `None` when the name is not a moved local machine.
+fn follow_move(name: &str) -> Result<Option<(Location, String)>> {
+    let Some(moved) = super::moved::of_local(name)? else {
+        return Ok(None);
+    };
+    eprintln!(
+        "note: '{name}' moved to Smol Cloud; using cloud/{} ({}). \
+         'local/{name}' is the paused copy on this computer.",
+        moved.name, moved.id
+    );
+    Ok(Some((Location::Cloud, moved.id)))
+}
+
 /// Decide where a verb should act, returning `(location, bare_handle)`.
 ///
 /// Policy — an explicit `--local`/`--cloud` flag or a `local/`/`cloud/` prefix
@@ -377,6 +391,9 @@ pub fn locate(reference: Option<&str>, target: Target) -> Result<(Location, Stri
             None => Ok((Location::Local, "default".into())),
             Some(name) => {
                 if local_exists(&name)? {
+                    if let Some(moved) = follow_move(&name)? {
+                        return Ok(moved);
+                    }
                     Ok((Location::Local, name))
                 } else if cloud_has(&name)? {
                     Ok((Location::Cloud, name))
@@ -401,6 +418,21 @@ pub fn locate(reference: Option<&str>, target: Target) -> Result<(Location, Stri
 /// with no flag; an unknown name is handed to the local path to report in its
 /// own terms (and never forces a cloud login).
 pub fn route(reference: Option<&str>, target: Target) -> Result<(Location, String)> {
+    route_with(reference, target, true)
+}
+
+/// Like [`route`], but a moved local machine resolves to the paused copy here
+/// instead of following it to the cloud: for `rm`, which must never delete the
+/// cloud machine by its old local name, and for `resume`, which brings it back.
+pub fn route_here(reference: Option<&str>, target: Target) -> Result<(Location, String)> {
+    route_with(reference, target, false)
+}
+
+fn route_with(
+    reference: Option<&str>,
+    target: Target,
+    follow_moves: bool,
+) -> Result<(Location, String)> {
     let (hint, bare) = hint_and_bare(reference, target)?;
 
     match hint {
@@ -415,6 +447,11 @@ pub fn route(reference: Option<&str>, target: Target) -> Result<(Location, Strin
             None => Ok((Location::Local, "default".into())),
             Some(name) => {
                 if local_exists(&name)? {
+                    if follow_moves {
+                        if let Some(moved) = follow_move(&name)? {
+                            return Ok(moved);
+                        }
+                    }
                     Ok((Location::Local, name))
                 } else if cloud_has(&name)? {
                     Ok((Location::Cloud, name))
