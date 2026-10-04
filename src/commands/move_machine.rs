@@ -32,6 +32,25 @@ impl MoveCmd {
         let runtime = smolvm::embedded::EmbeddedRuntime::new()?;
         let name = self.machine.as_str();
         let cloud_name = self.cloud_name.clone().unwrap_or_else(|| name.to_string());
+        let record = runtime
+            .list_machines()?
+            .into_iter()
+            .find(|record| record.name == name)
+            .ok_or_else(|| anyhow::anyhow!("no local machine named '{name}'"))?;
+
+        // Refuse a taken name before touching the machine: finding it after
+        // pausing and uploading wastes the upload and stops the work.
+        let client = super::cloud::cloud_api()?;
+        if client
+            .machines()?
+            .iter()
+            .any(|machine| machine.name.as_deref() == Some(cloud_name.as_str()))
+        {
+            anyhow::bail!(
+                "a cloud machine named '{cloud_name}' already exists; pick another name with \
+                 `--as <name>`, or remove it with `smol machine rm --name cloud/{cloud_name}`"
+            );
+        }
 
         // The checkpoint the cloud resumes. Moving pauses the local machine
         // at that exact point, so nothing it does afterwards is lost and a
@@ -65,7 +84,11 @@ impl MoveCmd {
         } else {
             had_network(&artifact)
         };
-        let moved = upload_and_resume(&artifact, &cloud_name, net);
+        let image = record
+            .image
+            .as_deref()
+            .filter(|image| registry_image(image));
+        let moved = upload_and_resume(&client, &artifact, name, image, &cloud_name, net);
         let (checkpoint_id, machine_id) = match moved {
             Ok(ids) => ids,
             Err(error) if !self.keep_local => {
@@ -97,12 +120,14 @@ impl MoveCmd {
 /// Upload a checkpoint file and resume it as a running cloud machine.
 /// Returns the checkpoint and machine ids.
 fn upload_and_resume(
+    client: &smol_cloud::blocking::Client,
     artifact: &std::path::Path,
+    name: &str,
+    image: Option<&str>,
     cloud_name: &str,
     net: bool,
 ) -> anyhow::Result<(String, String)> {
-    let checkpoint = super::cloud::upload_checkpoint_file(artifact)?;
-    let client = super::cloud::cloud_api()?;
+    let checkpoint = super::cloud::upload_checkpoint_named(artifact, &format!("'{name}'"), image)?;
     let network = smol_cloud::types::Network {
         mode: Some(if net { "open" } else { "blocked" }.to_string()),
         cidrs: Vec::new(),
@@ -110,13 +135,34 @@ fn upload_and_resume(
     };
     eprintln!("Resuming it in the cloud as '{cloud_name}'...");
     let machine = client.restore_checkpoint_with_network(&checkpoint.id, cloud_name, &network)?;
-    client.start(&machine.id, false)?;
-    client.wait_until_ready(
-        &machine.id,
-        Duration::from_secs(10 * 60),
-        Duration::from_secs(1),
-    )?;
+    let started = client.start(&machine.id, false).and_then(|()| {
+        client.wait_until_ready(
+            &machine.id,
+            Duration::from_secs(10 * 60),
+            Duration::from_secs(1),
+        )
+    });
+    if let Err(error) = started {
+        // The work is still saved here; a cloud machine that never resumed
+        // would only hold the name and block the next attempt.
+        if let Err(cleanup) = client.delete(&machine.id) {
+            eprintln!("could not remove the failed cloud machine '{cloud_name}': {cleanup}");
+        }
+        return Err(error.into());
+    }
     Ok((checkpoint.id, machine.id))
+}
+
+/// Whether the cloud can pull `image`: a registry reference, not a local
+/// archive or rootfs directory the machine was created from.
+fn registry_image(image: &str) -> bool {
+    !(image == "-"
+        || image.starts_with('/')
+        || image.starts_with("./")
+        || image.starts_with("../")
+        || [".tar", ".tar.gz", ".tgz"]
+            .iter()
+            .any(|suffix| image.ends_with(suffix)))
 }
 
 /// Whether the checkpointed machine had network access, from its manifest.
@@ -126,4 +172,19 @@ fn had_network(artifact: &std::path::Path) -> bool {
         .and_then(|manifest| manifest.checkpoint)
         .and_then(|checkpoint| checkpoint.network)
         .is_some_and(|network| network.enabled)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::registry_image;
+
+    #[test]
+    fn only_registry_images_are_named_to_the_cloud() {
+        for image in ["alpine", "python:3.12-alpine", "ghcr.io/org/app@sha256:ab"] {
+            assert!(registry_image(image), "{image}");
+        }
+        for image in ["-", "./app.tar", "../rootfs/", "/abs/img.tgz", "img.tar.gz"] {
+            assert!(!registry_image(image), "{image}");
+        }
+    }
 }

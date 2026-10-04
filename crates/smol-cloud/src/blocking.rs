@@ -582,13 +582,25 @@ impl Client {
         path: &std::path::Path,
         on_progress: &mut dyn FnMut(u64, u64),
     ) -> Result<Checkpoint> {
+        self.upload_checkpoint_of_image(path, None, on_progress)
+    }
+
+    /// [`Self::upload_checkpoint`], naming the OCI image the checkpointed
+    /// machine was created from. A checkpoint records only its machine, so
+    /// this is how the cloud machine restored from it knows its image.
+    pub fn upload_checkpoint_of_image(
+        &self,
+        path: &std::path::Path,
+        image: Option<&str>,
+        on_progress: &mut dyn FnMut(u64, u64),
+    ) -> Result<Checkpoint> {
         let size = std::fs::metadata(path)
             .map_err(|e| Error::new(ErrorKind::Other, format!("read {}: {e}", path.display())))?
             .len();
         let upload: CheckpointUpload = self.json(
             reqwest::Method::POST,
             "/v1/checkpoints",
-            Body::Json(serde_json::json!({ "sizeBytes": size })),
+            Body::Json(serde_json::json!({ "sizeBytes": size, "image": image })),
             REQUEST_TIMEOUT,
         )?;
         let sent = Arc::new(std::sync::atomic::AtomicU64::new(0));
@@ -671,26 +683,32 @@ impl Client {
             })?;
             file.seek(std::io::SeekFrom::Start(start))
                 .map_err(|e| Error::new(ErrorKind::Other, format!("read the checkpoint: {e}")))?;
-            let counted = CountingReader {
+            let counted = Arc::new(std::sync::atomic::AtomicU64::new(0));
+            let reader = CountingReader {
                 inner: file.take(len),
                 sent: Arc::clone(sent),
-                counted: 0,
+                counted: Arc::clone(&counted),
             };
             let result = self
                 .http
                 .put(url)
                 .header(reqwest::header::CONTENT_LENGTH, len)
-                .body(reqwest::blocking::Body::sized(counted, len))
+                .body(reqwest::blocking::Body::sized(reader, len))
                 .timeout(UPLOAD_PART_TIMEOUT)
                 .send();
+            // Settle this attempt only once its response is in: the body is
+            // dropped as soon as it is sent, well before the server answers.
+            let counted = counted.load(std::sync::atomic::Ordering::SeqCst);
             match result {
                 Ok(response) if response.status().is_success() => {
-                    // The body's reader has been dropped, taking back what it
-                    // counted; the part is now sent for good.
-                    sent.fetch_add(len, std::sync::atomic::Ordering::SeqCst);
+                    // The reader is capped at `len`, so this tops the part up
+                    // to exactly its size.
+                    sent.fetch_add(len - counted, std::sync::atomic::Ordering::SeqCst);
                     return Ok(());
                 }
                 Ok(response) => {
+                    // Whatever this attempt sent is resent by the next one.
+                    sent.fetch_sub(counted, std::sync::atomic::Ordering::SeqCst);
                     let status = response.status();
                     let body = response.text().unwrap_or_default();
                     last = Some(Error::new(
@@ -699,6 +717,7 @@ impl Client {
                     ));
                 }
                 Err(e) => {
+                    sent.fetch_sub(counted, std::sync::atomic::Ordering::SeqCst);
                     last = Some(Error::new(
                         ErrorKind::Connection,
                         format!("upload part at byte {start} failed: {e}"),
@@ -1026,25 +1045,17 @@ fn sse_event(kind: &str, data: &str) -> Option<StreamEvent> {
 struct CountingReader<R> {
     inner: R,
     sent: Arc<std::sync::atomic::AtomicU64>,
-    counted: u64,
+    counted: Arc<std::sync::atomic::AtomicU64>,
 }
 
 impl<R: Read> Read for CountingReader<R> {
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
         let n = self.inner.read(buf)?;
-        self.counted += n as u64;
+        self.counted
+            .fetch_add(n as u64, std::sync::atomic::Ordering::SeqCst);
         self.sent
             .fetch_add(n as u64, std::sync::atomic::Ordering::SeqCst);
         Ok(n)
-    }
-}
-
-impl<R> Drop for CountingReader<R> {
-    fn drop(&mut self) {
-        // Whatever this attempt sent is resent by the next one. A successful
-        // part is added back in full once its request returns.
-        self.sent
-            .fetch_sub(self.counted, std::sync::atomic::Ordering::SeqCst);
     }
 }
 
