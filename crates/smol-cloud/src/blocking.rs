@@ -1021,6 +1021,33 @@ fn sse_event(kind: &str, data: &str) -> Option<StreamEvent> {
     }
 }
 
+/// Counts bytes as the HTTP client reads them, for upload progress. A retried
+/// part takes back what it had counted.
+struct CountingReader<R> {
+    inner: R,
+    sent: Arc<std::sync::atomic::AtomicU64>,
+    counted: u64,
+}
+
+impl<R: Read> Read for CountingReader<R> {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        let n = self.inner.read(buf)?;
+        self.counted += n as u64;
+        self.sent
+            .fetch_add(n as u64, std::sync::atomic::Ordering::SeqCst);
+        Ok(n)
+    }
+}
+
+impl<R> Drop for CountingReader<R> {
+    fn drop(&mut self) {
+        // Whatever this attempt sent is resent by the next one. A successful
+        // part is added back in full once its request returns.
+        self.sent
+            .fetch_sub(self.counted, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1110,32 +1137,5 @@ mod tests {
         let raw = "event: stdout\ndata: partial\n";
         let events: Vec<_> = SseEvents::new(raw.as_bytes()).collect();
         assert_eq!(events, vec![StreamEvent::Stdout("partial".into())]);
-    }
-}
-
-/// Counts bytes as the HTTP client reads them, for upload progress. A retried
-/// part takes back what it had counted.
-struct CountingReader<R> {
-    inner: R,
-    sent: Arc<std::sync::atomic::AtomicU64>,
-    counted: u64,
-}
-
-impl<R: Read> Read for CountingReader<R> {
-    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
-        let n = self.inner.read(buf)?;
-        self.counted += n as u64;
-        self.sent
-            .fetch_add(n as u64, std::sync::atomic::Ordering::SeqCst);
-        Ok(n)
-    }
-}
-
-impl<R> Drop for CountingReader<R> {
-    fn drop(&mut self) {
-        // Whatever this attempt sent is resent by the next one. A successful
-        // part is added back in full once its request returns.
-        self.sent
-            .fetch_sub(self.counted, std::sync::atomic::Ordering::SeqCst);
     }
 }
