@@ -135,11 +135,13 @@ fn upload_and_resume(
     };
     eprintln!("Resuming it in the cloud as '{cloud_name}'...");
     let machine = client.restore_checkpoint_with_network(&checkpoint.id, cloud_name, &network)?;
-    let started = client.start(&machine.id, false).and_then(|()| {
+    // The work is paused until this returns, so ask the control plane to
+    // answer once the machine is ready rather than polling for it.
+    let started = client.start_ready(&machine.id).and_then(|()| {
         client.wait_until_ready(
             &machine.id,
             Duration::from_secs(10 * 60),
-            Duration::from_secs(1),
+            Duration::from_millis(250),
         )
     });
     if let Err(error) = started {
