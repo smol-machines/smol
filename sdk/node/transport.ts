@@ -7,7 +7,9 @@
  *  Cloud-only/local-only capability gaps surface as `NotSupportedError`.
  */
 
-import { existsSync, readFileSync } from "node:fs";
+import { createReadStream, existsSync, readFileSync, statSync } from "node:fs";
+import { request as httpRequest } from "node:http";
+import { request as httpsRequest } from "node:https";
 import { createConnection } from "node:net";
 import { homedir } from "node:os";
 import { join, resolve as resolvePath } from "node:path";
@@ -300,6 +302,16 @@ export function networkMode(
   if (network === true) return { network: { mode: "open" } };
   if (network === false) return { network: { mode: "blocked" } };
   return {};
+}
+
+/** The cloud API's form of a {@link NetworkPolicy}. */
+export function cloudNetwork(
+  policy: NetworkPolicy,
+): { mode: "open" | "blocked" | "allowCidrs"; cidrs?: string[]; hosts?: string[] } {
+  if (policy === "allow-all") return { mode: "open" };
+  if (policy === "deny-all") return { mode: "blocked" };
+  const { cidrs, hosts } = egressPolicy(policy);
+  return { mode: "allowCidrs", cidrs, hosts };
 }
 
 /** The engine's form of a {@link NetworkPolicy}. */
@@ -2073,26 +2085,23 @@ export async function restoreCheckpointTransport(
       "keepIdentity is local-only: a cloud restore always gives the new machine its own identity.",
     );
   }
-  const explicitKey = conn.apiKey ?? process.env.SMOL_CLOUD_TOKEN;
-  const { apiKey: cliKey, endpoint: cliUrl } = cliSession(conn.target);
-  const key = explicitKey ?? cliKey ?? cliConfigApiKey();
-  if (!key) {
-    throw new InvalidConfigError(
-      `restoreCheckpoint requires an API key — ${NO_KEY_HINT}.`,
-    );
-  }
-  const baseUrl = (
-    conn.baseUrl ??
-    process.env.SMOL_CLOUD_URL ??
-    cliUrl ??
-    DEFAULT_CLOUD_URL
-  ).replace(/\/+$/, "");
-  const cloudConn: CloudConn = { baseUrl, apiKey: key };
+  const cloudConn = cloudConnFor(conn, "restoreCheckpoint");
+  // A checkpoint file taken on this computer is uploaded first.
+  const checkpoint = isCheckpointFile(checkpointId)
+    ? (await uploadCheckpointFile(cloudConn, resolvePath(checkpointId))).id
+    : checkpointId;
   const created = await cloudFetch<MachineInfo>(
     cloudConn,
     "POST",
-    `/v1/checkpoints/${encodeURIComponent(checkpointId)}/restore`,
-    { json: { name } },
+    `/v1/checkpoints/${encodeURIComponent(checkpoint)}/restore`,
+    {
+      json: {
+        name,
+        ...(options?.networkPolicy !== undefined
+          ? { network: cloudNetwork(options.networkPolicy) }
+          : {}),
+      },
+    },
   );
   const id = created.id;
   try {
@@ -2105,6 +2114,147 @@ export async function restoreCheckpointTransport(
     throw error;
   }
   return new CloudTransport(cloudConn, created.name ?? name, id);
+}
+
+/** The control plane and key a cloud operation uses: explicit options, then
+ *  the environment, then the CLI session. */
+function cloudConnFor(conn: ConnectOptions, operation: string): CloudConn {
+  const explicitKey = conn.apiKey ?? process.env.SMOL_CLOUD_TOKEN;
+  const { apiKey: cliKey, endpoint: cliUrl } = cliSession(conn.target);
+  const key = explicitKey ?? cliKey ?? cliConfigApiKey();
+  if (!key) {
+    throw new InvalidConfigError(`${operation} requires an API key — ${NO_KEY_HINT}.`);
+  }
+  const baseUrl = (
+    conn.baseUrl ??
+    process.env.SMOL_CLOUD_URL ??
+    cliUrl ??
+    DEFAULT_CLOUD_URL
+  ).replace(/\/+$/, "");
+  return { baseUrl, apiKey: key };
+}
+
+/** Upload a checkpoint file to the cloud; see {@link uploadCheckpointFile}. */
+export function uploadCheckpoint(
+  path: string,
+  conn: ConnectOptions = {},
+  onProgress?: (sent: number, total: number) => void,
+): Promise<CloudCheckpointInfo> {
+  return uploadCheckpointFile(cloudConnFor(conn, "uploadCheckpoint"), resolvePath(path), onProgress);
+}
+
+function isCheckpointFile(checkpoint: string): boolean {
+  try {
+    return statSync(checkpoint).isFile();
+  } catch {
+    return false;
+  }
+}
+
+/** A checkpoint as the cloud describes it. */
+export interface CloudCheckpointInfo {
+  id: string;
+  status: string;
+  sizeBytes: number;
+  arch: string;
+  createdAt: string;
+}
+
+const UPLOAD_PARALLELISM = 4;
+const UPLOAD_PART_ATTEMPTS = 4;
+
+/** Upload a `.checkpoint` file captured on this computer so it can be
+ *  restored in the cloud. The bytes go straight to object storage in parallel
+ *  parts; the cloud then reads the checkpoint's own manifest. */
+export async function uploadCheckpointFile(
+  conn: CloudConn,
+  path: string,
+  onProgress?: (sent: number, total: number) => void,
+): Promise<CloudCheckpointInfo> {
+  const size = statSync(path).size;
+  const upload = await cloudFetch<{
+    checkpoint: CloudCheckpointInfo;
+    partSizeBytes: number;
+    uploadUrls: string[];
+  }>(conn, "POST", "/v1/checkpoints", { json: { sizeBytes: size } });
+  const sent = new Array<number>(upload.uploadUrls.length).fill(0);
+  const report = () => onProgress?.(sent.reduce((a, b) => a + b, 0), size);
+  let next = 0;
+  const worker = async () => {
+    for (;;) {
+      const part = next++;
+      if (part >= upload.uploadUrls.length) return;
+      const start = part * upload.partSizeBytes;
+      const length = Math.min(upload.partSizeBytes, size - start);
+      for (let attempt = 0; ; attempt++) {
+        try {
+          await putPart(upload.uploadUrls[part]!, path, start, length, (n) => {
+            sent[part] = n;
+            report();
+          });
+          break;
+        } catch (error) {
+          sent[part] = 0;
+          if (attempt + 1 >= UPLOAD_PART_ATTEMPTS) throw error;
+          await new Promise((r) => setTimeout(r, 2_000 * 2 ** attempt));
+        }
+      }
+    }
+  };
+  await Promise.all(
+    Array.from({ length: Math.min(UPLOAD_PARALLELISM, upload.uploadUrls.length) }, worker),
+  );
+  return cloudFetch<CloudCheckpointInfo>(
+    conn,
+    "POST",
+    `/v1/checkpoints/${encodeURIComponent(upload.checkpoint.id)}/complete`,
+    { timeoutMs: 30 * 60 * 1_000 },
+  );
+}
+
+/** PUT one slice of a file to a pre-signed URL. */
+function putPart(
+  url: string,
+  path: string,
+  start: number,
+  length: number,
+  onSent: (bytes: number) => void,
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const send = url.startsWith("http://") ? httpRequest : httpsRequest;
+    const request = send(url, {
+      method: "PUT",
+      headers: { "content-length": String(length) },
+    });
+    request.on("response", (response) => {
+      const chunks: Buffer[] = [];
+      response.on("data", (chunk: Buffer) => chunks.push(chunk));
+      response.on("end", () => {
+        const status = response.statusCode ?? 0;
+        if (status >= 200 && status < 300) resolve();
+        else
+          reject(
+            new SmolError(
+              "CONNECTION",
+              `upload part at byte ${start} failed: ${status} ${Buffer.concat(chunks).toString().slice(0, 300)}`,
+            ),
+          );
+      });
+    });
+    request.on("error", reject);
+    if (length === 0) {
+      request.end();
+      return;
+    }
+    let sentBytes = 0;
+    const stream = createReadStream(path, { start, end: start + length - 1 });
+    stream.on("data", (chunk) => {
+      sentBytes += chunk.length;
+      onSent(sentBytes);
+    });
+    stream.on("error", reject);
+    stream.pipe(request);
+  });
 }
 
 function looksLikeLocalCheckpoint(checkpoint: string): boolean {

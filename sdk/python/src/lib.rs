@@ -28,6 +28,7 @@ const NOT_FOUND: &str = "NOT_FOUND";
 const INVALID_STATE: &str = "INVALID_STATE";
 const HYPERVISOR_UNAVAILABLE: &str = "HYPERVISOR_UNAVAILABLE";
 const CONFLICT: &str = "CONFLICT";
+const FORBIDDEN: &str = "FORBIDDEN";
 const STORAGE_ERROR: &str = "STORAGE_ERROR";
 const MOUNT_ERROR: &str = "MOUNT_ERROR";
 const CONFIG_ERROR: &str = "CONFIG_ERROR";
@@ -78,6 +79,7 @@ fn code_and_message(e: &SmolvmError) -> (&'static str, String) {
             let code = match kind {
                 AgentErrorKind::NotFound => NOT_FOUND,
                 AgentErrorKind::Conflict => CONFLICT,
+                AgentErrorKind::Forbidden => FORBIDDEN,
                 AgentErrorKind::Other => SMOLVM_ERROR,
             };
             (code, format!("Agent error ({operation}): {reason}"))

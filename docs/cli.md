@@ -43,6 +43,9 @@ Global behavior:
 | `smol machine checkpoint --export-from <point> --output <file.smolcheckpoint>` | Export a stored checkpoint directory as one portable file. |
 | `smol machine checkpoint-prune --store <store>` | Reclaim objects that no retained checkpoint in the store references. |
 | `smol machine restore --checkpoint <point-or-file> --name <machine>` | Restore a stored directory or portable checkpoint as a running branch source. |
+| `smol machine move --name <machine> [--as <cloud-name>] [--net] [--keep-local]` | Move a running local machine to Smol Cloud, processes and memory included. It pauses here at the moment it is saved; if the move fails, `smol machine resume` continues it here. `--keep-local` sends a copy and leaves it running. A Mac's machine moves to an arm64 cloud machine. |
+| `smol machine restore --checkpoint <file> --name <machine> --cloud [--net]` | Upload a checkpoint file taken on this computer and resume it as a cloud machine. |
+| `smol cloud checkpoint upload <file>` | Upload a checkpoint file so it can be restored in the cloud by id. |
 | `smol machine images --name <name>` | List a machine's cached images and storage usage (`--json`). |
 | `smol machine prune --name <name>` | Reclaim a machine's disk: free unreferenced layers, or `--all` to purge the cache (`--dry-run` to preview; `--all` requires the machine stopped). |
 | `smol machine update --name <name> …` | Modify a **stopped** machine: add/remove volumes/ports/env, set `--cpus`/`--mem`/`--workdir`, toggle `--net`/`--gpu`, expand `--storage`/`--overlay` (expand-only). Use `--no-egress-interceptor` to explicitly clear a prior interceptor requirement. |

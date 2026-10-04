@@ -297,6 +297,20 @@ pub struct Checkpoint {
     pub download_url: Option<String>,
 }
 
+/// Where to send a checkpoint file's bytes, as `POST /v1/checkpoints` returns.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CheckpointUpload {
+    /// The checkpoint being uploaded, `uploading` until completed.
+    pub checkpoint: Checkpoint,
+    /// Every part but the last is exactly this long.
+    pub part_size_bytes: u64,
+    /// One pre-signed `PUT` URL per part, in file order.
+    pub upload_urls: Vec<String>,
+    /// When the URLs stop working.
+    pub expires_at: String,
+}
+
 /// What a batch branch returned.
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct BranchBatch {

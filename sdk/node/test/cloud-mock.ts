@@ -125,6 +125,30 @@ const server = createServer(async (req, res) => {
       downloadUrl: "/v1/checkpoints/ckpt-1/download",
     }]);
   }
+  if (method === "POST" && url === "/v1/checkpoints") {
+    seen.uploadBody = JSON.parse((await readBody(req)).toString() || "{}");
+    const base = `http://${req.headers.host}`;
+    return json(201, {
+      checkpoint: { id: "ckpt-up", machineId: "", status: "uploading", sizeBytes: seen.uploadBody.sizeBytes, arch: "", createdAt: "2026-10-04T00:00:00Z" },
+      partSizeBytes: 6,
+      uploadUrls: [`${base}/upload/1`, `${base}/upload/2`],
+      expiresAt: "2026-10-04T06:00:00Z",
+    });
+  }
+  if (method === "PUT" && url.startsWith("/upload/")) {
+    seen.uploadAuth = req.headers["authorization"] ?? null;
+    files.set(url, await readBody(req));
+    res.writeHead(200);
+    return res.end();
+  }
+  if (method === "POST" && url === "/v1/checkpoints/ckpt-up/complete") {
+    seen.uploaded = Buffer.concat([files.get("/upload/1") ?? Buffer.alloc(0), files.get("/upload/2") ?? Buffer.alloc(0)]);
+    return json(200, { id: "ckpt-up", machineId: "", status: "available", sizeBytes: seen.uploaded.length, arch: "arm64", createdAt: "2026-10-04T00:00:00Z" });
+  }
+  if (method === "POST" && url === "/v1/checkpoints/ckpt-up/restore") {
+    seen.uploadRestoreBody = JSON.parse((await readBody(req)).toString() || "{}");
+    return json(201, { id: "m-restored", name: seen.uploadRestoreBody.name, state: "stopped" });
+  }
   if (method === "POST" && url === "/v1/checkpoints/ckpt-1/restore") {
     seen.restoreBody = JSON.parse((await readBody(req)).toString() || "{}");
     return json(201, { id: "m-restored", name: seen.restoreBody.name, state: "stopped" });
@@ -572,6 +596,41 @@ async function main(): Promise<void> {
     seen.restoreBody?.name === "restored" && restored.id === "m-restored" && await restored.ready(),
     JSON.stringify(seen.restoreBody),
   );
+  {
+    const { mkdtempSync, writeFileSync } = await import("node:fs");
+    const { tmpdir } = await import("node:os");
+    const { join } = await import("node:path");
+    const file = join(mkdtempSync(join(tmpdir(), "smol-upload-")), "laptop.checkpoint");
+    writeFileSync(file, Buffer.from("0123456789"));
+    let lastProgress = [0, 0];
+    const info = await Machine.uploadCheckpoint(
+      file,
+      { target: "cloud", baseUrl, apiKey: "smk_test123" },
+      (sent, total) => (lastProgress = [sent, total]),
+    );
+    check(
+      "uploadCheckpoint sends each slice to its URL and completes",
+      info.id === "ckpt-up" && seen.uploaded?.toString() === "0123456789" && seen.uploadBody?.sizeBytes === 10,
+      `${seen.uploaded} ${JSON.stringify(seen.uploadBody)}`,
+    );
+    check("...without sending the API key to storage", seen.uploadAuth === null, String(seen.uploadAuth));
+    check("...and reports progress to the end", lastProgress[0] === 10 && lastProgress[1] === 10, String(lastProgress));
+    files.clear();
+    const moved = await Machine.restoreCheckpoint(
+      file,
+      "moved",
+      { target: "cloud", baseUrl, apiKey: "smk_test123" },
+      { networkPolicy: "allow-all" },
+    );
+    check(
+      "restoring a local file in the cloud uploads it and keeps the network policy",
+      moved.id === "m-restored" &&
+        seen.uploaded?.toString() === "0123456789" &&
+        seen.uploadRestoreBody?.name === "moved" &&
+        seen.uploadRestoreBody?.network?.mode === "open",
+      JSON.stringify(seen.uploadRestoreBody),
+    );
+  }
   check(
     "branch uses POST /branches with the child name",
     seen.forkBody?.name === "rollout-1",

@@ -281,8 +281,9 @@ export type NetworkPolicy =
 /** Options for `Machine.restoreCheckpoint`. */
 export interface RestoreCheckpointOptions {
   /** Apply this network policy to the restored machine before it boots.
-   *  The checkpoint must have been taken on the `"virtio-net"` backend for an
-   *  allow list or `deny-all`. Local target only. */
+   *  Locally, the checkpoint must have been taken on the `"virtio-net"`
+   *  backend for an allow list or `deny-all`. A cloud restore without one has
+   *  networking blocked. */
   networkPolicy?: NetworkPolicy;
   /** Restore the machine as itself going back in time rather than as a clone:
    *  it keeps the hostname and machine ID it was saved with, which skips about

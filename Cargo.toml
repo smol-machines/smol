@@ -28,7 +28,7 @@ path = "src/main.rs"
 [dependencies]
 # The smolfleet /v1 wire contract, shared with the Rust SDK so the two clients
 # of one control plane cannot drift.
-smol-cloud = { path = "crates/smol-cloud" }
+smol-cloud = { path = "crates/smol-cloud", features = ["blocking"] }
 # smolvm engine — VM lifecycle, agent protocol, config
 smolvm = { path = ".." }
 smolvm-pack = { path = "../crates/smolvm-pack" }

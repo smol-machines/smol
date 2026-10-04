@@ -79,6 +79,30 @@ class Handler(BaseHTTPRequestHandler):
                 "sizeBytes": 4096, "arch": "amd64", "createdAt": "2026-08-26T00:00:00Z",
                 "downloadUrl": "/v1/checkpoints/ckpt-1/download",
             }).encode())
+        if self.path == "/v1/checkpoints":
+            captured["upload_body"] = json.loads(self._read() or b"{}")
+            base = f"http://{self.headers.get('host')}"
+            return self._send(201, json.dumps({
+                "checkpoint": {"id": "ckpt-up", "machineId": "", "status": "uploading",
+                               "sizeBytes": captured["upload_body"]["sizeBytes"], "arch": "",
+                               "createdAt": "2026-10-04T00:00:00Z"},
+                "partSizeBytes": 6,
+                "uploadUrls": [f"{base}/upload/1", f"{base}/upload/2"],
+                "expiresAt": "2026-10-04T06:00:00Z",
+            }).encode())
+        if self.path == "/v1/checkpoints/ckpt-up/complete":
+            parts = captured.get("parts", {})
+            captured["uploaded"] = parts.get("/upload/1", b"") + parts.get("/upload/2", b"")
+            return self._send(200, json.dumps({
+                "id": "ckpt-up", "machineId": "", "status": "available",
+                "sizeBytes": len(captured["uploaded"]), "arch": "arm64",
+                "createdAt": "2026-10-04T00:00:00Z",
+            }).encode())
+        if self.path == "/v1/checkpoints/ckpt-up/restore":
+            captured["upload_restore_body"] = json.loads(self._read() or b"{}")
+            return self._send(201, json.dumps({
+                "id": "mach-restored", "name": captured["upload_restore_body"]["name"], "state": "stopped"
+            }).encode())
         if self.path == "/v1/checkpoints/ckpt-1/restore":
             captured["restore_body"] = json.loads(self._read() or b"{}")
             return self._send(201, json.dumps({
@@ -247,6 +271,11 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_PUT(self):
         captured["hits"].append(f"PUT {self.path}")
+        if self.path.startswith("/upload/"):
+            # Pre-signed storage URLs carry no API key.
+            captured["upload_auth"] = self.headers.get("authorization")
+            captured.setdefault("parts", {})[self.path] = self._read()
+            return self._send(200)
         if not self._auth_ok():
             return self._send(401, b"bad token")
         if self.path.startswith(f"/v1/machines/{MACHINE_ID}/files/"):
@@ -334,6 +363,33 @@ def main() -> int:
               captured.get("restore_body", {}).get("name") == "restored"
               and restored.id == "mach-restored" and restored.ready(),
               str(captured.get("restore_body")))
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            laptop = Path(tmp) / "laptop.checkpoint"
+            laptop.write_bytes(b"0123456789")
+            progress: list = []
+            info = Machine.upload_checkpoint(
+                str(laptop),
+                ConnectOptions(target="cloud", base_url=base, api_key="smk_testkey"),
+                lambda sent, total: progress.append((sent, total)),
+            )
+            check("upload_checkpoint() sends each slice and completes",
+                  info["id"] == "ckpt-up" and captured.get("uploaded") == b"0123456789"
+                  and captured["upload_body"] == {"sizeBytes": 10},
+                  str(captured.get("uploaded")))
+            check("...without sending the API key to storage", captured.get("upload_auth") is None)
+            check("...and reports progress to the end", progress[-1] == (10, 10), str(progress[-3:]))
+            captured["parts"] = {}
+            moved = Machine.restore_checkpoint(
+                str(laptop), "moved",
+                ConnectOptions(target="cloud", base_url=base, api_key="smk_testkey"),
+                network=True,
+            )
+            body = captured.get("upload_restore_body", {})
+            check("restoring a local file in the cloud uploads it and opens the network",
+                  moved.id == "mach-restored" and captured.get("uploaded") == b"0123456789"
+                  and body.get("name") == "moved" and body.get("network") == {"mode": "open"},
+                  str(body))
         m.wait_until_ready(timeout_s=2, interval_s=0.05)
         check("wait_until_ready() resolves on ready", True)
 
