@@ -846,6 +846,9 @@ impl Transport for LocalTransport {
             args.push("-p".into());
             args.push(format!("{}:{}", port.host, port.guest));
         }
+        if options.freeze_source {
+            args.push("--freeze-source".into());
+        }
         let borrowed: Vec<&str> = args.iter().map(String::as_str).collect();
         self.run(&borrowed)?;
         Ok(Box::new(LocalTransport::with_ports(

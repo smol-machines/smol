@@ -347,6 +347,11 @@ pub struct BranchOptions {
     pub checkpointable: bool,
     /// How many branches to boot at once in [`Machine::branch_batch`].
     pub parallel: usize,
+    /// Keep the source paused as a reusable branch base instead of resuming
+    /// it. Later branches start from that same state, and on the cloud a
+    /// frozen source no longer counts toward the concurrency cap. The source
+    /// cannot run commands again; work in its branches, or stop it.
+    pub freeze_source: bool,
 }
 
 impl BranchOptions {
@@ -370,6 +375,12 @@ impl BranchOptions {
     /// Boot this many branches at once during a batch branch.
     pub fn parallel(mut self, parallel: usize) -> Self {
         self.parallel = parallel;
+        self
+    }
+
+    /// Keep the source paused as a reusable branch base.
+    pub fn freeze_source(mut self, freeze_source: bool) -> Self {
+        self.freeze_source = freeze_source;
         self
     }
 }

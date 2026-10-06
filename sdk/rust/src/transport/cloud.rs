@@ -375,6 +375,7 @@ impl Transport for CloudTransport {
             name,
             &Self::ports(options),
             options.checkpointable,
+            options.freeze_source,
         )?;
         let transport = CloudTransport::from_machine(self.client.clone(), clone);
         transport.wait_until_ready(ReadyOptions::default())?;
@@ -386,9 +387,12 @@ impl Transport for CloudTransport {
         names: &[String],
         options: &BranchOptions,
     ) -> Result<Vec<Box<dyn Transport>>> {
-        let clones = self
-            .client
-            .branch_batch(&self.id, names, &Self::ports(options))?;
+        let clones = self.client.branch_batch(
+            &self.id,
+            names,
+            &Self::ports(options),
+            options.freeze_source,
+        )?;
         let mut transports: Vec<Box<dyn Transport>> = Vec::with_capacity(clones.len());
         for clone in clones {
             let transport = CloudTransport::from_machine(self.client.clone(), clone);

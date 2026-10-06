@@ -378,13 +378,23 @@ class Machine:
         *,
         branchable: bool = False,
         checkpointable: Optional[bool] = None,
+        freeze_source: bool = False,
     ) -> "Machine":
         """Branch an independent child from this running source. The child
         inherits warm RAM and disk through copy-on-write while the source remains
         available for more branches. Create the source with
         ``MachineConfig(branchable=True)``.
+
+        ``freeze_source=True`` keeps the source paused as a reusable branch
+        base: later branches start from that same state, and a frozen source no
+        longer counts toward the concurrency cap. The source cannot run
+        commands again; work in its branches, or stop it. Cloud target only.
         """
         promote = branchable or bool(checkpointable)
+        if freeze_source:
+            return Machine(
+                self._t.fork(name, ports, checkpointable=promote, freeze_source=True)
+            )
         return Machine(self._t.fork(name, ports, checkpointable=promote))
 
     def fork_batch(
@@ -405,16 +415,23 @@ class Machine:
         names: Optional[list[str]] = None,
         name_prefix: Optional[str] = None,
         ports: Optional[list[PortSpec]] = None,
+        freeze_source: bool = False,
     ) -> "list[Machine]":
         """Branch this source into many independent children in one call.
 
         The cloud operation is transactional: callers receive every child or
         none. Create the source with ``MachineConfig(branchable=True)``.
+
+        ``freeze_source=True`` keeps the source paused as a reusable branch
+        base: later branches start from that same state, and a frozen source no
+        longer counts toward the concurrency cap. The source cannot run
+        commands again; work in its branches, or stop it. Cloud target only.
         """
+        extra = {"freeze_source": True} if freeze_source else {}
         return [
             Machine(t)
             for t in self._t.fork_batch(
-                count, names=names, name_prefix=name_prefix, ports=ports
+                count, names=names, name_prefix=name_prefix, ports=ports, **extra
             )
         ]
 

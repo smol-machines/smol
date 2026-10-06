@@ -487,9 +487,13 @@ impl Client {
         name: &str,
         ports: &[Port],
         branchable: bool,
+        freeze_source: bool,
     ) -> Result<Machine> {
         let ports = port_bodies(ports);
         let mut branch_body = serde_json::json!({ "name": name, "ports": ports });
+        if freeze_source {
+            branch_body["freezeSource"] = true.into();
+        }
         let mut fork_body = branch_body.clone();
         if branchable {
             branch_body["branchable"] = true.into();
@@ -505,8 +509,17 @@ impl Client {
 
     /// Branch a machine into many clones in one transactional call: all of
     /// them, or none.
-    pub fn branch_batch(&self, id: &str, names: &[String], ports: &[Port]) -> Result<Vec<Machine>> {
-        let body = serde_json::json!({ "names": names, "ports": port_bodies(ports) });
+    pub fn branch_batch(
+        &self,
+        id: &str,
+        names: &[String],
+        ports: &[Port],
+        freeze_source: bool,
+    ) -> Result<Vec<Machine>> {
+        let mut body = serde_json::json!({ "names": names, "ports": port_bodies(ports) });
+        if freeze_source {
+            body["freezeSource"] = true.into();
+        }
         let batch: BranchBatch = self.branch_call(
             &format!("/v1/machines/{id}/branches/batch"),
             body.clone(),

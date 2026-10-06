@@ -157,6 +157,7 @@ class Transport(Protocol):
         ports: Optional[list[PortSpec]] = None,
         *,
         checkpointable: bool = False,
+        freeze_source: bool = False,
     ) -> "Transport": ...
 
     def fork_batch(
@@ -166,6 +167,7 @@ class Transport(Protocol):
         names: Optional[list[str]] = None,
         name_prefix: Optional[str] = None,
         ports: Optional[list[PortSpec]] = None,
+        freeze_source: bool = False,
     ) -> "list[Transport]": ...
 
     def assign(
@@ -828,9 +830,12 @@ class LocalTransport:
         ports: Optional[list[PortSpec]] = None,
         *,
         checkpointable: bool = False,
+        freeze_source: bool = False,
     ) -> "Transport":
         # Local live-RAM CoW clone via the embedded engine. The golden must have
         # been started forkable (MachineConfig(forkable=True)).
+        if freeze_source:
+            raise _freeze_source_unsupported()
         pinned = [(p.host, p.guest) for p in (ports or [])]
         try:
             clone_inner = self._inner.fork(name, pinned, checkpointable)
@@ -855,7 +860,10 @@ class LocalTransport:
         names: Optional[list[str]] = None,
         name_prefix: Optional[str] = None,
         ports: Optional[list[PortSpec]] = None,
+        freeze_source: bool = False,
     ) -> "list[Transport]":
+        if freeze_source:
+            raise _freeze_source_unsupported()
         # The embedded engine freezes once, prepares the whole group from that
         # retained snapshot, and boots clones in bounded parallel waves. It is
         # transactional before returning; readiness below preserves that same
@@ -1298,6 +1306,7 @@ class CloudTransport:
         ports: Optional[list[PortSpec]] = None,
         *,
         checkpointable: bool = False,
+        freeze_source: bool = False,
     ) -> "CloudTransport":
         # Live-RAM CoW clone on the golden's node. The control plane returns the
         # running clone; wait for its agent so the returned handle is usable.
@@ -1312,6 +1321,7 @@ class CloudTransport:
                     "name": name,
                     "ports": port_body,
                     **({"branchable": True} if checkpointable else {}),
+                    **({"freezeSource": True} if freeze_source else {}),
                 },
             )
         except SmolError as error:
@@ -1327,6 +1337,7 @@ class CloudTransport:
                     "name": name,
                     "ports": port_body,
                     **({"forkable": True} if checkpointable else {}),
+                    **({"freezeSource": True} if freeze_source else {}),
                 },
             )
         clone = clone or {}
@@ -1342,6 +1353,7 @@ class CloudTransport:
         names: Optional[list[str]] = None,
         name_prefix: Optional[str] = None,
         ports: Optional[list[PortSpec]] = None,
+        freeze_source: bool = False,
     ) -> "list[CloudTransport]":
         # One transactional call: the control plane forks all clones (or none)
         # off the golden. Send the size spec raw so the server resolves names
@@ -1354,6 +1366,8 @@ class CloudTransport:
             body["count"] = count
         if name_prefix is not None:
             body["namePrefix"] = name_prefix
+        if freeze_source:
+            body["freezeSource"] = True
         try:
             resp = _cloud_fetch(
                 self._base,
@@ -1467,6 +1481,11 @@ class CloudTransport:
             _cloud_fetch(self._base, self._key, "GET", f"/v1/leases/{lease_id}")
             or {}
         )
+
+
+def _freeze_source_unsupported() -> NotSupportedError:
+    # The embedded engine cannot keep a source frozen after branching it.
+    return NotSupportedError("freeze_source is currently available on the cloud target.")
 
 
 def _resolve_batch_names(
