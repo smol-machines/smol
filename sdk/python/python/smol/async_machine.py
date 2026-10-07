@@ -336,7 +336,7 @@ class AsyncMachine:
         """Branch an independent copy-on-write child from this running source.
 
         ``freeze_source=True`` keeps the source paused as a reusable branch
-        base. Cloud target only.
+        base.
         """
         clone = await asyncio.to_thread(
             self._m.branch,
@@ -373,7 +373,7 @@ class AsyncMachine:
         """Branch this source into many independent children in one call.
 
         ``freeze_source=True`` keeps the source paused as a reusable branch
-        base. Cloud target only.
+        base.
         """
         children = await asyncio.to_thread(
             self._m.branch_batch,

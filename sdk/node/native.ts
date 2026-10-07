@@ -137,11 +137,13 @@ export interface NapiMachine {
     name: string,
     ports?: NativePortMapping[],
     checkpointable?: boolean,
+    freezeSource?: boolean,
   ): Promise<NapiMachine>;
   forkBatch(
     names: string[],
     ports?: NativePortMapping[],
     parallel?: number,
+    freezeSource?: boolean,
   ): Promise<NapiMachine[]>;
   exec(
     command: string[],

@@ -834,11 +834,9 @@ class LocalTransport:
     ) -> "Transport":
         # Local live-RAM CoW clone via the embedded engine. The golden must have
         # been started forkable (MachineConfig(forkable=True)).
-        if freeze_source:
-            raise _freeze_source_unsupported()
         pinned = [(p.host, p.guest) for p in (ports or [])]
         try:
-            clone_inner = self._inner.fork(name, pinned, checkpointable)
+            clone_inner = self._inner.fork(name, pinned, checkpointable, freeze_source)
         except Exception as e:  # noqa: BLE001
             raise wrap_native_error(e) from e
         # LocalTransport.__init__ registers the clone for atexit cleanup.
@@ -862,8 +860,6 @@ class LocalTransport:
         ports: Optional[list[PortSpec]] = None,
         freeze_source: bool = False,
     ) -> "list[Transport]":
-        if freeze_source:
-            raise _freeze_source_unsupported()
         # The embedded engine freezes once, prepares the whole group from that
         # retained snapshot, and boots clones in bounded parallel waves. It is
         # transactional before returning; readiness below preserves that same
@@ -874,7 +870,7 @@ class LocalTransport:
         try:
             try:
                 inners = self._inner.fork_batch(
-                    resolved, pinned, min(8, len(resolved))
+                    resolved, pinned, min(8, len(resolved)), freeze_source
                 )
             except Exception as e:  # noqa: BLE001 - normalize native engine errors
                 raise wrap_native_error(e) from e
@@ -1481,11 +1477,6 @@ class CloudTransport:
             _cloud_fetch(self._base, self._key, "GET", f"/v1/leases/{lease_id}")
             or {}
         )
-
-
-def _freeze_source_unsupported() -> NotSupportedError:
-    # The embedded engine cannot keep a source frozen after branching it.
-    return NotSupportedError("freeze_source is currently available on the cloud target.")
 
 
 def _resolve_batch_names(

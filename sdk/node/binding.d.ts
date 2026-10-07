@@ -265,12 +265,12 @@ export declare class NapiMachine {
    * live RAM + disks (same host). `ports` are `{ host, guest }` inbound
    * forwards for the clone. Returns a handle to the running clone.
    */
-  fork(name: string, ports?: Array<PortMappingConfig> | undefined | null, checkpointable?: boolean | undefined | null): Promise<NapiMachine>
+  fork(name: string, ports?: Array<PortMappingConfig> | undefined | null, checkpointable?: boolean | undefined | null, freezeSource?: boolean | undefined | null): Promise<NapiMachine>
   /**
    * Fork many clones from one retained snapshot and boot them in bounded
    * parallel waves. Transactional: an error removes every clone in this call.
    */
-  forkBatch(names: Array<string>, ports?: Array<PortMappingConfig> | undefined | null, parallel?: number | undefined | null): Promise<Array<NapiMachine>>
+  forkBatch(names: Array<string>, ports?: Array<PortMappingConfig> | undefined | null, parallel?: number | undefined | null, freezeSource?: boolean | undefined | null): Promise<Array<NapiMachine>>
   /** Execute a command directly in the VM (not in a container). */
   exec(command: Array<string>, options?: ExecOptions | undefined | null): Promise<ExecResult>
   /**

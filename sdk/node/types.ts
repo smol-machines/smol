@@ -96,7 +96,7 @@ export interface BranchOptions {
   /** Keep the source paused as a reusable branch base instead of resuming it.
    *  Later branches start from that same state, and a frozen source no longer
    *  counts toward the concurrency cap. The source cannot run commands again;
-   *  work in its branches, or stop it. Cloud target only. */
+   *  work in its branches, or stop it. */
   freezeSource?: boolean;
 }
 
@@ -119,7 +119,7 @@ export interface BranchBatchOptions {
   /** Keep the source paused as a reusable branch base instead of resuming it.
    *  Later branches start from that same state, and a frozen source no longer
    *  counts toward the concurrency cap. The source cannot run commands again;
-   *  work in its branches, or stop it. Cloud target only. */
+   *  work in its branches, or stop it. */
   freezeSource?: boolean;
 }
 

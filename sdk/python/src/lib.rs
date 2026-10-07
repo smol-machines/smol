@@ -19,7 +19,7 @@ use pyo3::exceptions::PyRuntimeError;
 use pyo3::prelude::*;
 use pyo3::types::{PyBytes, PyDict};
 use smolvm::agent::ExecEvent;
-use smolvm::embedded::{runtime, ExecCancel, ExecOptions, MachineSpec};
+use smolvm::embedded::{runtime, ExecCancel, ExecOptions, ForkSourcePolicy, MachineSpec};
 use smolvm::error::{AgentErrorKind, Error as SmolvmError};
 
 // Error codes exposed to Python as `SmolError.code` (parity with smol-node's
@@ -252,6 +252,14 @@ struct ExecStream {
     // Mutex makes `&Receiver` Send so __next__ can recv inside `allow_threads`.
     rx: std::sync::Mutex<std::sync::mpsc::Receiver<ExecEvent>>,
     cancel: ExecCancel,
+}
+
+fn source_policy(freeze_source: bool) -> ForkSourcePolicy {
+    if freeze_source {
+        ForkSourcePolicy::Freeze
+    } else {
+        ForkSourcePolicy::PlatformDefault
+    }
 }
 
 #[pymethods]
@@ -760,23 +768,27 @@ impl Machine {
 
     /// Fork this running, forkable machine into a new clone via copy-on-write
     /// live RAM + disks (same host). `ports` are `(host, guest)` inbound forwards
-    /// for the clone. Returns a handle to the running clone.
-    #[pyo3(signature = (name, ports=None, checkpointable=false))]
+    /// for the clone. `freeze_source` keeps this machine paused as a reusable
+    /// branch base. Returns a handle to the running clone.
+    #[pyo3(signature = (name, ports=None, checkpointable=false, freeze_source=false))]
     fn fork(
         &self,
         py: Python<'_>,
         name: String,
         ports: Option<Vec<(u16, u16)>>,
         checkpointable: bool,
+        freeze_source: bool,
     ) -> PyResult<Self> {
         let pinned = ports.unwrap_or_default();
         let runtime = runtime().map_err(err)?;
         py.allow_threads(|| {
-            if checkpointable {
-                runtime.fork_checkpointable_machine(&self.name, &name, &pinned)
-            } else {
-                runtime.fork_machine(&self.name, &name, &pinned)
-            }
+            runtime.fork_machine_with(
+                &self.name,
+                &name,
+                &pinned,
+                checkpointable,
+                source_policy(freeze_source),
+            )
         })
         .map_err(err)?;
         Ok(Machine { name })
@@ -784,18 +796,27 @@ impl Machine {
 
     /// Fork many clones from one snapshot and boot them in bounded parallel
     /// waves. Transactional: an error removes every clone in this call.
-    #[pyo3(signature = (names, ports=None, parallel=8))]
+    #[pyo3(signature = (names, ports=None, parallel=8, freeze_source=false))]
     fn fork_batch(
         &self,
         py: Python<'_>,
         names: Vec<String>,
         ports: Option<Vec<(u16, u16)>>,
         parallel: usize,
+        freeze_source: bool,
     ) -> PyResult<Vec<Self>> {
         let pinned = ports.unwrap_or_default();
         let runtime = runtime().map_err(err)?;
-        py.allow_threads(|| runtime.fork_machines(&self.name, &names, &pinned, parallel))
-            .map_err(err)?;
+        py.allow_threads(|| {
+            runtime.fork_machines_with(
+                &self.name,
+                &names,
+                &pinned,
+                parallel,
+                source_policy(freeze_source),
+            )
+        })
+        .map_err(err)?;
         Ok(names.into_iter().map(|name| Machine { name }).collect())
     }
 
