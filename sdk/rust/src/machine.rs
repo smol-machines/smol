@@ -569,6 +569,19 @@ impl Machine {
         Ok(Self::from_transport(Box::new(transport)))
     }
 
+    /// Delete a capture the control plane is holding, by the id from
+    /// [`Machine::checkpoint`] or [`Machine::checkpoints`]. A local capture is a
+    /// file; remove it like any other.
+    pub fn delete_cloud_checkpoint(checkpoint: &str, connect: &ConnectOptions) -> Result<()> {
+        if connect.target() != Target::Cloud {
+            return Err(Error::new(
+                ErrorKind::NotSupported,
+                "deleting by checkpoint id is a cloud operation; a local capture is a file",
+            ));
+        }
+        Ok(connect.client()?.delete_checkpoint(checkpoint)?)
+    }
+
     /// Upload a `.checkpoint` file taken on this computer, such as one from
     /// [`Machine::checkpoint`], so it can be restored in the cloud with
     /// [`Machine::restore_cloud_checkpoint`]. Returns the cloud checkpoint id.

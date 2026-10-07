@@ -325,6 +325,10 @@ const server = createServer(async (req, res) => {
   // and no URL; the SDK must surface null rather than inventing one.
   if (method === "POST" && url === "/v1/machines/m2/share")
     return json(200, { token: "msh_tok456" });
+  if (method === "DELETE" && url === "/v1/checkpoints/ckpt-old") {
+    seen.deletedCheckpoint = true;
+    return json(204, {});
+  }
   if (method === "DELETE" && url === "/v1/machines/m1/share") {
     seen.unshared = true;
     res.writeHead(204);
@@ -686,6 +690,10 @@ async function main(): Promise<void> {
       legacyBranch.name === "legacy-branch",
     JSON.stringify(seen.legacyForkBody),
   );
+
+  // --- delete a stored checkpoint by id ---
+  await Machine.deleteCheckpoint("ckpt-old", { target: "cloud", baseUrl, apiKey: "smk_test123" });
+  check("deleteCheckpoint sends DELETE /v1/checkpoints/<id>", seen.deletedCheckpoint === true);
 
   // --- resize: grow the running machine in place ---
   const grown = await m.resize({ cpus: 4, memoryMb: 4096, storageGb: 40 });

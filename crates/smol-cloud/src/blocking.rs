@@ -617,6 +617,18 @@ impl Client {
         )
     }
 
+    /// Delete a stored capture. The control plane refuses one that a machine
+    /// was restored from, or that holds a paused machine's saved execution,
+    /// until that machine is gone.
+    pub fn delete_checkpoint(&self, checkpoint_id: &str) -> Result<()> {
+        self.empty(
+            reqwest::Method::DELETE,
+            &format!("/v1/checkpoints/{}", encode_path(checkpoint_id)),
+            Body::None,
+            REQUEST_TIMEOUT,
+        )
+    }
+
     /// Create a machine from a stored capture.
     ///
     /// The new machine comes back stopped; start it and wait for readiness the

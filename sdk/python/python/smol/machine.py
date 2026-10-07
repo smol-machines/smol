@@ -21,6 +21,7 @@ from .transport import (
     Transport,
     _load_native,
     connect_transport,
+    delete_checkpoint_transport,
     make_transport,
     restore_checkpoint_transport,
     upload_checkpoint,
@@ -116,6 +117,15 @@ class Machine:
                 network,
             )
         )
+
+    @staticmethod
+    def delete_checkpoint(checkpoint_id: str, conn: Optional[ConnectOptions] = None) -> None:
+        """Delete a local checkpoint file or a durable cloud checkpoint by id.
+
+        A cloud checkpoint that a machine was restored from, or that holds a
+        paused machine's saved execution, is refused until that machine is gone.
+        """
+        delete_checkpoint_transport(checkpoint_id, conn)
 
     @staticmethod
     def upload_checkpoint(

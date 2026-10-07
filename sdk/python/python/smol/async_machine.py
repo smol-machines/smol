@@ -103,6 +103,11 @@ class AsyncMachine:
         return cls(machine)
 
     @staticmethod
+    async def delete_checkpoint(checkpoint_id: str, conn: Optional[ConnectOptions] = None) -> None:
+        """Delete a local checkpoint file or a durable cloud checkpoint by id."""
+        await asyncio.to_thread(Machine.delete_checkpoint, checkpoint_id, conn)
+
+    @staticmethod
     async def upload_checkpoint(
         path: str,
         conn: Optional[ConnectOptions] = None,
