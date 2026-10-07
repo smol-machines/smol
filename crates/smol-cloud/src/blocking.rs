@@ -251,6 +251,33 @@ impl Client {
         )
     }
 
+    /// Change a running machine's size in place. Fields left `None` keep their
+    /// current value; memory and disk only grow.
+    pub fn resize(
+        &self,
+        id: &str,
+        cpus: Option<u8>,
+        memory_mb: Option<u32>,
+        disk_gb: Option<u64>,
+    ) -> Result<Machine> {
+        let mut body = serde_json::Map::new();
+        if let Some(cpus) = cpus {
+            body.insert("cpus".into(), cpus.into());
+        }
+        if let Some(memory_mb) = memory_mb {
+            body.insert("memoryMb".into(), memory_mb.into());
+        }
+        if let Some(disk_gb) = disk_gb {
+            body.insert("diskGb".into(), disk_gb.into());
+        }
+        self.json(
+            reqwest::Method::POST,
+            &format!("/v1/machines/{id}/resize"),
+            Body::Json(serde_json::Value::Object(body)),
+            START_TIMEOUT,
+        )
+    }
+
     /// Save execution durably and stop the machine.
     pub fn pause(&self, id: &str) -> Result<()> {
         self.empty(

@@ -1489,10 +1489,35 @@ class CloudTransport implements Transport {
     );
   }
 
-  async resize(_options: ResizeOptions): Promise<MachineResources> {
-    throw new NotSupportedError(
-      "live resize is currently available on the local target.",
+  async resize(options: ResizeOptions): Promise<MachineResources> {
+    // The control plane applies RAM, then CPUs, then disk on the running
+    // machine. A cloud machine has one disk, so its size is `storageGb`.
+    if (options.overlayGb !== undefined) {
+      throw new InvalidConfigError(
+        "a cloud machine has a single disk; resize it with storageGb, not overlayGb",
+      );
+    }
+    for (const [field, value] of Object.entries(options)) {
+      if (value !== undefined && (!Number.isInteger(value) || value < 1)) {
+        throw new InvalidConfigError(`resize ${field} must be a positive whole number`);
+      }
+    }
+    const body: Record<string, number> = {};
+    if (options.cpus !== undefined) body.cpus = options.cpus;
+    if (options.memoryMb !== undefined) body.memoryMb = options.memoryMb;
+    if (options.storageGb !== undefined) body.diskGb = options.storageGb;
+    const m = await cloudFetch<MachineInfo>(
+      this.conn,
+      "POST",
+      `/v1/machines/${this.id}/resize`,
+      { json: body },
     );
+    const resources: MachineResources = {
+      cpus: m.resources.cpus ?? 1,
+      memoryMb: m.resources.memoryMb ?? 0,
+    };
+    if (m.resources.diskGb != null) resources.storageGb = m.resources.diskGb;
+    return resources;
   }
 
   async fork(name: string, options?: PortSpec[] | ForkOptions): Promise<Transport> {

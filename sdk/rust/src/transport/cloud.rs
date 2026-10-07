@@ -15,7 +15,7 @@ use crate::error::{Error, ErrorKind, Result};
 use crate::exec::{ExecEvent, ExecOptions, ExecResult, ExecStream, KillHandle};
 use crate::machine::{
     BranchOptions, Checkpoint, CheckpointOptions, CloudCheckpoint, CostBreakdown, ImageInfo,
-    MachineState, PortEndpoint, ShareLink, UsageReport, UsageTotals,
+    MachineResources, MachineState, PortEndpoint, Resize, ShareLink, UsageReport, UsageTotals,
 };
 
 /// Slack over a command's own timeout, covering the round trip, so the client
@@ -180,6 +180,26 @@ impl Transport for CloudTransport {
 
     fn stop(&self) -> Result<()> {
         Ok(self.client.stop(&self.id)?)
+    }
+
+    fn resize(&self, resize: &Resize) -> Result<MachineResources> {
+        // A cloud machine has one disk, so its size is the storage disk.
+        if resize.overlay_gib.is_some() {
+            return Err(Error::new(
+                ErrorKind::Config,
+                "a cloud machine has a single disk; resize it with storage_gib, not overlay_gib",
+            ));
+        }
+        let machine =
+            self.client
+                .resize(&self.id, resize.cpus, resize.memory_mib, resize.storage_gib)?;
+        let resources = machine.resources.unwrap_or_default();
+        Ok(MachineResources {
+            cpus: resources.cpus.map(|c| c as u8).unwrap_or(1),
+            memory_mib: resources.memory_mb.unwrap_or(0),
+            storage_gib: resources.disk_gb.map(u64::from),
+            overlay_gib: None,
+        })
     }
 
     fn pause(&self) -> Result<()> {

@@ -1294,7 +1294,36 @@ class CloudTransport:
         storage_gb: Optional[int] = None,
         overlay_gb: Optional[int] = None,
     ) -> MachineResources:
-        raise NotSupportedError("live resize is currently available on the local target.")
+        # The control plane applies RAM, then CPUs, then disk on the running
+        # machine. A cloud machine has one disk, so its size is `storage_gb`.
+        if overlay_gb is not None:
+            raise InvalidConfigError(
+                "a cloud machine has a single disk; resize it with storage_gb, not overlay_gb"
+            )
+        body: dict[str, int] = {}
+        for field, key, value in (
+            ("cpus", "cpus", cpus),
+            ("memory_mb", "memoryMb", memory_mb),
+            ("storage_gb", "diskGb", storage_gb),
+        ):
+            if value is None:
+                continue
+            if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+                raise InvalidConfigError(f"resize {field} must be a positive whole number")
+            body[key] = value
+        m = _cloud_fetch(
+            self._base,
+            self._key,
+            "POST",
+            f"/v1/machines/{self._id}/resize",
+            json_body=body,
+        ) or {}
+        resources = m.get("resources") or {}
+        return MachineResources(
+            cpus=int(resources.get("cpus") or 1),
+            memory_mb=int(resources.get("memoryMb") or 0),
+            storage_gb=resources.get("diskGb"),
+        )
 
     def fork(
         self,
