@@ -456,11 +456,12 @@ jobs:
     # The Rust SDK is source-only and self-contained, so it needs no build
     # matrix — but it must go out at the SAME version as npm and PyPI, or the
     # three SDKs drift. Publishing it by hand from main is how it ended up at
-    # main's stale baseline instead of the release version. It waits for npm,
-    # whose pre-publish checks gate the release, but not for PyPI: a PyPI
-    # failure after npm is live (e.g. the project size limit) would otherwise
-    # leave only the Rust SDK behind.
-    needs: [node-publish]
+    # main's stale baseline instead of the release version. It waits for every
+    # SDK build, so a broken build stops all three registries, but not for
+    # another registry's publish: npm refusing a publish (a package missing its
+    # trusted publisher, as on 1.23.1 and 1.24.0) used to hold back crates.io
+    # and PyPI too.
+    needs: [node-build, python-wheels]
     if: github.event_name == 'push' || inputs.publish
     runs-on: ubuntu-latest
     steps:
@@ -477,20 +478,41 @@ jobs:
           # the whole workspace, so publish from a copy that lives outside it.
           # The crate inherits nothing from the workspace, so the copy is complete.
           cp -r crates/smol-cloud "$RUNNER_TEMP/smol-cloud"
+          # A re-run skips a version crates.io already has, like npm and PyPI.
+          published() {
+            curl -fsS -A "smol-release (github.com/smol-machines/smol)" \
+              "https://crates.io/api/v1/crates/$1/$2" >/dev/null 2>&1
+          }
+          version() {
+            cargo metadata --no-deps --format-version 1 --manifest-path "$1" \
+              | jq -r '.packages[0].version'
+          }
           # Order matters: the SDK resolves smol-cloud from the registry.
-          cargo publish --manifest-path "$RUNNER_TEMP/smol-cloud/Cargo.toml"
+          ver="$(version "$RUNNER_TEMP/smol-cloud/Cargo.toml")"
+          if published smol-cloud "$ver"; then
+            echo "smol-cloud $ver already on crates.io — skipping"
+          else
+            cargo publish --manifest-path "$RUNNER_TEMP/smol-cloud/Cargo.toml"
+          fi
+          ver="$(version sdk/rust/Cargo.toml)"
+          if published smolmachines "$ver"; then
+            echo "smolmachines $ver already on crates.io — skipping"
+            exit 0
+          fi
           # crates.io needs a moment to index before the dependant resolves.
           for _ in $(seq 1 30); do
-            cargo publish --manifest-path sdk/rust/Cargo.toml && break
+            cargo publish --manifest-path sdk/rust/Cargo.toml && exit 0
             sleep 10
           done
+          exit 1
 
   python-publish:
     name: py · publish to PyPI
-    # Also gate on node-publish: if node's pre-publish verify fails, PyPI must NOT
-    # publish either — keeps the version consistent across both registries (no
-    # half-published release / version divergence).
-    needs: [python-wheels, node-publish]
+    # Gate on every SDK build, so a broken build stops all registries, but not on
+    # the npm publish: a registry-side refusal there must not hold PyPI back.
+    # Each registry skips a version it already has, so re-running the release
+    # finishes whichever one failed.
+    needs: [python-wheels, node-build]
     if: ${{ github.event_name == 'push' || inputs.publish }}
     runs-on: ubuntu-latest
     # OIDC trusted publishing: GitHub mints a short-lived token PyPI verifies
