@@ -326,6 +326,8 @@ impl Transport for CloudTransport {
                     .map(|rest| format!("ws{rest}"))
             })
             .unwrap_or_else(|| http_url.clone());
+        // The header outlives this call, so never hand out a lapsed session.
+        self.client.credentials().renew_if_expiring()?;
         Ok(PortEndpoint {
             http_url,
             ws_url,
@@ -337,11 +339,12 @@ impl Transport for CloudTransport {
     }
 
     fn tunnel_target(&self, port: u16) -> Result<crate::tunnel::Target> {
+        self.client.credentials().renew_if_expiring()?;
         crate::tunnel::Target::cloud(
             self.client.credentials().base_url(),
             &self.id,
             port,
-            self.client.credentials().api_key(),
+            &self.client.credentials().api_key(),
         )
     }
 

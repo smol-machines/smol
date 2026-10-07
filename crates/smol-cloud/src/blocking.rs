@@ -104,24 +104,48 @@ impl Client {
         body: Body<'_>,
         timeout: Duration,
     ) -> Result<reqwest::blocking::Response> {
+        self.credentials.renew_if_expiring()?;
+        let key = self.credentials.api_key();
+        let response = self.send_once(&method, path, &body, timeout, &key)?;
+        // A CLI session the control plane stopped honouring before its
+        // recorded expiry gets one renewal and one retry; any other 401 is a
+        // verdict.
+        if response.status() == reqwest::StatusCode::UNAUTHORIZED
+            && self.credentials.renew_after_rejection(&key)?
+        {
+            let key = self.credentials.api_key();
+            let response = self.send_once(&method, path, &body, timeout, &key)?;
+            return check_status(response, &method, path);
+        }
+        check_status(response, &method, path)
+    }
+
+    fn send_once(
+        &self,
+        method: &reqwest::Method,
+        path: &str,
+        body: &Body<'_>,
+        timeout: Duration,
+        key: &str,
+    ) -> Result<reqwest::blocking::Response> {
         let mut request = self
             .http
             .request(
                 method.clone(),
                 format!("{}{path}", self.credentials.base_url()),
             )
-            .bearer_auth(self.credentials.api_key())
+            .bearer_auth(key)
             .timeout(timeout);
         match body {
             Body::None => {}
-            Body::Json(value) => request = request.json(&value),
+            Body::Json(value) => request = request.json(value),
             Body::Bytes(bytes) => {
                 request = request
                     .header(reqwest::header::CONTENT_TYPE, "application/octet-stream")
                     .body(bytes.to_vec())
             }
         }
-        let response = request.send().map_err(|e| {
+        request.send().map_err(|e| {
             if e.is_timeout() {
                 Error::new(
                     ErrorKind::Timeout,
@@ -133,8 +157,7 @@ impl Client {
                     format!("{method} {path} failed: {e}"),
                 )
             }
-        })?;
-        check_status(response, &method, path)
+        })
     }
 
     fn json<T: DeserializeOwned>(
@@ -402,6 +425,7 @@ impl Client {
             .enable_all()
             .build()
             .map_err(|e| Error::new(ErrorKind::Other, format!("start a stream runtime: {e}")))?;
+        self.credentials.renew_if_expiring()?;
         let request = self
             .stream_http
             .post(format!("{}{path}", self.credentials.base_url()))
@@ -1088,6 +1112,75 @@ impl<R: Read> Read for CountingReader<R> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// One server standing in for both the control plane and the identity
+    /// provider: it rejects `jwt-old`, accepts `jwt-new`, and hands out
+    /// `jwt-new` for a refresh. Returns its URL and how many 401s it sent.
+    fn rejecting_then_renewing_server() -> (String, std::sync::Arc<std::sync::atomic::AtomicUsize>)
+    {
+        use std::io::{Read, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        let rejected = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let count = rejected.clone();
+        std::thread::spawn(move || {
+            for stream in listener.incoming() {
+                let mut stream = stream.unwrap();
+                let mut request = vec![0_u8; 8192];
+                let read = stream.read(&mut request).unwrap_or(0);
+                let request = String::from_utf8_lossy(&request[..read]).to_lowercase();
+                let (status, body) = if request.starts_with("post /oauth/token") {
+                    (
+                        "200 OK",
+                        r#"{"access_token":"jwt-new","refresh_token":"rt-new","expires_in":86400}"#,
+                    )
+                } else if request.contains("authorization: bearer jwt-new") {
+                    ("200 OK", "[]")
+                } else {
+                    count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    ("401 Unauthorized", r#"{"error":"unauthorized"}"#)
+                };
+                let _ = write!(
+                    stream,
+                    "HTTP/1.1 {status}\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+            }
+        });
+        (url, rejected)
+    }
+
+    #[test]
+    fn a_rejected_cli_session_is_renewed_and_the_request_retried_once() {
+        let (url, rejected) = rejecting_then_renewing_server();
+        let dir = std::env::temp_dir().join(format!("smol-cloud-retry-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let config = dir.join("config.toml");
+        std::fs::write(
+            &config,
+            "[cloud]\napi_key = \"jwt-old\"\nrefresh_token = \"rt-old\"\n",
+        )
+        .unwrap();
+        let client = Client::new(Credentials::test_session(
+            &url, "jwt-old", "rt-old", &config, &url,
+        ))
+        .unwrap();
+
+        assert!(client.machines().unwrap().is_empty());
+        assert_eq!(rejected.load(std::sync::atomic::Ordering::SeqCst), 1);
+        assert_eq!(client.credentials().api_key(), "jwt-new");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_rejected_api_key_is_not_retried() {
+        let (url, rejected) = rejecting_then_renewing_server();
+        let client = Client::new(Credentials::new(&url, "smk_revoked")).unwrap();
+
+        let error = client.machines().unwrap_err();
+        assert_eq!(error.kind(), ErrorKind::Unauthorized);
+        assert_eq!(rejected.load(std::sync::atomic::Ordering::SeqCst), 1);
+    }
 
     #[test]
     fn a_status_error_shows_the_sentence_not_the_problem_json() {

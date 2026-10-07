@@ -47,15 +47,14 @@ enum FetchErr {
 
 impl AuthStatusCmd {
     pub fn run(self) -> Result<()> {
-        let settings = SmolSettings::load()?;
-        let cloud = &settings.cloud;
-        let key = cloud.api_key.as_deref().filter(|k| !k.is_empty());
-        let endpoint = cloud
+        let mut settings = SmolSettings::load()?;
+        let endpoint = settings
+            .cloud
             .endpoint()
             .unwrap_or(smolvm::registry::SMOLMACHINES_API)
             .to_string();
 
-        let Some(key) = key else {
+        let Some(mut key) = settings.cloud.api_key.clone().filter(|k| !k.is_empty()) else {
             if self.json {
                 println!("{}", serde_json::json!({ "loggedIn": false }));
             } else {
@@ -75,7 +74,29 @@ impl AuthStatusCmd {
             "user session"
         };
 
-        match fetch_me(&endpoint, key) {
+        // A session's access token lasts a day; renew it the way every cloud
+        // command does, so this reports the login rather than the token's age.
+        let renewable = !is_api_key && settings.cloud.refresh_token.is_some();
+        if renewable && settings.cloud.is_token_expired() {
+            if let Err(e) = super::cloud::renew_cloud_session(&mut settings) {
+                return report_rejected(self.json, is_api_key, Some(&e.to_string()));
+            }
+            key = settings.cloud.api_key.clone().unwrap_or_default();
+        }
+
+        let mut fetched = fetch_me(&endpoint, &key);
+        // The control plane can stop honouring a token before its recorded
+        // expiry; one renewal and one retry, as the cloud client does.
+        if renewable && matches!(fetched, Err(FetchErr::Unauthorized)) {
+            if let Err(e) = super::cloud::renew_cloud_session(&mut settings) {
+                return report_rejected(self.json, is_api_key, Some(&e.to_string()));
+            }
+            key = settings.cloud.api_key.clone().unwrap_or_default();
+            fetched = fetch_me(&endpoint, &key);
+        }
+        let cloud = &settings.cloud;
+
+        match fetched {
             Ok(me) => {
                 if self.json {
                     let out = serde_json::json!({
@@ -90,20 +111,7 @@ impl AuthStatusCmd {
                 }
             }
             Err(FetchErr::Unauthorized) => {
-                if self.json {
-                    println!(
-                        "{}",
-                        serde_json::json!({ "loggedIn": false, "error": "unauthorized" })
-                    );
-                } else {
-                    println!("Credential rejected (401) — it may be expired or revoked.");
-                    if is_api_key {
-                        println!("  Check the key, or create a new one in the console.");
-                    } else {
-                        println!("  Run `smol auth login` to re-authenticate.");
-                    }
-                }
-                std::process::exit(1);
+                return report_rejected(self.json, is_api_key, None);
             }
             Err(FetchErr::Other(e)) => {
                 // Offline / control-plane unreachable: report what we know locally.
@@ -134,6 +142,26 @@ impl AuthStatusCmd {
 }
 
 /// Query `GET {endpoint}/v1/me` with the bearer credential.
+/// Say the credential was refused (and, for a failed renewal, why) and exit 1.
+fn report_rejected(json: bool, is_api_key: bool, renewal_error: Option<&str>) -> Result<()> {
+    if json {
+        println!(
+            "{}",
+            serde_json::json!({ "loggedIn": false, "error": "unauthorized" })
+        );
+    } else if let Some(reason) = renewal_error {
+        println!("Session expired and could not be renewed: {reason}");
+    } else {
+        println!("Credential rejected (401) — it may be expired or revoked.");
+        if is_api_key {
+            println!("  Check the key, or create a new one in the console.");
+        } else {
+            println!("  Run `smol auth login` to re-authenticate.");
+        }
+    }
+    std::process::exit(1);
+}
+
 fn fetch_me(endpoint: &str, key: &str) -> std::result::Result<Me, FetchErr> {
     let url = format!("{}/v1/me", endpoint.trim_end_matches('/'));
     let rt = tokio::runtime::Runtime::new().map_err(|e| FetchErr::Other(e.to_string()))?;
