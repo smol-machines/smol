@@ -10,7 +10,7 @@ use napi_derive::napi;
 use crate::error::IntoNapiResult;
 use crate::types::*;
 use smolvm::agent::ExecEvent;
-use smolvm::embedded::{runtime, MachineSpec};
+use smolvm::embedded::{runtime, ForkSourcePolicy, MachineSpec};
 
 fn join_error(err: tokio::task::JoinError) -> napi::Error {
     napi::Error::from_reason(format!("Task join error: {}", err))
@@ -83,6 +83,14 @@ fn parse_interceptor(
         _ => Err(napi::Error::from_reason(
             "egress interceptor requires both address and token",
         )),
+    }
+}
+
+fn source_policy(freeze_source: Option<bool>) -> ForkSourcePolicy {
+    if freeze_source.unwrap_or(false) {
+        ForkSourcePolicy::Freeze
+    } else {
+        ForkSourcePolicy::PlatformDefault
     }
 }
 
@@ -286,7 +294,11 @@ impl NapiMachine {
                         state,
                         pid,
                         image: record.image.clone(),
-                        labels: record.labels.iter().map(|(k, v)| (k.clone(), v.clone())).collect(),
+                        labels: record
+                            .labels
+                            .iter()
+                            .map(|(k, v)| (k.clone(), v.clone()))
+                            .collect(),
                         persistent: !record.ephemeral,
                         detached: record.detached,
                         branchable: record.forkable_on_start(),
@@ -527,6 +539,7 @@ impl NapiMachine {
         name: String,
         ports: Option<Vec<PortMappingConfig>>,
         checkpointable: Option<bool>,
+        freeze_source: Option<bool>,
     ) -> napi::Result<NapiMachine> {
         let runtime = runtime().into_napi()?;
         let golden = self.name.clone();
@@ -537,11 +550,13 @@ impl NapiMachine {
             .map(|p| (p.host, p.guest))
             .collect();
         tokio::task::spawn_blocking(move || {
-            if checkpointable.unwrap_or(false) {
-                runtime.fork_checkpointable_machine(&golden, &clone, &pinned)
-            } else {
-                runtime.fork_machine(&golden, &clone, &pinned)
-            }
+            runtime.fork_machine_with(
+                &golden,
+                &clone,
+                &pinned,
+                checkpointable.unwrap_or(false),
+                source_policy(freeze_source),
+            )
         })
         .await
         .map_err(join_error)?
@@ -557,6 +572,7 @@ impl NapiMachine {
         names: Vec<String>,
         ports: Option<Vec<PortMappingConfig>>,
         parallel: Option<u32>,
+        freeze_source: Option<bool>,
     ) -> napi::Result<Vec<NapiMachine>> {
         let runtime = runtime().into_napi()?;
         let golden = self.name.clone();
@@ -568,7 +584,13 @@ impl NapiMachine {
             .collect();
         let width = parallel.unwrap_or(8).max(1) as usize;
         tokio::task::spawn_blocking(move || {
-            runtime.fork_machines(&golden, &clones, &pinned, width)
+            runtime.fork_machines_with(
+                &golden,
+                &clones,
+                &pinned,
+                width,
+                source_policy(freeze_source),
+            )
         })
         .await
         .map_err(join_error)?

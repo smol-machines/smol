@@ -156,13 +156,6 @@ export interface Transport {
   getLease(leaseId: string): Promise<Record<string, unknown>>;
 }
 
-/** The embedded engine cannot keep a source frozen after branching it. */
-function freezeSourceUnsupported(): NotSupportedError {
-  return new NotSupportedError(
-    "freezeSource is currently available on the cloud target.",
-  );
-}
-
 /** Resolve a batch fork's clone names + size, mirroring the control plane:
  *  explicit `names` win, otherwise `count` clones are named `{prefix}-{n}`.
  *  Used by the local target (the cloud target lets the server resolve). */
@@ -753,7 +746,6 @@ class LocalTransport implements Transport {
     // Local live-RAM CoW clone via the embedded engine. The golden must have been
     // started forkable (MachineConfig({ forkable: true })).
     const opts: ForkOptions = Array.isArray(options) ? { ports: options } : (options ?? {});
-    if (opts.freezeSource) throw freezeSourceUnsupported();
     const nativePorts = (opts.ports ?? []).map((p) => ({
       host: p.host,
       guest: p.guest,
@@ -765,6 +757,7 @@ class LocalTransport implements Transport {
           name,
           nativePorts,
           opts.branchable ?? opts.checkpointable ?? false,
+          opts.freezeSource ?? false,
         ),
         this.handleSignals,
         undefined,
@@ -779,7 +772,6 @@ class LocalTransport implements Transport {
   }
 
   async forkBatch(opts: ForkBatchOptions): Promise<Transport[]> {
-    if (opts.freezeSource) throw freezeSourceUnsupported();
     const names = resolveBatchNames(opts, "branch");
     const nativePorts = (opts.ports ?? []).map((p) => ({
       host: p.host,
@@ -791,6 +783,7 @@ class LocalTransport implements Transport {
         names,
         nativePorts,
         Math.min(8, names.length),
+        opts.freezeSource ?? false,
       );
       branches.push(
         ...inners.map(

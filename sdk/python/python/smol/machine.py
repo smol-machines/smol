@@ -388,7 +388,7 @@ class Machine:
         ``freeze_source=True`` keeps the source paused as a reusable branch
         base: later branches start from that same state, and a frozen source no
         longer counts toward the concurrency cap. The source cannot run
-        commands again; work in its branches, or stop it. Cloud target only.
+        commands again; work in its branches, or stop it.
         """
         promote = branchable or bool(checkpointable)
         if freeze_source:
@@ -425,7 +425,7 @@ class Machine:
         ``freeze_source=True`` keeps the source paused as a reusable branch
         base: later branches start from that same state, and a frozen source no
         longer counts toward the concurrency cap. The source cannot run
-        commands again; work in its branches, or stop it. Cloud target only.
+        commands again; work in its branches, or stop it.
         """
         extra = {"freeze_source": True} if freeze_source else {}
         return [
