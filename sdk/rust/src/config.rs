@@ -151,6 +151,10 @@ pub struct MachineConfig {
     pub user: Option<String>,
     /// Directories exposed in the guest.
     pub mounts: Vec<Mount>,
+    /// Unix sockets the guest listens on, reachable from the host as
+    /// `(guest_path, host_path)`. Carried over vsock, so a machine without
+    /// networking keeps no network device for them. Local only.
+    pub exposed_sockets: Vec<(String, String)>,
     /// Inbound port forwards.
     pub ports: Vec<Port>,
     /// VM sizing and devices.
@@ -258,6 +262,10 @@ impl MachineConfig {
             args.push("--allow-cidr".into());
             args.push(cidr.clone());
         }
+        for (guest, host) in &self.exposed_sockets {
+            args.push("--expose-socket".into());
+            args.push(format!("{guest}:{host}"));
+        }
         for port in &self.ports {
             args.push("-p".into());
             args.push(format!("{}:{}", port.host, port.guest));
@@ -322,6 +330,12 @@ impl MachineConfig {
             return Err(Error::new(
                 ErrorKind::NotSupported,
                 "egress interception is local-only",
+            ));
+        }
+        if !self.exposed_sockets.is_empty() {
+            return Err(Error::new(
+                ErrorKind::NotSupported,
+                "exposing a guest Unix socket is local-only",
             ));
         }
 
@@ -454,6 +468,19 @@ impl MachineBuilder {
     /// Expose a directory in the guest.
     pub fn mount(mut self, mount: Mount) -> Self {
         self.config.mounts.push(mount);
+        self
+    }
+
+    /// Make a Unix socket the guest listens on at `guest_path` reachable on
+    /// the host at `host_path`. It crosses vsock, not the network.
+    pub fn expose_socket(
+        mut self,
+        guest_path: impl Into<String>,
+        host_path: impl Into<String>,
+    ) -> Self {
+        self.config
+            .exposed_sockets
+            .push((guest_path.into(), host_path.into()));
         self
     }
 
@@ -629,6 +656,32 @@ mod tests {
         assert!(joined.contains("-v s3://bucket/prefix:/models"), "{joined}");
         // `--mount` does not exist; emitting it made every mounted machine fail.
         assert!(!joined.contains("--mount"), "{joined}");
+    }
+
+    #[test]
+    fn an_exposed_socket_reaches_the_host_through_its_own_flag() {
+        let (args, _) = MachineBuilder::new("sock")
+            .expose_socket("/run/app/control.sock", "/tmp/app-control.sock")
+            .build()
+            .into_local_args()
+            .expect("an exposed socket translates locally");
+        let joined = args.join(" ");
+        assert!(
+            joined.contains("--expose-socket /run/app/control.sock:/tmp/app-control.sock"),
+            "{joined}"
+        );
+        assert!(!joined.contains("--net"), "{joined}");
+    }
+
+    #[test]
+    fn an_exposed_socket_is_refused_on_the_cloud() {
+        let error = MachineBuilder::new("sock")
+            .image("alpine")
+            .expose_socket("/run/app/control.sock", "/tmp/app-control.sock")
+            .build()
+            .into_cloud_request()
+            .expect_err("a cloud machine has no host to expose a socket on");
+        assert_eq!(error.kind(), ErrorKind::NotSupported);
     }
 
     #[test]

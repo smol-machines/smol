@@ -226,6 +226,35 @@ pub(crate) fn explicit_cli(path: PathBuf) -> Result<PathBuf> {
     }
 }
 
+/// The rows of `machine ls --json`, which older engines wrap in `machines`.
+fn machine_rows(out: &[u8]) -> Result<Vec<serde_json::Value>> {
+    let rows: serde_json::Value = serde_json::from_slice(out)
+        .map_err(|e| Error::new(ErrorKind::Other, format!("read the machine list: {e}")))?;
+    Ok(rows
+        .as_array()
+        .cloned()
+        .or_else(|| rows.get("machines").and_then(|m| m.as_array()).cloned())
+        .unwrap_or_default())
+}
+
+/// Every machine the local engine knows, as `machine ls --json` rows.
+pub(crate) fn list_rows() -> Result<Vec<serde_json::Value>> {
+    let cli = resolve_cli()?;
+    let args = ["machine", "ls", "--json"];
+    let output = retry_text_busy(|| {
+        Command::new(&cli)
+            .args(args)
+            .stdin(Stdio::null())
+            .env_remove("SMOLVM_BOOT_BINARY")
+            .output()
+    })
+    .map_err(|e| Error::new(ErrorKind::Other, format!("run {}: {e}", cli.display())))?;
+    if !output.status.success() {
+        return Err(cli_error(&args, &output.stderr, &output.stdout));
+    }
+    machine_rows(&output.stdout)
+}
+
 #[derive(Debug)]
 pub(crate) struct LocalTransport {
     name: String,
@@ -312,14 +341,8 @@ impl LocalTransport {
     /// This machine's row from `machine ls --json`.
     fn record(&self) -> Result<serde_json::Value> {
         let out = self.run(&["machine", "ls", "--json"])?;
-        let rows: serde_json::Value = serde_json::from_slice(&out)
-            .map_err(|e| Error::new(ErrorKind::Other, format!("read the machine list: {e}")))?;
-        let rows = rows
-            .as_array()
-            .cloned()
-            .or_else(|| rows.get("machines").and_then(|m| m.as_array()).cloned())
-            .unwrap_or_default();
-        rows.into_iter()
+        machine_rows(&out)?
+            .into_iter()
             .find(|row| row.get("name").and_then(|n| n.as_str()) == Some(&self.name))
             .ok_or_else(|| Error::new(ErrorKind::NotFound, format!("VM not found: {}", self.name)))
     }

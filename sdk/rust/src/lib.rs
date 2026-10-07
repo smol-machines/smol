@@ -139,7 +139,7 @@ pub use exec::{ExecEvent, ExecOptions, ExecResult, ExecStream, KillHandle};
 pub use machine::{
     list_cloud_machines, BranchOptions, Checkpoint, CheckpointOptions, CheckpointResult,
     CloudCheckpoint, CostBreakdown, ImageInfo, Machine, MachineResources, MachineState,
-    PortEndpoint, Resize, ShareLink, UsageReport, UsageTotals,
+    MachineSummary, PortEndpoint, Resize, ShareLink, UsageReport, UsageTotals,
 };
 pub use transport::ReadyOptions;
 pub use tunnel::Tunnel;

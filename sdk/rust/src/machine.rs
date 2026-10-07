@@ -943,10 +943,104 @@ impl Machine {
     }
 }
 
-/// Every machine in a cloud account.
-///
-/// There is no local equivalent: the embedded engine's machines are whatever
-/// this process created, and it already knows their names.
+/// One machine as a listing reports it, without attaching to it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MachineSummary {
+    /// Machine name.
+    pub name: String,
+    /// The cloud `mach-…` id, or the name on local.
+    pub id: String,
+    /// Lifecycle state, as [`Machine::state`] would report it.
+    pub state: MachineState,
+    /// Base image, when the machine boots one.
+    pub image: Option<String>,
+    /// Caller metadata given at create. Local only; empty on cloud.
+    pub labels: std::collections::BTreeMap<String, String>,
+    /// Host PID of the VM process while it runs. Local only.
+    pub pid: Option<i32>,
+    /// Whether the record outlives the process that created it.
+    pub persistent: bool,
+    /// Whether the VM outlives the process that starts it. Always true on cloud.
+    pub detached: bool,
+    /// Whether the machine can be branched.
+    pub branchable: bool,
+}
+
+impl MachineSummary {
+    fn from_local_row(row: &serde_json::Value) -> Option<Self> {
+        let name = row.get("name")?.as_str()?.to_string();
+        let flag = |key: &str| row.get(key).and_then(|v| v.as_bool()).unwrap_or(false);
+        Some(Self {
+            id: name.clone(),
+            name,
+            state: MachineState::parse(row.get("state").and_then(|v| v.as_str()).unwrap_or("")),
+            image: row
+                .get("image")
+                .and_then(|v| v.as_str())
+                .map(str::to_string),
+            labels: row
+                .get("labels")
+                .and_then(|v| v.as_object())
+                .map(|labels| {
+                    labels
+                        .iter()
+                        .filter_map(|(k, v)| Some((k.clone(), v.as_str()?.to_string())))
+                        .collect()
+                })
+                .unwrap_or_default(),
+            pid: row
+                .get("pid")
+                .and_then(|v| v.as_i64())
+                .and_then(|pid| i32::try_from(pid).ok()),
+            persistent: !flag("ephemeral"),
+            detached: flag("detached"),
+            branchable: flag("branchable") || flag("forkable"),
+        })
+    }
+
+    fn carries(&self, labels: &[(&str, &str)]) -> bool {
+        labels
+            .iter()
+            .all(|(key, value)| self.labels.get(*key).map(String::as_str) == Some(*value))
+    }
+}
+
+impl Machine {
+    /// List every machine the target knows about, including ones created by
+    /// other processes or by this one before it restarted. Locally that is the
+    /// engine's own database, the one `smolvm machine ls` reads; on the cloud,
+    /// the account's machines. Keep only machines carrying every one of
+    /// `labels`, then [`Machine::connect`] to pick one up.
+    pub fn list(connect: &ConnectOptions, labels: &[(&str, &str)]) -> Result<Vec<MachineSummary>> {
+        let all = if connect.target() == Target::Cloud {
+            connect
+                .client()?
+                .machines()?
+                .into_iter()
+                .map(|machine| MachineSummary {
+                    name: machine.display_name().to_string(),
+                    state: MachineState::parse(&machine.state),
+                    image: machine.source.as_ref().and_then(|s| s.reference.clone()),
+                    id: machine.id,
+                    labels: std::collections::BTreeMap::new(),
+                    pid: None,
+                    persistent: !machine.ephemeral.unwrap_or(false),
+                    detached: true,
+                    branchable: false,
+                })
+                .collect::<Vec<_>>()
+        } else {
+            crate::transport::local::list_rows()?
+                .iter()
+                .filter_map(MachineSummary::from_local_row)
+                .collect()
+        };
+        Ok(all.into_iter().filter(|m| m.carries(labels)).collect())
+    }
+}
+
+/// Every machine in a cloud account, attached. [`Machine::list`] lists either
+/// target without attaching, and can keep only machines carrying given labels.
 pub fn list_cloud_machines(connect: &ConnectOptions) -> Result<Vec<Machine>> {
     if connect.target() != Target::Cloud {
         return Err(Error::new(
@@ -972,6 +1066,65 @@ pub fn list_cloud_machines(connect: &ConnectOptions) -> Result<Vec<Machine>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A row as `smolvm machine ls --json` prints it.
+    fn local_row(name: &str, labels: serde_json::Value) -> serde_json::Value {
+        serde_json::json!({
+            "name": name,
+            "state": "running",
+            "image": "nvcr.io/nvidia/base/ubuntu:24.04",
+            "labels": labels,
+            "pid": 4242,
+            "ephemeral": false,
+            "detached": true,
+            "branchable": false,
+            "forkable": true,
+            "cpus": 2,
+            "memory_mib": 2048
+        })
+    }
+
+    #[test]
+    fn a_local_row_becomes_a_summary() {
+        let summary = MachineSummary::from_local_row(&local_row(
+            "os-1",
+            serde_json::json!({"openshell.sandbox": "abc", "team": "qa"}),
+        ))
+        .expect("a row with a name is a machine");
+        assert_eq!(summary.name, "os-1");
+        assert_eq!(summary.id, "os-1");
+        assert_eq!(summary.state, MachineState::Running);
+        assert_eq!(
+            summary.image.as_deref(),
+            Some("nvcr.io/nvidia/base/ubuntu:24.04")
+        );
+        assert_eq!(
+            summary.labels.get("openshell.sandbox").map(String::as_str),
+            Some("abc")
+        );
+        assert_eq!(summary.pid, Some(4242));
+        assert!(summary.persistent);
+        assert!(summary.detached);
+        assert!(
+            summary.branchable,
+            "the engine's older forkable flag counts"
+        );
+        assert!(MachineSummary::from_local_row(&serde_json::json!({"state": "running"})).is_none());
+    }
+
+    #[test]
+    fn a_label_filter_keeps_machines_carrying_every_label() {
+        let summary = MachineSummary::from_local_row(&local_row(
+            "os-1",
+            serde_json::json!({"owner": "openshell", "gateway": "a"}),
+        ))
+        .unwrap();
+        assert!(summary.carries(&[]));
+        assert!(summary.carries(&[("owner", "openshell")]));
+        assert!(summary.carries(&[("owner", "openshell"), ("gateway", "a")]));
+        assert!(!summary.carries(&[("owner", "openshell"), ("gateway", "b")]));
+        assert!(!summary.carries(&[("missing", "x")]));
+    }
 
     #[test]
     fn a_state_this_sdk_does_not_know_reads_as_unknown_not_stopped() {
