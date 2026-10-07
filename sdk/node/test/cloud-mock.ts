@@ -652,6 +652,17 @@ async function main(): Promise<void> {
     clone.name === "rollout-1" && (await clone.state()) === "running",
     clone.name,
   );
+  check(
+    "branch leaves the source running by default",
+    seen.forkBody?.freezeSource === undefined,
+    JSON.stringify(seen.forkBody),
+  );
+  await m.branch("frozen-1", { freezeSource: true });
+  check(
+    "branch({ freezeSource: true }) asks to keep the source as a branch base",
+    seen.forkBody?.freezeSource === true,
+    JSON.stringify(seen.forkBody),
+  );
   const legacyBranch = await m.branch("legacy-branch", { branchable: true });
   check(
     "branch falls back to a legacy /fork control plane",
@@ -676,6 +687,17 @@ async function main(): Promise<void> {
       batch[0].name === "rollout-1" &&
       batch[2].name === "rollout-3",
     batch.map((c) => c.name).join(","),
+  );
+  check(
+    "branchBatch leaves the source running by default",
+    seen.forkBatchBody?.freezeSource === undefined,
+    JSON.stringify(seen.forkBatchBody),
+  );
+  await m.branchBatch({ count: 2, namePrefix: "frozen", freezeSource: true });
+  check(
+    "branchBatch({ freezeSource: true }) asks to keep the source as a branch base",
+    seen.forkBatchBody?.freezeSource === true,
+    JSON.stringify(seen.forkBatchBody),
   );
   const legacyBatch = await m.branchBatch({ count: 2, namePrefix: "legacy" });
   check(

@@ -93,6 +93,11 @@ export interface BranchOptions {
   branchable?: boolean;
   /** @deprecated Use `branchable`. */
   checkpointable?: boolean;
+  /** Keep the source paused as a reusable branch base instead of resuming it.
+   *  Later branches start from that same state, and a frozen source no longer
+   *  counts toward the concurrency cap. The source cannot run commands again;
+   *  work in its branches, or stop it. Cloud target only. */
+  freezeSource?: boolean;
 }
 
 /** Backwards-compatible name for {@link BranchOptions}. */
@@ -111,6 +116,11 @@ export interface BranchBatchOptions {
   /** Inbound port forwards applied to every child. Empty = each child gets fresh
    *  host ports so children don't collide. */
   ports?: PortSpec[];
+  /** Keep the source paused as a reusable branch base instead of resuming it.
+   *  Later branches start from that same state, and a frozen source no longer
+   *  counts toward the concurrency cap. The source cannot run commands again;
+   *  work in its branches, or stop it. Cloud target only. */
+  freezeSource?: boolean;
 }
 
 /** Backwards-compatible name for {@link BranchBatchOptions}. */

@@ -471,6 +471,11 @@ def main() -> int:
               str(captured.get("fork_body")))
         check("fork returns running clone handle", clone.name == "rollout-1" and clone.state() == "started",
               f"{clone.name}/{clone.state()}")
+        check("branch leaves the source running by default",
+              "freezeSource" not in captured["fork_body"], str(captured.get("fork_body")))
+        m.branch("frozen-1", freeze_source=True)
+        check("branch(freeze_source=True) asks to keep the source as a branch base",
+              captured["fork_body"].get("freezeSource") is True, str(captured.get("fork_body")))
         legacy_branch = m.branch("legacy-branch", branchable=True)
         check("branch falls back to legacy /fork",
               captured.get("new_branch_returned_404") is True
@@ -489,6 +494,12 @@ def main() -> int:
         check("fork_batch returns N clones in request order",
               len(batch) == 3 and batch[0].name == "rollout-1" and batch[2].name == "rollout-3",
               ",".join(c.name for c in batch))
+        check("branch_batch leaves the source running by default",
+              "freezeSource" not in captured["fork_batch_body"], str(captured.get("fork_batch_body")))
+        m.branch_batch(count=2, name_prefix="frozen", freeze_source=True)
+        check("branch_batch(freeze_source=True) asks to keep the source as a branch base",
+              captured["fork_batch_body"].get("freezeSource") is True,
+              str(captured.get("fork_batch_body")))
         legacy_batch = m.branch_batch(count=2, name_prefix="legacy")
         check("branch_batch falls back to legacy /fork-batch",
               captured.get("new_branch_batch_returned_404") is True

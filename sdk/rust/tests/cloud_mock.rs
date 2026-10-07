@@ -523,6 +523,57 @@ fn branching_falls_back_to_the_fork_route_on_an_older_control_plane() {
 }
 
 #[test]
+fn freezing_the_source_is_asked_for_on_a_branch_and_a_batch() {
+    let batch = r#"{"clones":[{"id":"c-1","name":"c-1","state":"started","ports":[]}]}"#;
+    let cloud = MockCloud::start(routes(vec![
+        (
+            "GET /v1/machines/m-7",
+            Box::new(|_| Reply::json(ready_machine("m-7"))),
+        ),
+        (
+            "GET /v1/machines/child",
+            Box::new(|_| Reply::json(ready_machine("child"))),
+        ),
+        (
+            "GET /v1/machines/c-1",
+            Box::new(|_| Reply::json(ready_machine("c-1"))),
+        ),
+        (
+            "POST /v1/machines/m-7/branches",
+            Box::new(|_| Reply::json(ready_machine("child"))),
+        ),
+        (
+            "POST /v1/machines/m-7/branches/batch",
+            Box::new(move |_| Reply::json(batch)),
+        ),
+    ]));
+
+    let machine = Machine::connect_with("m-7", &cloud.connect()).expect("attach");
+    machine.branch("child").expect("plain branch");
+    machine
+        .branch_with("child", BranchOptions::new().freeze_source(true))
+        .expect("frozen branch");
+    machine
+        .branch_batch(
+            vec!["c-1".to_string()],
+            BranchOptions::new().freeze_source(true),
+        )
+        .expect("frozen batch");
+
+    let bodies: Vec<serde_json::Value> = cloud
+        .requests()
+        .into_iter()
+        .filter(|r| r.method == "POST")
+        .map(|r| serde_json::from_str(&r.body).expect("valid JSON body"))
+        .collect();
+    assert_eq!(bodies.len(), 3);
+    // Left out unless asked for, so the source keeps running by default.
+    assert!(bodies[0].get("freezeSource").is_none());
+    assert_eq!(bodies[1]["freezeSource"], true);
+    assert_eq!(bodies[2]["freezeSource"], true);
+}
+
+#[test]
 fn files_move_both_ways_with_their_paths_escaped() {
     let written = Arc::new(Mutex::new(String::new()));
     let sink = Arc::clone(&written);

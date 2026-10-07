@@ -156,6 +156,13 @@ export interface Transport {
   getLease(leaseId: string): Promise<Record<string, unknown>>;
 }
 
+/** The embedded engine cannot keep a source frozen after branching it. */
+function freezeSourceUnsupported(): NotSupportedError {
+  return new NotSupportedError(
+    "freezeSource is currently available on the cloud target.",
+  );
+}
+
 /** Resolve a batch fork's clone names + size, mirroring the control plane:
  *  explicit `names` win, otherwise `count` clones are named `{prefix}-{n}`.
  *  Used by the local target (the cloud target lets the server resolve). */
@@ -746,6 +753,7 @@ class LocalTransport implements Transport {
     // Local live-RAM CoW clone via the embedded engine. The golden must have been
     // started forkable (MachineConfig({ forkable: true })).
     const opts: ForkOptions = Array.isArray(options) ? { ports: options } : (options ?? {});
+    if (opts.freezeSource) throw freezeSourceUnsupported();
     const nativePorts = (opts.ports ?? []).map((p) => ({
       host: p.host,
       guest: p.guest,
@@ -771,6 +779,7 @@ class LocalTransport implements Transport {
   }
 
   async forkBatch(opts: ForkBatchOptions): Promise<Transport[]> {
+    if (opts.freezeSource) throw freezeSourceUnsupported();
     const names = resolveBatchNames(opts, "branch");
     const nativePorts = (opts.ports ?? []).map((p) => ({
       host: p.host,
@@ -1513,6 +1522,7 @@ class CloudTransport implements Transport {
             name,
             ports: portBody,
             ...(branchable ? { branchable: true } : {}),
+            ...(opts.freezeSource ? { freezeSource: true } : {}),
           },
         },
       );
@@ -1529,6 +1539,7 @@ class CloudTransport implements Transport {
             name,
             ports: portBody,
             ...(branchable ? { forkable: true } : {}),
+            ...(opts.freezeSource ? { freezeSource: true } : {}),
           },
         },
       );
@@ -1550,6 +1561,7 @@ class CloudTransport implements Transport {
     if (opts.names && opts.names.length > 0) body.names = opts.names;
     if (opts.count !== undefined) body.count = opts.count;
     if (opts.namePrefix !== undefined) body.namePrefix = opts.namePrefix;
+    if (opts.freezeSource) body.freezeSource = true;
     let resp: { clones: MachineInfo[] };
     try {
       resp = await cloudFetch<{ clones: MachineInfo[] }>(

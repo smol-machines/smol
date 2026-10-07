@@ -331,14 +331,20 @@ class AsyncMachine:
         *,
         branchable: bool = False,
         checkpointable: Optional[bool] = None,
+        freeze_source: bool = False,
     ) -> "AsyncMachine":
-        """Branch an independent copy-on-write child from this running source."""
+        """Branch an independent copy-on-write child from this running source.
+
+        ``freeze_source=True`` keeps the source paused as a reusable branch
+        base. Cloud target only.
+        """
         clone = await asyncio.to_thread(
             self._m.branch,
             name,
             ports,
             branchable=branchable,
             checkpointable=checkpointable,
+            freeze_source=freeze_source,
         )
         return AsyncMachine(clone)
 
@@ -362,14 +368,20 @@ class AsyncMachine:
         names: Optional[list[str]] = None,
         name_prefix: Optional[str] = None,
         ports: Optional[list[PortSpec]] = None,
+        freeze_source: bool = False,
     ) -> "list[AsyncMachine]":
-        """Branch this source into many independent children in one call."""
+        """Branch this source into many independent children in one call.
+
+        ``freeze_source=True`` keeps the source paused as a reusable branch
+        base. Cloud target only.
+        """
         children = await asyncio.to_thread(
             self._m.branch_batch,
             count,
             names=names,
             name_prefix=name_prefix,
             ports=ports,
+            freeze_source=freeze_source,
         )
         return [AsyncMachine(child) for child in children]
 
