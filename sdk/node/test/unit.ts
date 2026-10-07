@@ -118,6 +118,19 @@ check('detach forwards to the native config and implies persistent', () => {
   assert.strictEqual(toNativeConfig('m', { persistent: false }).persistent, false);
   assert.strictEqual(toNativeConfig('m', {}).detached, undefined);
 });
+check('credentials forward to the native config with their value', () => {
+  const nc = toNativeConfig('m', {
+    credentials: [
+      { name: 'notion', envVar: 'NOTION_API_KEY', hosts: ['api.notion.com', 'files.notion.com'], value: 'secret_x' },
+      { name: 'github', envVar: 'GITHUB_TOKEN', hosts: ['api.github.com'], methods: ['GET', 'HEAD'] },
+    ],
+  });
+  assert.deepStrictEqual(nc.credentials, [
+    { name: 'notion', envVar: 'NOTION_API_KEY', hosts: ['api.notion.com', 'files.notion.com'], methods: undefined, value: 'secret_x' },
+    { name: 'github', envVar: 'GITHUB_TOKEN', hosts: ['api.github.com'], methods: ['GET', 'HEAD'], value: undefined },
+  ]);
+  assert.strictEqual(toNativeConfig('m', {}).credentials, undefined);
+});
 check('networkBackend reaches the native config', () => {
   assert.strictEqual(toNativeConfig('m', { resources: { networkBackend: 'virtio-net' } }).resources?.networkBackend, 'virtio-net');
 });

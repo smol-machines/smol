@@ -62,6 +62,14 @@ const server = createServer(async (req, res) => {
     res.end(JSON.stringify(obj));
   };
 
+  if (method === "PUT" && url.startsWith("/v1/credentials/")) {
+    seen.credentialPuts = seen.credentialPuts ?? [];
+    seen.credentialPuts.push({
+      name: decodeURIComponent(url.slice("/v1/credentials/".length)),
+      body: JSON.parse((await readBody(req)).toString() || "{}"),
+    });
+    return json(200, { name: "notion", envVar: "NOTION_API_KEY", hosts: [], createdAt: "", updatedAt: "" });
+  }
   if (method === "POST" && url === "/v1/machines") {
     seen.createBody = JSON.parse((await readBody(req)).toString() || "{}");
     return json(200, { id: "m1", name: "cloud-test", state: "created" });
@@ -545,6 +553,51 @@ async function main(): Promise<void> {
     syncGated = e instanceof NotSupportedError;
   }
   check("cloud sync is gated as NotSupported", syncGated);
+
+  // A credential with a value is stored for the account first; the machine
+  // then binds every credential by name, including one already stored.
+  seen.credentialPuts = [];
+  await Machine.create(
+    {
+      image: "alpine",
+      credentials: [
+        { name: "notion", envVar: "NOTION_API_KEY", hosts: ["api.notion.com", "files.notion.com"], value: "secret_x" },
+        { name: "github", envVar: "GITHUB_TOKEN", hosts: ["api.github.com"] },
+      ],
+    },
+    { target: "cloud", baseUrl, apiKey: "smk_test123" },
+  );
+  check(
+    "cloud create stores a credential that carries a value",
+    JSON.stringify(seen.credentialPuts) ===
+      JSON.stringify([
+        {
+          name: "notion",
+          body: { envVar: "NOTION_API_KEY", hosts: ["api.notion.com", "files.notion.com"], value: "secret_x" },
+        },
+      ]),
+    JSON.stringify(seen.credentialPuts),
+  );
+  check(
+    "cloud create binds every credential by name",
+    JSON.stringify(seen.createBody?.credentials) === JSON.stringify(["notion", "github"]),
+    JSON.stringify(seen.createBody?.credentials),
+  );
+  let methodsRefused = false;
+  seen.credentialPuts = [];
+  try {
+    await Machine.create(
+      { image: "alpine", credentials: [{ name: "gh", envVar: "GH", hosts: ["api.github.com"], methods: ["GET"], value: "v" }] },
+      { target: "cloud", baseUrl, apiKey: "smk_test123" },
+    );
+  } catch (e) {
+    methodsRefused = e instanceof NotSupportedError;
+  }
+  check(
+    "a method restriction is refused on the cloud before anything is stored",
+    methodsRefused && seen.credentialPuts.length === 0,
+    `${methodsRefused} ${JSON.stringify(seen.credentialPuts)}`,
+  );
 
   // Published ports ARE a cloud feature: create sends only the guest port; the
   // control plane allocates the node host port. (Contrast: host mounts above.)

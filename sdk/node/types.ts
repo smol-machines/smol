@@ -179,6 +179,34 @@ export interface AssignOptions {
 }
 
 /** Configuration for creating a machine. */
+/**
+ * A credential the workload uses without ever seeing it, like the CLI's
+ * `--credential`. The guest variable `envVar` holds a placeholder; the real
+ * value is substituted only in the headers of HTTPS requests to `hosts`, so
+ * no other destination can receive it.
+ */
+export interface CredentialSpec {
+  /** Binding name: 1-64 lowercase letters, digits, `-` and `_`. On the cloud
+   *  it names the credential stored for your account. */
+  name: string;
+  /** Guest environment variable that holds the placeholder. */
+  envVar: string;
+  /** Exact host names the value may be sent to. No wildcards: list each
+   *  subdomain. */
+  hosts: string[];
+  /**
+   * The real value. Locally it is held in this process's memory only, never
+   * written to disk; when omitted, this process's own `envVar` is read at
+   * each start, which is also how a machine reopened by a later process gets
+   * it. On the cloud it is stored sealed under `name` (replacing any stored
+   * value); when omitted, the credential already stored under `name` is used.
+   */
+  value?: string;
+  /** HTTP methods the value may be used with, e.g. `["GET", "HEAD"]` for a
+   *  read-only token. Every method when omitted. (local) */
+  methods?: string[];
+}
+
 export interface MachineConfig {
   /** Trusted host egress interceptor for local machines. Supply it again after reconnect. */
   egressInterceptor?: EgressInterceptor;
@@ -238,6 +266,9 @@ export interface MachineConfig {
   checkpoint?: boolean;
   /** Environment variables for the image workload launched at create. */
   env?: Record<string, string>;
+  /** Credentials the workload uses without seeing them. Implies network
+   *  access. See {@link CredentialSpec}. */
+  credentials?: CredentialSpec[];
   /** Working directory for the image workload, set at create. Overrides
    *  the image's own workdir. */
   workdir?: string;

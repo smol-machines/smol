@@ -59,6 +59,15 @@ export interface NativeMachineConfig {
   forkable?: boolean | undefined;
   detached?: boolean | undefined;
   labels?: Record<string, string> | undefined;
+  credentials?: NativeCredential[] | undefined;
+}
+
+export interface NativeCredential {
+  name: string;
+  envVar: string;
+  hosts: string[];
+  methods?: string[] | undefined;
+  value?: string | undefined;
 }
 
 export interface NativeMachineSummary {

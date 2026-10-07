@@ -11,6 +11,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
+        /**
+         * Cluster health.
+         * @description Returns aggregate cluster health. Public; no authentication.
+         */
         get: operations["health_check"];
         put?: never;
         post?: never;
@@ -27,6 +31,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
+        /**
+         * Liveness probe.
+         * @description Returns 200 while the process is alive. Public; no authentication.
+         */
         get: operations["livez"];
         put?: never;
         post?: never;
@@ -43,6 +51,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
+        /**
+         * Prometheus metrics.
+         * @description Returns Prometheus text-format metrics, including per-tenant counts. Requires the `admin` scope.
+         */
         get: operations["metrics"];
         put?: never;
         post?: never;
@@ -59,6 +71,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
+        /**
+         * Readiness probe.
+         * @description Returns 200 when the state backend is reachable, 503 otherwise. Public; no authentication.
+         */
         get: operations["readyz"];
         put?: never;
         post?: never;
@@ -75,7 +91,279 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
+        /**
+         * Get the caller's account.
+         * @description Returns the caller's plan, effective limits, and period usage and spend. Requires the `usage:read` or `machine:read` scope.
+         */
         get: operations["account_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/account/attribution": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Record signup attribution.
+         * @description Stores where the account's first visit came from, once per account. Requires the `usage:read` or `machine:read` scope.
+         */
+        post: operations["account_attribution"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/account/plan": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Change the account's plan.
+         * @description Moves the account to a self-serve plan; a plan with a fee is billed through the card on file. Requires the `billing:write` scope.
+         */
+        post: operations["account_plan_change"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/account/plans": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List available plans.
+         * @description Returns the self-serve plans this account can move to, with prices and limits. Any valid API key.
+         */
+        get: operations["account_plans_list"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/agents": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List agents.
+         * @description Returns the agents in the caller's account. Requires the `machine:read` scope.
+         */
+        get: operations["agent_list"];
+        put?: never;
+        /**
+         * Create an agent.
+         * @description Creates a managed agent and the machine it runs in. Requires the `machine:create` scope.
+         */
+        post: operations["agent_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/agents/{name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get an agent.
+         * @description Returns one agent's state and its machine. Requires the `machine:read` scope.
+         */
+        get: operations["agent_get"];
+        put?: never;
+        post?: never;
+        /**
+         * Delete an agent.
+         * @description Deletes the agent and its machine. Requires the `machine:delete` scope.
+         */
+        delete: operations["agent_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/agents/{name}/branch": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Branch an agent.
+         * @description Creates a new agent from a live copy-on-write branch of this agent's machine. Requires the `machine:create` scope.
+         */
+        post: operations["agent_branch"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/agents/{name}/fork": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Fork an agent.
+         * @description Alias of branch: creates a new agent from a live branch of this agent's machine. Requires the `machine:create` scope.
+         */
+        post: operations["agent_fork"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/agents/{name}/pause": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Pause an agent.
+         * @description Checkpoints and stops the agent's machine so it can resume later. Requires the `machine:create` scope.
+         */
+        post: operations["agent_pause"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/agents/{name}/resume": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Resume an agent.
+         * @description Starts a paused agent's machine from its checkpoint. Requires the `machine:create` scope.
+         */
+        post: operations["agent_resume"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/agents/{name}/rewind": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Rewind an agent.
+         * @description Restores the agent to an earlier turn's checkpoint. Requires the `machine:create` scope.
+         */
+        post: operations["agent_rewind"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/agents/{name}/turns": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Send an agent a turn.
+         * @description Starts a new turn with the given input. Requires the `machine:exec` scope.
+         */
+        post: operations["agent_turn_send"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/agents/{name}/turns/{turn}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Cancel an agent turn.
+         * @description Stops a turn that is still running. Requires the `machine:create` or `machine:exec` scope.
+         */
+        post: operations["agent_turn_cancel"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/agents/{name}/turns/{turn}/events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Stream an agent turn's events.
+         * @description Returns the events a turn produced, streaming while it runs. Requires the `machine:read` scope.
+         */
+        get: operations["agent_turn_events"];
         put?: never;
         post?: never;
         delete?: never;
@@ -91,8 +379,16 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
+        /**
+         * List API keys.
+         * @description Returns the account's API keys (metadata only, never the secret). Requires the `members:write` scope (owner or admin).
+         */
         get: operations["apikey_list"];
         put?: never;
+        /**
+         * Create an API key.
+         * @description Mints a scoped API key; the plaintext secret is returned once, and a key never carries more scopes than its creator holds. Requires the `members:write` scope (owner or admin).
+         */
         post: operations["apikey_create"];
         delete?: never;
         options?: never;
@@ -110,6 +406,10 @@ export interface paths {
         get?: never;
         put?: never;
         post?: never;
+        /**
+         * Revoke an API key.
+         * @description Revokes an API key immediately; the key is kept with a revocation stamp. Requires the `members:write` scope (owner or admin).
+         */
         delete: operations["apikey_delete"];
         options?: never;
         head?: never;
@@ -123,8 +423,16 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
+        /**
+         * Get auto-recharge settings.
+         * @description Returns the tenant's opt-in auto-recharge settings. Requires the `usage:read` or `machine:read` scope.
+         */
         get: operations["auto_recharge_get"];
         put?: never;
+        /**
+         * Update auto-recharge settings.
+         * @description Updates opt-in auto-recharge; enabling with no saved card returns a setup URL. Requires the `billing:write` scope.
+         */
         post: operations["auto_recharge_set"];
         delete?: never;
         options?: never;
@@ -141,6 +449,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
+        /**
+         * Start a prepaid top-up.
+         * @description Starts a one-time Stripe Checkout to add prepaid credit; the wallet is credited when Stripe's webhook confirms payment. Requires the `billing:write` scope.
+         */
         post: operations["billing_checkout_session"];
         delete?: never;
         options?: never;
@@ -155,9 +467,33 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
+        /**
+         * List tenant meters.
+         * @description Returns per-tenant metered usage and cost for the period. Requires the `admin` scope.
+         */
         get: operations["billing_meters"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/billing/payment-method-setup": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Start adding a payment method.
+         * @description Returns a checkout URL where a card is saved for the account; an organization needs one before it can create anything that costs money. Requires the `billing:write` scope.
+         */
+        post: operations["billing_payment_method_setup"];
         delete?: never;
         options?: never;
         head?: never;
@@ -171,9 +507,17 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /**
+         * Get a checkpoint.
+         * @description Returns one checkpoint's metadata and lineage. Requires the `machine:read` scope.
+         */
+        get: operations["portable_checkpoint_get"];
         put?: never;
         post?: never;
+        /**
+         * Delete a checkpoint.
+         * @description Deletes a stored checkpoint. Requires the `machine:delete` scope.
+         */
         delete: operations["portable_checkpoint_delete"];
         options?: never;
         head?: never;
@@ -187,6 +531,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
+        /**
+         * Download a checkpoint.
+         * @description Returns the checkpoint as a single portable file. Requires the `machine:files` or `machine:exec` scope.
+         */
         get: operations["portable_checkpoint_download"];
         put?: never;
         post?: never;
@@ -205,8 +553,56 @@ export interface paths {
         };
         get?: never;
         put?: never;
+        /**
+         * Restore a checkpoint.
+         * @description Creates a new machine from a checkpoint. Requires the `machine:create` scope.
+         */
         post: operations["portable_checkpoint_restore"];
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/credentials": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List credentials.
+         * @description Returns the names of stored credentials; values are never returned. Requires the `machine:read` scope.
+         */
+        get: operations["credential_list"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/credentials/{name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Set a credential.
+         * @description Creates or replaces a stored credential that machines can use without seeing its value. Requires the `machine:create` scope.
+         */
+        put: operations["credential_set"];
+        post?: never;
+        /**
+         * Delete a credential.
+         * @description Removes a stored credential so new machines no longer receive it. Requires the `machine:delete` scope.
+         */
+        delete: operations["credential_delete"];
         options?: never;
         head?: never;
         patch?: never;
@@ -219,8 +615,16 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
+        /**
+         * List deployment groups.
+         * @description Returns every group in the caller's tenant with replica and instance status. Requires a valid API key for the tenant; no specific scope.
+         */
         get: operations["group_list"];
         put?: never;
+        /**
+         * Create or update a group deployment.
+         * @description Deploys an image as a replicated group; re-deploying an existing name rolls it according to the requested strategy. Requires the `group:write` scope (legacy alias `app:write`).
+         */
         post: operations["group_deploy"];
         delete?: never;
         options?: never;
@@ -235,9 +639,17 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
+        /**
+         * Get a group.
+         * @description Returns one group's configuration and per-instance status. Requires a valid API key for the tenant; no specific scope.
+         */
         get: operations["group_get"];
         put?: never;
         post?: never;
+        /**
+         * Destroy a group.
+         * @description Stops and removes every instance of the group. Requires the `group:write` scope (legacy alias `app:write`).
+         */
         delete: operations["group_destroy"];
         options?: never;
         head?: never;
@@ -251,6 +663,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
+        /**
+         * Stream group logs.
+         * @description Streams log lines from the group's instances as text/event-stream. Requires a valid API key for the tenant; no specific scope.
+         */
         get: operations["group_logs"];
         put?: never;
         post?: never;
@@ -269,6 +685,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
+        /**
+         * Promote a canary.
+         * @description Promotes the group's canary revision to stable. Requires the `group:write` scope (legacy alias `app:write`).
+         */
         post: operations["group_promote"];
         delete?: never;
         options?: never;
@@ -285,6 +705,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
+        /**
+         * Redeploy a group.
+         * @description Re-pulls the group's image and rolls its instances. Requires the `group:write` scope (legacy alias `app:write`).
+         */
         post: operations["group_redeploy"];
         delete?: never;
         options?: never;
@@ -301,6 +725,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
+        /**
+         * Scale a group.
+         * @description Changes the group's replica count; new instances are placed immediately. Requires the `group:write` scope (legacy alias `app:write`).
+         */
         post: operations["group_scale"];
         delete?: never;
         options?: never;
@@ -315,8 +743,16 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
+        /**
+         * List machines.
+         * @description Returns every machine in the caller's tenant. Requires the `machine:read` scope.
+         */
         get: operations["machine_list"];
         put?: never;
+        /**
+         * Create a machine.
+         * @description Creates (and by default boots) a machine from an OCI image or packed artifact. Requires the `machine:create` scope.
+         */
         post: operations["machine_create"];
         delete?: never;
         options?: never;
@@ -331,9 +767,17 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
+        /**
+         * Get a machine.
+         * @description Returns one machine's configuration, state, and placement. Requires the `machine:read` scope.
+         */
         get: operations["machine_get"];
         put?: never;
         post?: never;
+        /**
+         * Delete a machine.
+         * @description Stops the machine if needed and removes it and its local storage. Requires the `machine:delete` scope.
+         */
         delete: operations["machine_delete"];
         options?: never;
         head?: never;
@@ -349,6 +793,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
+        /**
+         * Branch a machine.
+         * @description Creates a live copy-on-write clone of a running machine. Requires the `machine:create` scope.
+         */
         post: operations["machine_branch"];
         delete?: never;
         options?: never;
@@ -365,6 +813,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
+        /**
+         * Branch a machine many times.
+         * @description Creates several live copy-on-write clones of a running machine in one call. Requires the `machine:create` scope.
+         */
         post: operations["machine_branch_batch"];
         delete?: never;
         options?: never;
@@ -379,8 +831,16 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
+        /**
+         * List a machine's checkpoints.
+         * @description Returns the checkpoints captured from a machine. Requires the `machine:read` scope.
+         */
         get: operations["portable_checkpoint_list"];
         put?: never;
+        /**
+         * Create a checkpoint.
+         * @description Captures the machine's full state as a portable checkpoint. Requires the `machine:create` scope.
+         */
         post: operations["portable_checkpoint_create"];
         delete?: never;
         options?: never;
@@ -397,7 +857,31 @@ export interface paths {
         };
         get?: never;
         put?: never;
+        /**
+         * Execute a code snippet.
+         * @description Runs a code snippet with the matching interpreter inside the machine and returns the result. Requires the `machine:exec` scope.
+         */
         post: operations["machine_code"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/machines/{id}/connect-token": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Mint a connect token.
+         * @description Returns a short-lived token that opens only this machine's connect bridge, `/v1/machines/{id}/connect/{port}`, and the bridges of the machines branched from it. It is refused on every other endpoint, expires after `ttlSeconds` (3600 by default, never past the minting key's own expiry), and can be sent as the `access_token` query parameter on a WebSocket upgrade, so a client that cannot set headers, such as a DevTools client, can still connect. Requires the `machine:exec` scope.
+         */
+        post: operations["machine_connect_token"];
         delete?: never;
         options?: never;
         head?: never;
@@ -411,13 +895,33 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
+        /**
+         * Bridge to a guest port.
+         * @description Forward an HTTP request (any method, body included, up to 10 MiB) or a WebSocket upgrade to a published guest port. Append a path after the port to reach a subpath: `/v1/machines/{id}/connect/{port}/{rest}`.
+         */
         get: operations["machine_connect"];
-        put?: never;
-        post?: never;
-        delete?: never;
+        /**
+         * Connect to a machine port (PUT).
+         * @description Forward an HTTP request (any method, body included, up to 10 MiB) or a WebSocket upgrade to a published guest port. Append a path after the port to reach a subpath: `/v1/machines/{id}/connect/{port}/{rest}`.
+         */
+        put: operations["machine_connect_put"];
+        /**
+         * Connect to a machine port (POST).
+         * @description Forward an HTTP request (any method, body included, up to 10 MiB) or a WebSocket upgrade to a published guest port. Append a path after the port to reach a subpath: `/v1/machines/{id}/connect/{port}/{rest}`.
+         */
+        post: operations["machine_connect_post"];
+        /**
+         * Connect to a machine port (DELETE).
+         * @description Forward an HTTP request (any method, body included, up to 10 MiB) or a WebSocket upgrade to a published guest port. Append a path after the port to reach a subpath: `/v1/machines/{id}/connect/{port}/{rest}`.
+         */
+        delete: operations["machine_connect_delete"];
         options?: never;
         head?: never;
-        patch?: never;
+        /**
+         * Connect to a machine port (PATCH).
+         * @description Forward an HTTP request (any method, body included, up to 10 MiB) or a WebSocket upgrade to a published guest port. Append a path after the port to reach a subpath: `/v1/machines/{id}/connect/{port}/{rest}`.
+         */
+        patch: operations["machine_connect_patch"];
         trace?: never;
     };
     "/v1/machines/{id}/events": {
@@ -427,6 +931,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
+        /**
+         * List machine events.
+         * @description Returns the machine's lifecycle event history. Requires the `machine:read` scope.
+         */
         get: operations["machine_events"];
         put?: never;
         post?: never;
@@ -445,7 +953,51 @@ export interface paths {
         };
         get?: never;
         put?: never;
+        /**
+         * Execute a command.
+         * @description Runs a command in the machine and returns exit code, stdout, and stderr. Requires the `machine:exec` scope.
+         */
         post: operations["machine_exec"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/machines/{id}/exec/interactive": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Open an interactive terminal.
+         * @description Upgrades to a WebSocket running a program on a pseudo-terminal in the machine. Requires the `machine:exec` scope.
+         */
+        get: operations["machine_exec_interactive"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/machines/{id}/exec/stream": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run a command and stream its output.
+         * @description Runs a command and returns stdout, stderr, and the exit code as Server-Sent Events. Requires the `machine:exec` scope.
+         */
+        post: operations["machine_exec_stream"];
         delete?: never;
         options?: never;
         head?: never;
@@ -461,6 +1013,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
+        /**
+         * Export a machine.
+         * @description Packs the machine's filesystem and pushes it to the registry as a reusable artifact. Requires the `machine:create` scope.
+         */
         post: operations["machine_export"];
         delete?: never;
         options?: never;
@@ -475,7 +1031,15 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
+        /**
+         * Download a file.
+         * @description Reads the file at the given path inside the machine. Requires the `machine:files` scope.
+         */
         get: operations["machine_file_download"];
+        /**
+         * Upload a file.
+         * @description Writes the request body to the given path inside the machine. Requires the `machine:files` scope.
+         */
         put: operations["machine_file_upload"];
         post?: never;
         delete?: never;
@@ -493,6 +1057,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
+        /**
+         * Fork a machine.
+         * @description Creates a running copy-on-write clone of a forkable golden machine, inheriting its memory and filesystem state. Requires the `machine:create` scope.
+         */
         post: operations["machine_fork"];
         delete?: never;
         options?: never;
@@ -509,7 +1077,31 @@ export interface paths {
         };
         get?: never;
         put?: never;
+        /**
+         * Fork a machine in batch.
+         * @description Creates up to 64 clones of a forkable golden machine in one call. Requires the `machine:create` scope.
+         */
         post: operations["machine_fork_batch"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/machines/{id}/lineage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get a machine's lineage.
+         * @description Returns the machines and checkpoints this machine was branched or restored from. Requires the `machine:read` scope.
+         */
+        get: operations["machine_lineage"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -523,9 +1115,53 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
+        /**
+         * Stream machine console logs.
+         * @description Streams the machine's console output as server-sent events; falls back to the archived log when the machine is not running. Requires the `machine:read` scope.
+         */
         get: operations["machine_logs"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/machines/{id}/pause": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Pause a machine.
+         * @description Checkpoints the machine's memory and disks, then stops it so it can resume where it left off. Requires the `machine:create` scope.
+         */
+        post: operations["machine_pause"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/machines/{id}/resume": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Resume a machine.
+         * @description Starts a paused machine from its checkpoint. Requires the `machine:create` scope.
+         */
+        post: operations["machine_resume"];
         delete?: never;
         options?: never;
         head?: never;
@@ -539,8 +1175,16 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
+        /**
+         * List exec sessions.
+         * @description Returns the machine's open exec sessions. Requires the `machine:read` scope.
+         */
         get: operations["machine_session_list"];
         put?: never;
+        /**
+         * Create an exec session.
+         * @description Opens a persistent exec session whose working directory and environment survive between commands. Requires the `machine:exec` scope.
+         */
         post: operations["machine_session_create"];
         delete?: never;
         options?: never;
@@ -558,6 +1202,10 @@ export interface paths {
         get?: never;
         put?: never;
         post?: never;
+        /**
+         * Delete an exec session.
+         * @description Closes an exec session and discards its state. Requires the `machine:exec` scope.
+         */
         delete: operations["machine_session_delete"];
         options?: never;
         head?: never;
@@ -573,6 +1221,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
+        /**
+         * Execute in a session.
+         * @description Runs a command inside an existing session, inheriting its state. Requires the `machine:exec` scope.
+         */
         post: operations["machine_session_exec"];
         delete?: never;
         options?: never;
@@ -589,6 +1241,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
+        /**
+         * Snapshot a machine.
+         * @description Starts a durability snapshot of the machine's filesystem. Requires the `machine:create` scope.
+         */
         post: operations["machine_snapshot_create"];
         delete?: never;
         options?: never;
@@ -603,6 +1259,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
+        /**
+         * List machine snapshots.
+         * @description Returns the machine's durability snapshots. Requires the `machine:read` scope.
+         */
         get: operations["machine_snapshot_list"];
         put?: never;
         post?: never;
@@ -621,6 +1281,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
+        /**
+         * Start a machine.
+         * @description Boots a stopped machine, preserving its filesystem. Requires the `machine:create` scope.
+         */
         post: operations["machine_start"];
         delete?: never;
         options?: never;
@@ -637,7 +1301,31 @@ export interface paths {
         };
         get?: never;
         put?: never;
+        /**
+         * Stop a machine.
+         * @description Stops a running machine; billing for compute stops, storage persists. Requires the `machine:create` scope.
+         */
         post: operations["machine_stop"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/machines/{id}/tunnel/{port}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Open a TCP tunnel to a machine port.
+         * @description Upgrades to a WebSocket carrying raw TCP to a port inside the machine. Requires the `machine:exec` scope.
+         */
+        get: operations["machine_tunnel"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -651,6 +1339,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
+        /**
+         * Get machine usage.
+         * @description Returns the machine's metered usage and cost so far this billing period. Requires the `machine:read` scope.
+         */
         get: operations["machine_usage"];
         put?: never;
         post?: never;
@@ -667,6 +1359,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
+        /**
+         * Get caller identity.
+         * @description Returns the caller's subject, tenant, scopes, and registry namespace. Requires any valid API key; no specific scope.
+         */
         get: operations["me_get"];
         put?: never;
         post?: never;
@@ -683,6 +1379,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
+        /**
+         * List cluster nodes.
+         * @description Returns every worker node with capacity and health. Requires the `admin` scope.
+         */
         get: operations["node_list"];
         put?: never;
         post?: never;
@@ -701,7 +1401,31 @@ export interface paths {
         };
         get?: never;
         put?: never;
+        /**
+         * Register a node.
+         * @description Enrolls a worker node. Authenticated by a node join token in the Authorization header, not an API key.
+         */
         post: operations["node_register"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/nodes/{id}/cordon": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Cordon a node.
+         * @description Stops new machines from being placed on a node. Requires the `admin` scope.
+         */
+        post: operations["node_cordon"];
         delete?: never;
         options?: never;
         head?: never;
@@ -718,6 +1442,10 @@ export interface paths {
         get?: never;
         put?: never;
         post?: never;
+        /**
+         * Revoke a node credential.
+         * @description Invalidates the node's credential so it can no longer authenticate. Requires the `admin` scope.
+         */
         delete: operations["node_credential_revoke"];
         options?: never;
         head?: never;
@@ -733,6 +1461,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
+        /**
+         * Drain a node.
+         * @description Marks a node as draining so no new machines are placed on it. Requires the `admin` scope.
+         */
         post: operations["node_drain"];
         delete?: never;
         options?: never;
@@ -749,7 +1481,31 @@ export interface paths {
         };
         get?: never;
         put?: never;
+        /**
+         * Node heartbeat.
+         * @description Reports node liveness and capacity. Authenticated by the node's credential, not an API key.
+         */
         post: operations["node_heartbeat"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/nodes/{id}/uncordon": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Uncordon a node.
+         * @description Lets a cordoned node receive new machines again. Requires the `admin` scope.
+         */
+        post: operations["node_uncordon"];
         delete?: never;
         options?: never;
         head?: never;
@@ -763,6 +1519,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
+        /**
+         * List async operations.
+         * @description Returns recent asynchronous operations for the caller's tenant. Requires a valid API key for the tenant; no specific scope.
+         */
         get: operations["operation_list"];
         put?: never;
         post?: never;
@@ -779,7 +1539,263 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
+        /**
+         * Get an async operation.
+         * @description Returns one asynchronous operation's status and result. Requires a valid API key for the tenant; no specific scope.
+         */
         get: operations["operation_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/org": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get the current organization.
+         * @description Returns the organization the request acts in, with its machine counts. Any valid credential for that organization.
+         */
+        get: operations["org_get"];
+        put?: never;
+        /**
+         * Create an organization.
+         * @description Creates an organization with the caller as its owner. Requires a user login, not an API key.
+         */
+        post: operations["org_create"];
+        /**
+         * Delete an organization.
+         * @description Deletes the organization the request acts in, once it holds no machines or balance and its subscription is cancelled. Requires a user login, not an API key, held by the organization's owner.
+         */
+        delete: operations["org_delete"];
+        options?: never;
+        head?: never;
+        /**
+         * Rename an organization.
+         * @description Changes the organization's display name. Requires a user login, not an API key, and the `members:write` scope (owner or admin).
+         */
+        patch: operations["org_rename"];
+        trace?: never;
+    };
+    "/v1/org/convert": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Convert your own account into an organization.
+         * @description Makes the caller's own account an organization in place, with them as its owner; its machines, keys, registry entries, balance and card are unchanged. Requires a user login, not an API key.
+         */
+        post: operations["org_convert"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/org/invitations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List pending invitations.
+         * @description Returns the organization's invitations that have not been accepted. Requires the `members:write` scope (owner or admin).
+         */
+        get: operations["org_invitations_list"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/org/invitations/accept": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Accept an invitation.
+         * @description Joins the organization an invitation names; it must be addressed to the login's verified email. Requires a user login, not an API key.
+         */
+        post: operations["org_invitation_accept"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/org/invitations/mine": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List your invitations.
+         * @description Returns the invitations addressed to the logged-in person's verified email. Requires a user login, not an API key.
+         */
+        get: operations["org_invitations_mine"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/org/invitations/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Withdraw an invitation.
+         * @description Cancels a pending invitation so its link no longer works. Requires a user login, not an API key, and the `members:write` scope (owner or admin).
+         */
+        delete: operations["org_invitation_revoke"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/org/invitations/{id}/resend": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Resend an invitation.
+         * @description Sends the invitation again with a new link, which replaces the old one. Requires a user login, not an API key, and the `members:write` scope (owner or admin).
+         */
+        post: operations["org_invitation_resend"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/org/members": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List organization members.
+         * @description Returns the people in the organization and their roles. Requires the `members:read` or `members:write` scope.
+         */
+        get: operations["org_members_list"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/org/members/invite": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Invite a member.
+         * @description Emails an invitation to join the organization with a given role. Requires a user login, not an API key, and the `members:write` scope (owner or admin).
+         */
+        post: operations["org_member_invite"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/org/members/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Remove a member.
+         * @description Removes the person from the organization and revokes their API keys in the same step. Requires a user login, not an API key, and the `members:write` scope (owner or admin).
+         */
+        delete: operations["org_member_remove"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/org/members/{id}/role": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Change a member's role.
+         * @description Sets a member's role; an organization always keeps at least one owner. Requires a user login, not an API key, and the `members:write` scope (owner or admin).
+         */
+        patch: operations["org_member_role"];
+        trace?: never;
+    };
+    "/v1/org/memberships": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List your organizations.
+         * @description Returns every organization the logged-in person belongs to, for switching accounts. Requires a user login, not an API key.
+         */
+        get: operations["org_memberships"];
         put?: never;
         post?: never;
         delete?: never;
@@ -795,8 +1811,16 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
+        /**
+         * List plans.
+         * @description Returns the configured quota/rate/budget plans. Requires the `admin` scope.
+         */
         get: operations["plan_list"];
         put?: never;
+        /**
+         * Create a plan.
+         * @description Creates a quota/rate/budget plan tenants can be assigned to. Requires the `admin` scope.
+         */
         post: operations["plan_create"];
         delete?: never;
         options?: never;
@@ -804,23 +1828,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/v1/pools": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get: operations["pool_list"];
-        put?: never;
-        post: operations["pool_create"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/pools/{id}/claim": {
+    "/v1/plans/{id}": {
         parameters: {
             query?: never;
             header?: never;
@@ -829,11 +1837,15 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        post: operations["pool_claim"];
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
-        patch?: never;
+        /**
+         * Update a plan.
+         * @description Changes a plan's price or limits. Requires the `admin` scope.
+         */
+        patch: operations["plan_update"];
         trace?: never;
     };
     "/v1/pricing": {
@@ -843,7 +1855,31 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
+        /**
+         * Get the public rate card.
+         * @description Returns per-unit rates and the volume schedule. Public; no authentication.
+         */
         get: operations["pricing_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/status/machines": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get public machine statistics.
+         * @description Returns the lifetime count of machines started on the platform. Public; no API key needed.
+         */
+        get: operations["machine_stats_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -859,8 +1895,16 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
+        /**
+         * List tenants.
+         * @description Returns every tenant. Requires the `admin` scope.
+         */
         get: operations["tenant_list"];
         put?: never;
+        /**
+         * Create a tenant.
+         * @description Creates a tenant with the given plan and limits. Requires the `admin` scope.
+         */
         post: operations["tenant_create"];
         delete?: never;
         options?: never;
@@ -875,12 +1919,20 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
+        /**
+         * Get a tenant.
+         * @description Returns one tenant's plan, limits, and status. Requires the `admin` scope.
+         */
         get: operations["tenant_get"];
         put?: never;
         post?: never;
         delete?: never;
         options?: never;
         head?: never;
+        /**
+         * Update a tenant.
+         * @description Patches a tenant's plan, limits, or metadata. Requires the `admin` scope.
+         */
         patch: operations["tenant_update"];
         trace?: never;
     };
@@ -893,6 +1945,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
+        /**
+         * Reactivate a tenant.
+         * @description Lifts a tenant's suspension. Requires the `admin` scope.
+         */
         post: operations["tenant_reactivate"];
         delete?: never;
         options?: never;
@@ -909,6 +1965,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
+        /**
+         * Suspend a tenant.
+         * @description Suspends a tenant; its API calls fail with 402 until reactivated. Requires the `admin` scope.
+         */
         post: operations["tenant_suspend"];
         delete?: never;
         options?: never;
@@ -923,8 +1983,16 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
+        /**
+         * List join tokens.
+         * @description Returns the cluster's node join tokens. Requires the `admin` scope.
+         */
         get: operations["token_list"];
         put?: never;
+        /**
+         * Create a join token.
+         * @description Mints a join token a new worker node can register with. Requires the `admin` scope.
+         */
         post: operations["token_create"];
         delete?: never;
         options?: never;
@@ -942,6 +2010,10 @@ export interface paths {
         get?: never;
         put?: never;
         post?: never;
+        /**
+         * Delete a join token.
+         * @description Revokes a join token by prefix. Requires the `admin` scope.
+         */
         delete: operations["token_delete"];
         options?: never;
         head?: never;
@@ -955,6 +2027,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
+        /**
+         * Query usage.
+         * @description Returns metered usage for the caller's tenant over the requested period. Requires the `usage:read` or `machine:read` scope.
+         */
         get: operations["usage_query"];
         put?: never;
         post?: never;
@@ -971,8 +2047,16 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
+        /**
+         * List volumes.
+         * @description Returns every persistent volume in the caller's tenant. Requires a valid API key for the tenant; no specific scope.
+         */
         get: operations["volume_list"];
         put?: never;
+        /**
+         * Create a volume.
+         * @description Creates a persistent volume that can be mounted into machines. Requires a valid API key for the tenant; no specific scope.
+         */
         post: operations["volume_create"];
         delete?: never;
         options?: never;
@@ -987,9 +2071,17 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
+        /**
+         * Get a volume.
+         * @description Returns one volume's configuration and attachment state. Requires a valid API key for the tenant; no specific scope.
+         */
         get: operations["volume_get"];
         put?: never;
         post?: never;
+        /**
+         * Delete a volume.
+         * @description Removes an unattached volume and its data. Requires a valid API key for the tenant; no specific scope.
+         */
         delete: operations["volume_delete"];
         options?: never;
         head?: never;
@@ -1000,12 +2092,24 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** @description Body of `POST /v1/org/invitations/accept`: the token out of the link. */
+        AcceptInvitationRequest: {
+            /** @description The invitation's id from `GET /v1/org/invitations/mine`, a handle not a credential. */
+            id?: string | null;
+            /** @description The token from the emailed link, absent when accepting from the pending list. */
+            token?: string | null;
+        };
         /** @description The tenant self-service account view: plan, effective limits, usage, spend. */
         AccountInfo: {
             /** Format: int64 */
             budgetRemainingMicros?: number | null;
             /** Format: int32 */
             effectiveMaxCpus: number;
+            /**
+             * Format: int64
+             * @description Largest disk (GB) one machine may request on this account.
+             */
+            effectiveMaxDiskGb: number;
             /** Format: int32 */
             effectiveMaxMachines: number;
             /** Format: int64 */
@@ -1020,6 +2124,8 @@ export interface components {
             lowBalanceThresholdMicros?: number;
             /** Format: int64 */
             monthlyBudgetMicros?: number | null;
+            /** @description The plan the account moves to when its paid period ends, or null if none is scheduled. */
+            pendingPlanId?: string | null;
             periodCost: components["schemas"]["CostBreakdown"];
             periodUsage: components["schemas"]["UsageResponse"];
             plan?: null | components["schemas"]["PlanInfo"];
@@ -1032,12 +2138,97 @@ export interface components {
             status: string;
             tenantId: string;
         };
+        /** @description Start a new session `name` from the state right after `turn`. */
+        AgentBranchRequest: {
+            name: string;
+            /** Format: int64 */
+            turn: number;
+        };
+        /** @description Start a new session `name` from the state right after `turn`. */
+        AgentForkRequest: {
+            name: string;
+            /** Format: int64 */
+            turn: number;
+        };
+        /** @description A managed agent session. */
+        AgentInfo: {
+            createdAt: string;
+            error?: string | null;
+            harness: string;
+            /** @description The machine the session currently runs on (it changes on rewind). */
+            machineId?: string | null;
+            model?: string | null;
+            name: string;
+            /**
+             * Format: int64
+             * @description The turn in progress, if any.
+             */
+            runningTurn?: number | null;
+            /**
+             * @description `starting` during setup, `turning` during a turn, `cancelling`,
+             *     `rewinding`, `forking`, `pausing`, `resuming`, `ready`, `deleting`, or
+             *     `failed`; stale work may read as `interrupted`.
+             */
+            status: string;
+            turns: components["schemas"]["AgentTurnInfo"][];
+        };
+        AgentListPage: {
+            items: components["schemas"]["AgentSummary"][];
+            nextCursor?: string | null;
+        };
+        /** @description Return a session to the state right after `turn`. */
+        AgentRewindRequest: {
+            /** Format: int64 */
+            turn: number;
+        };
+        /**
+         * @description A session entry for the paginated list. Turn history is fetched from the
+         *     session detail rather than repeated for every session in the account.
+         */
+        AgentSummary: {
+            createdAt: string;
+            error?: string | null;
+            harness: string;
+            machineId?: string | null;
+            model?: string | null;
+            name: string;
+            /** Format: int64 */
+            runningTurn?: number | null;
+            status: string;
+        };
+        /** @description A turn that was accepted and is running. */
+        AgentTurnAccepted: {
+            /** Format: int64 */
+            turn: number;
+        };
+        /** @description One turn of a managed agent session. */
+        AgentTurnInfo: {
+            /** @description Whether the session can be rewound or branched to this turn. */
+            checkpointed: boolean;
+            /**
+             * Format: double
+             * @description What the turn cost at the model provider, when the harness reports it.
+             */
+            costUsd?: number | null;
+            finishedAt?: string | null;
+            /** Format: int64 */
+            index: number;
+            isError: boolean;
+            prompt: string;
+            /** @description The agent's final answer, or why the turn failed. */
+            result?: string | null;
+            startedAt: string;
+            /** @description `preparing`, `running`, `cancelling`, `cancelled`, `done`, `failed`, or `interrupted`. */
+            status: string;
+        };
         ApiKeyCreated: {
             id: string;
             key: string;
         };
         ApiKeyInfo: {
             createdAt: string;
+            /** @description The account id of the person behind this key; null when nobody is. */
+            createdBy?: string | null;
             description?: string | null;
             expiresAt?: string | null;
             id: string;
@@ -1070,12 +2261,39 @@ export interface components {
              */
             thresholdMicros: number;
         };
+        /** @description The plan a tenant is on, and the ones it may move to itself. */
+        AvailablePlansResponse: {
+            /**
+             * @description Every self-serve plan, cheapest first. Includes the current plan when
+             *     that is itself self-serve, so a client can render the whole ladder.
+             */
+            available: components["schemas"]["PlanInfo"][];
+            current?: null | components["schemas"]["PlanInfo"];
+        };
+        /**
+         * @description Ask to move this tenant onto a different plan. Only plans whose
+         *     `self_serve` flag is set may be chosen; operator tiers are assigned by an
+         *     admin.
+         */
+        ChangePlanRequest: {
+            /** @description Plan id to move onto, e.g. `plan-startup-paid`. */
+            planId: string;
+        };
         /**
          * @description User-visible state of a live-RAM checkpoint.
          * @enum {string}
          */
         CheckpointState: "mutable" | "freezing" | "frozen";
         ClusterHealth: {
+            /**
+             * Format: int32
+             * @description Version of the public control-plane contract.
+             */
+            apiVersion?: number;
+            /** @description Source revision injected by the release pipeline, when available. */
+            buildSha?: string | null;
+            /** @description Stable feature identifiers clients and deployment checks can gate on. */
+            capabilities?: string[];
             clusterId: string;
             /** Format: int32 */
             groupsTotal: number;
@@ -1090,6 +2308,26 @@ export interface components {
             version: string;
         };
         CommandSpec: string[] | string;
+        /**
+         * @description A connect token: a short-lived credential that opens only
+         *     `/v1/machines/{id}/connect/{port}` on this machine and on the machines
+         *     branched from it, nothing else in the API. Send it as a Bearer token, or as
+         *     the `access_token` query parameter on a WebSocket upgrade, so a client that
+         *     cannot set headers (a DevTools client, a browser `WebSocket`) can still
+         *     connect.
+         */
+        ConnectToken: {
+            /** @description RFC 3339 time after which the token is refused. */
+            expiresAt: string;
+            /** @description The machine the token opens, with every machine branched from it. */
+            machineId: string;
+            token: string;
+        };
+        /** @description `POST /v1/org/convert` turns the caller's own account into an organization in place. */
+        ConvertOrgRequest: {
+            /** @description Human readable name, shown in the console, trimmed to 1 to 100 characters. */
+            displayName: string;
+        };
         /** @description Cost breakdown for a usage period (all amounts in integer micros). */
         CostBreakdown: {
             /**
@@ -1150,16 +2388,83 @@ export interface components {
              */
             volumeDiscountMicros?: number;
         };
+        /**
+         * @description Start a managed agent session: a harness (Claude Code, Codex, OpenCode, or
+         *     any program) in its own machine, driven as a sequence of turns.
+         */
+        CreateAgentRequest: {
+            /**
+             * @description Hosts the agent may reach beyond its model provider and package registry.
+             *     The `command` harness has neither, so callers must name hosts or
+             *     explicitly opt into unrestricted outbound access.
+             */
+            allowHosts?: string[];
+            /**
+             * @description `amd64` or `arm64`. A session with checkpoints runs on amd64 unless
+             *     pinned here.
+             */
+            arch?: string | null;
+            /**
+             * @description Checkpoint after every turn so the session can be rewound or branched
+             *     (default true).
+             */
+            checkpoints?: boolean | null;
+            /**
+             * Format: int32
+             * @description vCPUs (default 2).
+             */
+            cpus?: number | null;
+            /**
+             * @description A stored credential holding the model API key. The session's machine then
+             *     never holds the key: the agent sees a placeholder and the node
+             *     substitutes the key on requests to the provider, so turns need no key in
+             *     their `env`. Its variable must be the one the harness reads (e.g.
+             *     `ANTHROPIC_API_KEY`) and its hosts must include the provider's.
+             */
+            credential?: string | null;
+            /** @description `claude-code` (default), `codex`, `opencode`, or `command`. */
+            harness?: string | null;
+            /** @description Image for the `command` harness. */
+            image?: string | null;
+            /**
+             * Format: int32
+             * @description Memory in MiB (default 2048).
+             */
+            memoryMb?: number | null;
+            /** @description Model: optional for `codex`, required as `provider/model` for `opencode`. */
+            model?: string | null;
+            /** @description Session name, unique within the account. */
+            name: string;
+            /** @description Allow all outbound traffic instead of the host allow-list. */
+            openNetwork?: boolean;
+            /** @description Program for the `command` harness; the prompt is appended. */
+            program?: string[];
+        };
         CreateApiKeyRequest: {
             description?: string | null;
             /** Format: int64 */
             expiresInDays?: number | null;
+            /**
+             * @description The account id of the organization member this key acts for. Required when
+             *     acting in an organization, and the person the key is narrowed to and
+             *     revoked with. A personal account's key is for its owner, so leave it out.
+             */
+            personId?: string | null;
             scopes?: string[];
             /**
              * @description Tenant to scope this key to (admin only). Keys created with a tenant_id
              *     can only access resources belonging to that tenant.
              */
             tenantId?: string | null;
+        };
+        /** @description Body for `POST /v1/machines/{id}/connect-token`. Empty is fine. */
+        CreateConnectTokenRequest: {
+            /**
+             * Format: int64
+             * @description How long the token lasts, in seconds: 60 to 86400, 3600 when left out.
+             *     It never outlives the API key that mints it.
+             */
+            ttlSeconds?: number | null;
         };
         CreateMachineRequest: {
             /** Format: int64 */
@@ -1177,14 +2482,38 @@ export interface components {
              *     = use the source's own entrypoint, preserving prior behavior.
              */
             command?: string[];
+            /**
+             * @description Names of stored credentials this machine binds. Each gives the guest a
+             *     placeholder in the credential's variable; the node substitutes the value
+             *     only on HTTPS requests to the credential's hosts, so the machine never
+             *     holds it.
+             */
+            credentials?: string[];
             env?: {
                 [key: string]: string;
             };
             ephemeral?: boolean;
+            /**
+             * @description Free-form key/value labels for finding the machine again later
+             *     (`GET /v1/machines?label=key=value`). At most 32; keys are 1-63 chars of
+             *     `[a-z0-9]([a-z0-9._/-]*[a-z0-9])?`, values up to 255 chars.
+             */
+            labels?: {
+                [key: string]: string;
+            };
             mounts?: components["schemas"]["MachineMountSpec"][];
             name?: string | null;
+            /**
+             * @description Expose nested virtualization (VMX/SVM) to the guest so it can run its own
+             *     hypervisor. Refused with 422 `nested_virt_unavailable` unless this platform
+             *     enables it, so a request for it is never silently dropped. Default false.
+             */
+            nestedVirt?: boolean;
             network?: components["schemas"]["MachineNetwork"];
-            /** @description Ports to publish (web groups). Guest ports only; hostPort is allocated. */
+            /**
+             * @description Ports to publish (web groups), at most 16. Guest ports only; hostPort is
+             *     allocated.
+             */
             ports?: components["schemas"]["MachinePort"][];
             /**
              * @description Opt in to UNAUTHENTICATED public ingress: when true (and the machine has a
@@ -1210,6 +2539,13 @@ export interface components {
             };
             id?: string | null;
         };
+        /** @description `POST /v1/org` creates an organization and makes the caller its owner. */
+        CreateOrgRequest: {
+            /** @description Human readable name, shown in the console. */
+            displayName: string;
+            /** @description The slug: lowercase alphanumeric plus `-`/`_`, 3 to 50 characters, unique and final. */
+            name: string;
+        };
         CreatePlanRequest: {
             /** @description May keep a published-port machine running instead of scaling to zero. */
             allowAlwaysOn?: boolean;
@@ -1222,6 +2558,11 @@ export interface components {
             maxConcurrentMachines?: number;
             /** Format: int32 */
             maxCpus?: number;
+            /**
+             * Format: int64
+             * @description Largest disk (GB) one machine may request; omitted = platform maximum.
+             */
+            maxDiskGb?: number | null;
             /** Format: int64 */
             maxEgressGb?: number | null;
             /** Format: int32 */
@@ -1275,6 +2616,14 @@ export interface components {
             node?: string | null;
             /** Format: int64 */
             sizeGb: number;
+        };
+        /** @description A stored credential, without its value. */
+        CredentialInfo: {
+            createdAt: string;
+            envVar: string;
+            hosts: string[];
+            name: string;
+            updatedAt: string;
         };
         DeployRequest: {
             coLocateWith?: string | null;
@@ -1331,9 +2680,35 @@ export interface components {
             /** @enum {string} */
             type: "blueGreen";
         };
+        /**
+         * @description When a machine's guest disk writes must reach the node's physical disk.
+         * @enum {string}
+         */
+        DiskDurability: "full" | "deferred";
         EnvVar: {
             key: string;
             value: string;
+        };
+        /**
+         * @description RFC 9457 problem-details error body. Every 4xx/5xx from the API carries
+         *     this shape as `application/problem+json`: `code` is stable and
+         *     machine-readable (e.g. `not_found`, `too_many_requests`), `detail` is the
+         *     human-readable message, and `title`/`status` mirror the HTTP status line.
+         */
+        ErrorResponse: {
+            /** @description Stable machine-readable error code for branching without parsing prose. */
+            code: string;
+            /** @description Human-readable description of what failed and how to resolve it. */
+            detail: string;
+            /**
+             * Format: int32
+             * @description HTTP status code, repeated in the body for log-friendly errors.
+             */
+            status: number;
+            /** @description Canonical reason phrase for the status (e.g. `Not Found`). */
+            title: string;
+            /** @description Problem type URI; `about:blank` when the status code says it all. */
+            type: string;
         };
         EventInfo: {
             createdAt: string;
@@ -1346,12 +2721,20 @@ export interface components {
          *     operation is transactional: if any child fails, every child is rolled back.
          */
         ForkBatchRequest: {
+            /** @description Let every child become another branch source. */
+            branchable?: boolean;
             /**
              * Format: int32
              * @description Number of children to branch (1..=`MAX_FORK_BATCH`). Ignored when `names` is
              *     non-empty.
              */
             count?: number;
+            /** @description Keep the source paused as a reusable branch base, as for a single branch. */
+            freezeSource?: boolean;
+            /** @description Labels for every child. Omitted = copy the source's labels. */
+            labels?: {
+                [key: string]: string;
+            } | null;
             /**
              * @description Prefix for auto-named children when `count` is used. Defaults to the source's
              *     name.
@@ -1380,11 +2763,25 @@ export interface components {
              *     memory copy while the child boots; its descendants remain copy-on-write.
              */
             branchable?: boolean;
+            /**
+             * @description Keep the source paused as a reusable branch base instead of resuming it.
+             *     Later branches restore the same checkpoint, and a frozen source no longer
+             *     counts toward the concurrency cap. It cannot execute again; stop it, or
+             *     work in its children.
+             */
+            freezeSource?: boolean;
+            /**
+             * @description Labels for the child. Omitted = copy the source's labels; supplied
+             *     (even empty) = use exactly these.
+             */
+            labels?: {
+                [key: string]: string;
+            } | null;
             /** @description Name for the new child machine. */
             name: string;
             /**
-             * @description Pin the clone's inbound port forwards. Empty = the node allocates fresh
-             *     host ports so the clone doesn't collide with the golden or siblings.
+             * @description Guest ports the clone publishes. Empty = the source's guest ports. Host
+             *     ports are always allocated by the control plane; any `hostPort` is ignored.
              */
             ports?: components["schemas"]["MachinePort"][];
         };
@@ -1425,6 +2822,23 @@ export interface components {
             nodeId: string;
             status: string;
         };
+        /** @description Body of `POST /v1/org/members/invite`, declared here so it reaches the client spec. */
+        InviteMemberRequest: {
+            /** @description The address to invite, matched case-insensitively against the IdP's verified address. */
+            email: string;
+            /** @description `owner`, `admin` or `member`. */
+            role: string;
+        };
+        /**
+         * @description Result of inviting a member: the accept link, which comes back even with no
+         *     email provider configured (the admin can copy and share it directly).
+         */
+        InviteResult: {
+            /** @description Whether the link was handed to a mailer; false on a deployment with none. */
+            emailSent: boolean;
+            /** @description The accept link, carrying the only readable copy of the token. */
+            invitationUrl?: string | null;
+        };
         /**
          * @description Dynamic machine operations for clients that must feature-detect instead of
          *     guessing from a server or engine version.
@@ -1454,6 +2868,8 @@ export interface components {
             language: string;
             /** Format: int64 */
             timeoutSeconds?: number | null;
+            /** @description Run as this user (image user name or `uid[:gid]`), overriding the image's USER. */
+            user?: string | null;
         };
         MachineCommandRequest: {
             /**
@@ -1467,9 +2883,24 @@ export interface components {
                 [key: string]: string;
             };
             stdin?: string | null;
+            /**
+             * @description Stream stdout and stderr as Server-Sent Events instead of buffering the
+             *     whole run into one JSON body. The response is then `text/event-stream`,
+             *     not `MachineExecResponse`: frames are `event: stdout|stderr|error|exit`
+             *     with `data:` lines, and the terminal `exit` frame carries
+             *     `{"exitCode": N}`. Streamed output is not capped, so this is the right
+             *     path for long-running or high-volume commands.
+             */
             stream?: boolean;
             /** Format: int64 */
             timeoutSeconds?: number | null;
+            /**
+             * @description Run as this user: a name from the image or a numeric `uid[:gid]`,
+             *     overriding the image's USER. Forwarded to the machine's runtime; an
+             *     older runtime that cannot honour it rejects the request rather than
+             *     running the command as the wrong account.
+             */
+            user?: string | null;
         };
         MachineExecResponse: {
             /** Format: int64 */
@@ -1499,6 +2930,13 @@ export interface components {
              */
             stdoutB64?: string;
             stdoutTruncated?: boolean;
+            /**
+             * @description The user the command was run as, echoed back when the request set one.
+             *     A client that asked for a user and does not see it here is talking to a
+             *     control plane that predates the field and dropped it — which the
+             *     client must treat as an error, never as "ran as the default account".
+             */
+            user?: string | null;
         };
         MachineInfo: {
             /**
@@ -1523,6 +2961,8 @@ export interface components {
             capabilities?: components["schemas"]["MachineCapabilities"];
             checkpointState?: null | components["schemas"]["CheckpointState"];
             createdAt: string;
+            /** @description The account id of whoever created the machine; null when nobody is. */
+            createdBy?: string | null;
             env: {
                 [key: string]: string;
             };
@@ -1543,6 +2983,10 @@ export interface components {
             /** @description Legacy alias for `branchable`. */
             forkable?: boolean;
             id: string;
+            /** @description Labels set at create time (or inherited from a branch source). */
+            labels?: {
+                [key: string]: string;
+            };
             lastActivityAt?: string | null;
             name?: string | null;
             network: components["schemas"]["MachineNetwork"];
@@ -1564,8 +3008,14 @@ export interface components {
              */
             ready?: boolean;
             /**
-             * @description When the machine first became [`Self::ready`] (RFC3339), or `null` if not
-             *     yet ready. Monotonic: once set it isn't cleared until a stop/restart.
+             * @description When a probe first observed this machine serving (RFC3339), or `null`.
+             *
+             *     This is a readiness gate, not a boot timestamp: it is stamped when the
+             *     published port accepts a connection (or, for a machine with no published
+             *     ports, when its guest agent answers), and it is cleared on every stop so
+             *     a restart must re-prove itself. A short-lived machine may finish its
+             *     whole life as `null` here without anything being wrong. Use `createdAt`
+             *     if you want when the machine came into existence.
              */
             readyAt?: string | null;
             resources: components["schemas"]["MachineResources"];
@@ -1589,6 +3039,15 @@ export interface components {
              */
             url?: string | null;
             workdir?: string | null;
+        };
+        /**
+         * @description One complete live branch lineage, suitable for rendering as a tree. Parent
+         *     relationships remain on each machine so clients do not have to infer them
+         *     from names or creation order.
+         */
+        MachineLineage: {
+            machines: components["schemas"]["MachineInfo"][];
+            rootMachineId: string;
         };
         MachineMountSpec: {
             /** @description Mount path inside the VM. */
@@ -1631,6 +3090,7 @@ export interface components {
         MachineResources: {
             /** Format: int32 */
             cpus?: number;
+            diskDurability?: null | components["schemas"]["DiskDurability"];
             /** Format: int64 */
             diskGb?: number | null;
             /** Format: int32 */
@@ -1765,6 +3225,13 @@ export interface components {
             runtime?: string;
             /** @description The runtime endpoint (HTTP address) on this node. */
             smolvmAddress: string;
+            /**
+             * @description The smolvm engine version this node's runtime reports on `/health`,
+             *     recorded by the control plane. Read-only: a node never sets it. A
+             *     checkpoint is only restored on a node at the capturing engine's version
+             *     or newer. Absent until the runtime has been probed.
+             */
+            smolvmVersion?: string | null;
             status: string;
             /** Format: int32 */
             totalCpus: number;
@@ -1793,6 +3260,94 @@ export interface components {
              */
             usedMemoryMb?: number;
         };
+        /** @description One invitation an organization awaits; the token lives only in the invite link. */
+        OrgInvitation: {
+            createdAt: string;
+            /** @description The address invited, lowercased the way it is matched at acceptance. */
+            email: string;
+            /** @description When it lapses. After this it is neither listed nor acceptable. */
+            expiresAt: string;
+            id: string;
+            /** @description The account id of the person who sent it. */
+            invitedBy: string;
+            /** @description The role the membership row will carry: `owner`, `admin` or `member`. */
+            role: string;
+        };
+        /** @description One machine named in a removal's response. */
+        OrgMachineSummary: {
+            id: string;
+            name?: string | null;
+            state: string;
+        };
+        /** @description A member of an organization, with their org roles. */
+        OrgMember: {
+            email?: string | null;
+            /** @description Always null: the roster is read from our own rows, which hold no profile. */
+            name?: string | null;
+            /** @description Always null, for the same reason as `name`. */
+            picture?: string | null;
+            roles: string[];
+            /** @description The person's own account id; memberships, roles and removal key on it, not the IdP subject. */
+            userId: string;
+        };
+        /** @description One account a person belongs to; the switcher lists these, login lands on the latest. */
+        OrgMembership: {
+            /** @description The human readable name the console shows. */
+            displayName?: string | null;
+            /** @description When the caller last acted here, or null if never; the list orders by it, latest first. */
+            lastUsedAt?: string | null;
+            /** @description The slug, unique across the fleet and final once chosen. */
+            name: string;
+            /** @description The role the caller holds here: `owner`, `admin` or `member`. */
+            role: string;
+            /** @description The account's state: `active`, `suspended`, `waitlisted` or `deleted`. */
+            status: string;
+            /** @description The organization's tenant id used in `Smol-Tenant` to act in this account. */
+            tenantId: string;
+        };
+        /** @description An organization's limits and usage, counted once across every member's machines. */
+        OrgQuota: {
+            /**
+             * Format: int32
+             * @description How many machines it has now, by the same count the refusal reports.
+             */
+            machines: number;
+            /**
+             * Format: int32
+             * @description How many are running now, by the concurrency cap's own predicate.
+             */
+            running: number;
+        };
+        /** @description Summary of the caller's org context driving the console's member UI. */
+        OrgSummary: {
+            /** @description True when the caller may invite/change-role/remove members (owner/admin). */
+            canManageMembers: boolean;
+            /** @description The display name the owner may rename; null when the account is not an organization. */
+            displayName?: string | null;
+            /** @description True when the account is an organization (vs an individual login). */
+            isOrganization: boolean;
+            /** @description The slug, unique and final once chosen; null when the account is not an organization. */
+            name?: string | null;
+            quota?: null | components["schemas"]["OrgQuota"];
+            /** @description The org's tenant id for `Smol-Tenant`; null when the account is not an organization. */
+            tenantId?: string | null;
+        };
+        /** @description One invitation waiting on the caller; the address is not carried, it is the caller's own. */
+        PendingInvitation: {
+            createdAt: string;
+            /** @description When it lapses. After this it is neither listed nor acceptable. */
+            expiresAt: string;
+            /** @description What the accept names, a handle not a credential; the caller's address must still match. */
+            id: string;
+            /** @description The account id of the person who sent it. */
+            invitedBy: string;
+            /** @description The organization's display name, falling back to its slug, since the caller has no roster. */
+            organization: string;
+            /** @description The role the membership row will carry: `owner`, `admin` or `member`. */
+            role: string;
+            /** @description The organization it joins, for the `Smol-Tenant` header afterwards. */
+            tenantId: string;
+        };
         /** @description A reusable plan: quota + per-unit rates (money in integer micros) + budget. */
         PlanInfo: {
             allowAlwaysOn: boolean;
@@ -1810,6 +3365,11 @@ export interface components {
             maxConcurrentMachines: number;
             /** Format: int32 */
             maxCpus: number;
+            /**
+             * Format: int64
+             * @description Largest disk (GB) one machine may request; `null` = platform maximum.
+             */
+            maxDiskGb?: number | null;
             /** Format: int64 */
             maxEgressGb?: number | null;
             /** Format: int32 */
@@ -1842,46 +3402,49 @@ export interface components {
             rateExecMicros: number;
             /** Format: int64 */
             rateMemoryGbHourMicros: number;
-        };
-        PoolConfig: {
-            /** Format: int32 */
-            cpus?: number;
-            image: string;
-            /** Format: int64 */
-            maxIdleSecs?: number;
-            /** Format: int32 */
-            memoryMb?: number;
-            network?: boolean;
-            /** Format: int32 */
-            targetSize?: number;
             /**
-             * @description Optional owning tenant. Admin-only: when set, the pool is private to that
-             *     tenant; when omitted, the pool is shared and any tenant may claim from it.
+             * @description Whether a tenant may switch itself onto this plan. Operator-only tiers
+             *     are false and never appear in the self-serve list.
              */
-            tenantId?: string | null;
+            selfServe?: boolean;
         };
-        PoolInfo: {
-            /** Format: int32 */
-            busyCount: number;
-            id: string;
-            /** Format: int32 */
-            idleCount: number;
-            image: string;
-            status: string;
-            /** Format: int32 */
-            targetSize: number;
-        };
-        /** @description Durable live-state artifact stored by SmolCloud. */
+        /** @description Portable live-state capture; only `available` denotes a completed upload. */
         PortableCheckpointInfo: {
             arch: string;
             createdAt: string;
             /** @description Authenticated endpoint that downloads the `.smolcheckpoint` file. */
             downloadUrl: string;
+            /**
+             * @description smolvm version of the node that captured it. A restore is only placed
+             *     on a node at this version or newer. Absent for older checkpoints, which
+             *     restore anywhere.
+             */
+            engineVersion?: string | null;
             id: string;
             machineId: string;
             /** Format: int64 */
             sizeBytes: number;
+            /** @description `creating`, `available`, `failed`, or `deleting`. */
             status: string;
+        };
+        /**
+         * @description The lifetime count of machine starts on the platform, served UNAUTHENTICATED
+         *     at `GET /v1/status/machines` for the marketing site. Counted from the audit
+         *     trail, so it is a real number and only ever grows. Operator-owned accounts
+         *     (demos, QA) are left out via the `public_stats.exclude_tenants` server
+         *     setting, so the figure means "machines our customers launched".
+         */
+        PublicMachineStats: {
+            /**
+             * Format: int64
+             * @description Machines started by customers since `since`. `null` when the count could
+             *     not be computed — the site hides the figure rather than show a zero.
+             */
+            machinesStarted?: number | null;
+            /** @description The first day the count covers (`YYYY-MM-DD`), when known. */
+            since?: string | null;
+            /** @description When the figure was last computed (RFC 3339). */
+            updatedAt: string;
         };
         /**
          * @description The published rate card, served UNAUTHENTICATED at `GET /v1/pricing`. Read
@@ -1916,7 +3479,10 @@ export interface components {
             egressGbMicros: number;
             /**
              * Format: int64
-             * @description Recurring monthly free credit applied to each period's bill.
+             * @description Deprecated alias of [`Self::signup_credit_micros`], kept so clients written
+             *     against the old contract keep parsing. It once meant a recurring monthly
+             *     allowance; that allowance no longer exists, so the value is the same
+             *     one-time grant. Read `signup_credit_micros` instead.
              */
             freeCreditMicros: number;
             /**
@@ -1924,6 +3490,13 @@ export interface components {
              * @description Active resident-memory (RSS) GB-hour.
              */
             memoryGbHourMicros: number;
+            /**
+             * Format: int64
+             * @description One-time credit granted when an account is created, in micros. It is paid
+             *     into the account's prepaid balance and drawn down like any other credit —
+             *     it does NOT reset monthly and is not a per-period discount.
+             */
+            signupCreditMicros: number;
             /** @description Graduated volume-discount bands, low bound → high. */
             volumeTiers: components["schemas"]["VolumeTier"][];
         };
@@ -1950,6 +3523,18 @@ export interface components {
             /** @description `s3://bucket[/prefix]`. */
             source: string;
         };
+        /** @description What removing somebody from an organization revokes and what it leaves running. */
+        RemoveMemberResult: {
+            /** @description The ids of the organization's API keys that were revoked. */
+            revokedKeyIds: string[];
+            /** @description The organization's machines this person created that are left running. */
+            runningMachines: components["schemas"]["OrgMachineSummary"][];
+        };
+        /** @description `PATCH /v1/org` renames the organization; the slug is final so only the name changes. */
+        RenameOrgRequest: {
+            /** @description The new display name, trimmed, 1 to 100 characters, same bound as at creation. */
+            displayName: string;
+        };
         /** @description Create a stopped machine from a durable portable checkpoint. */
         RestorePortableCheckpointRequest: {
             name: string;
@@ -1957,6 +3542,70 @@ export interface components {
         ScaleRequest: {
             /** Format: int32 */
             count: number;
+        };
+        /** @description Send a prompt to a managed agent session. */
+        SendAgentTurnRequest: {
+            /**
+             * @description Environment for this turn only — typically the model API key. Never
+             *     stored.
+             */
+            env?: {
+                [key: string]: string;
+            };
+            prompt: string;
+            /**
+             * Format: int64
+             * @description Longest the turn may run (default 1800 s).
+             */
+            timeoutSeconds?: number | null;
+        };
+        /**
+         * @description Store a credential for credential substitution. The value is write-only:
+         *     it is sealed at rest and never returned.
+         */
+        SetCredentialRequest: {
+            /**
+             * @description The environment variable a machine that binds this credential sees —
+             *     holding a placeholder, never the value.
+             */
+            envVar: string;
+            /** @description The only hosts the value is ever sent to (HTTPS requests only). */
+            hosts: string[];
+            value: string;
+        };
+        /** @description Body of `PATCH /v1/org/members/{id}/role`. */
+        SetRoleRequest: {
+            /** @description `owner`, `admin` or `member`. */
+            role: string;
+        };
+        /**
+         * @description First-touch marketing attribution, reported once by the console right after a
+         *     new account's first login. Every field is optional and untrusted: the control
+         *     plane keeps an allowlisted, length-capped, query-stripped copy and ignores the
+         *     rest. Stored at most once per tenant and only for recently created tenants.
+         */
+        SignupAttribution: {
+            /** @description When the visitor first landed (RFC 3339), which can precede signup by days. */
+            firstSeenAt?: string | null;
+            /** @description The first path on this site the visitor landed on. */
+            landingPath?: string | null;
+            /**
+             * @description The external page that sent the visitor, as scheme://host/path — the
+             *     query string and fragment are dropped before storage.
+             */
+            referrer?: string | null;
+            utmCampaign?: string | null;
+            utmContent?: string | null;
+            utmMedium?: string | null;
+            utmSource?: string | null;
+            utmTerm?: string | null;
+        };
+        /**
+         * @description Whether a reported attribution was stored. `false` is not an error: the tenant
+         *     already has one, is not a new account, or the report carried nothing usable.
+         */
+        SignupAttributionResponse: {
+            recorded: boolean;
         };
         /**
          * @description A tenant (customer account). Quota override fields are `None` when inherited
@@ -1968,6 +3617,11 @@ export interface components {
             id: string;
             /** Format: int32 */
             maxCpus?: number | null;
+            /**
+             * Format: int64
+             * @description Per-tenant override of the plan's per-machine disk ceiling (GB).
+             */
+            maxDiskGb?: number | null;
             /** Format: int32 */
             maxGroups?: number | null;
             /** Format: int64 */
@@ -1976,6 +3630,7 @@ export interface components {
             maxSandboxPools?: number | null;
             name: string;
             planId?: string | null;
+            signupAttribution?: null | components["schemas"]["SignupAttribution"];
             status: string;
             updatedAt?: string | null;
         };
@@ -2026,6 +3681,23 @@ export interface components {
              */
             thresholdMicros?: number | null;
         };
+        /**
+         * @description `PATCH /v1/plans/{id}`: change a plan's limits in place. Every field is
+         *     optional; only the given ones change. Takes effect on the next machine
+         *     create for every tenant on the plan.
+         */
+        UpdatePlanRequest: {
+            /** Format: int32 */
+            maxConcurrentMachines?: number | null;
+            /** Format: int32 */
+            maxCpus?: number | null;
+            /** Format: int64 */
+            maxDiskGb?: number | null;
+            /** Format: int32 */
+            maxMachines?: number | null;
+            /** Format: int64 */
+            maxMemoryMb?: number | null;
+        };
         /** @description Partial update — only present fields change. */
         UpdateTenantRequest: {
             externalBillingId?: string | null;
@@ -2036,6 +3708,17 @@ export interface components {
              *     unchanged (still falls back to the plan). Admin-only.
              */
             freeCreditMicros?: number | null;
+            /**
+             * Format: int32
+             * @description Per-machine size overrides for this tenant (each `null` = leave as is).
+             *     They sit above the plan's ceilings, for a deal that needs bigger machines
+             *     without a new plan.
+             */
+            maxCpus?: number | null;
+            /** Format: int64 */
+            maxDiskGb?: number | null;
+            /** Format: int64 */
+            maxMemoryMb?: number | null;
             planId?: string | null;
             status?: string | null;
         };
@@ -2183,6 +3866,42 @@ export interface operations {
                 };
                 content?: never;
             };
+            /** @description Missing or invalid API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Key lacks the required scope */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limited; retry after the Retry-After header */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
         };
     };
     readyz: {
@@ -2228,6 +3947,1098 @@ export interface operations {
                     "application/json": components["schemas"]["AccountInfo"];
                 };
             };
+            /** @description Missing or invalid API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Key lacks the required scope */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limited; retry after the Retry-After header */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    account_attribution: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SignupAttribution"];
+            };
+        };
+        responses: {
+            /** @description Whether the attribution was stored. False when the tenant already has one, is not a new account, or the report held nothing usable. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SignupAttributionResponse"];
+                };
+            };
+            /** @description Missing or invalid API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Key lacks the required scope */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limited; retry after the Retry-After header */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    account_plan_change: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ChangePlanRequest"];
+            };
+        };
+        responses: {
+            /** @description The plan now in effect: a move onto a fee plan applies at once, a move off one when the paid period ends. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlanInfo"];
+                };
+            };
+            /** @description Missing or invalid API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The plan's monthly fee has no saved card to bill, or the card was declined; the plan does not move. */
+            402: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Key lacks the required scope */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Current usage exceeds the target plan's limits, or this account's plan is already changing */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description That plan is not self-serve */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limited; retry after the Retry-After header */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Paid plans are not enabled on this deployment */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    account_plans_list: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Plans this tenant may switch to itself */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AvailablePlansResponse"];
+                };
+            };
+            /** @description Missing or invalid API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Key lacks the required scope */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limited; retry after the Retry-After header */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    agent_list: {
+        parameters: {
+            query?: {
+                /** @description Last session name from the previous page */
+                after?: string;
+                /** @description Page size, 1-100 (default 20) */
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Paginated agent session summaries */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentListPage"];
+                };
+            };
+            /** @description Missing or invalid API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Key lacks the required scope */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limited; retry after the Retry-After header */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    agent_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateAgentRequest"];
+            };
+        };
+        responses: {
+            /** @description Session created; its machine and harness are set up in the background (status `starting`, then `ready` or `failed`) */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentInfo"];
+                };
+            };
+            /** @description Missing or invalid API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Key lacks the required scope */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description A session with that name exists */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limited; retry after the Retry-After header */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    agent_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Session name */
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Session with its turns */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentInfo"];
+                };
+            };
+            /** @description Missing or invalid API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Key lacks the required scope */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limited; retry after the Retry-After header */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    agent_delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Session name */
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Session, machine and unshared checkpoints deleted */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Missing or invalid API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Key lacks the required scope */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limited; retry after the Retry-After header */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    agent_branch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Session name */
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AgentBranchRequest"];
+            };
+        };
+        responses: {
+            /** @description New session from the state right after the turn */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentInfo"];
+                };
+            };
+            /** @description Missing or invalid API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Key lacks the required scope */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limited; retry after the Retry-After header */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    agent_fork: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Session name */
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AgentForkRequest"];
+            };
+        };
+        responses: {
+            /** @description New session from the state right after the turn */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentInfo"];
+                };
+            };
+            /** @description Missing or invalid API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Key lacks the required scope */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limited; retry after the Retry-After header */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    agent_pause: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Session name */
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Paused; the next turn resumes it */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Missing or invalid API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Key lacks the required scope */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limited; retry after the Retry-After header */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    agent_resume: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Session name */
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Resumed */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Missing or invalid API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Key lacks the required scope */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limited; retry after the Retry-After header */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    agent_rewind: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Session name */
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AgentRewindRequest"];
+            };
+        };
+        responses: {
+            /** @description Session restored to the state right after the turn */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentInfo"];
+                };
+            };
+            /** @description Missing or invalid API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Key lacks the required scope */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limited; retry after the Retry-After header */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    agent_turn_send: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Retry the same turn without running it twice; a different request using the same key conflicts */
+                "Idempotency-Key"?: string | null;
+            };
+            path: {
+                /** @description Session name */
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SendAgentTurnRequest"];
+            };
+        };
+        responses: {
+            /** @description Turn started; it runs whether or not a client stays connected */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentTurnAccepted"];
+                };
+            };
+            /** @description Missing or invalid API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Key lacks the required scope */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description A turn is already running, or the session is not ready */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limited; retry after the Retry-After header */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    agent_turn_cancel: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Session name */
+                name: string;
+                /** @description Running turn number */
+                turn: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Turn cancelled and its machine stopped; the next turn restarts it */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Missing or invalid API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Key lacks the required scope */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Turn is not running */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limited; retry after the Retry-After header */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    agent_turn_events: {
+        parameters: {
+            query?: {
+                /** @description Replay only events numbered above this */
+                after?: number;
+            };
+            header?: never;
+            path: {
+                /** @description Session name */
+                name: string;
+                /** @description Turn number */
+                turn: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description text/event-stream: an `event` per agent event (`id` = its number), then `done` with the finished turn */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Missing or invalid API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Key lacks the required scope */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limited; retry after the Retry-After header */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
         };
     };
     apikey_list: {
@@ -2248,6 +5059,42 @@ export interface operations {
                     "application/json": components["schemas"]["ApiKeyInfo"][];
                 };
             };
+            /** @description Missing or invalid API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Listing keys needs members:write, which an owner or an admin holds. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limited; retry after the Retry-After header */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
         };
     };
     apikey_create: {
@@ -2263,13 +5110,67 @@ export interface operations {
             };
         };
         responses: {
-            /** @description API key created (plaintext shown once) */
-            200: {
+            /** @description API key created; the plaintext key is in this response and nowhere else, and the key records the person it acts for. */
+            201: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
                     "application/json": components["schemas"]["ApiKeyCreated"];
+                };
+            };
+            /** @description Missing or invalid API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description An organization with no payment method on file mints nothing */
+            402: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Minting keys needs members:write, which an owner or an admin holds; or a scope the caller does not hold, or one no key may carry (anything under members:, billing: or key:, and admin or *), named in the message. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description On an organization, personId is missing or does not name a member of it; on a personal account, personId names someone other than the caller. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limited; retry after the Retry-After header */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
         };
@@ -2286,12 +5187,57 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description API key revoked */
-            204: {
+            /** @description API key revoked; the row stays with a revocation stamp. */
+            200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Missing or invalid API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Revoking keys needs members:write, which an owner or an admin holds; on an organization a key with nobody behind it revokes nothing. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description No such key on this account */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limited; retry after the Retry-After header */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
             };
         };
     };
@@ -2311,6 +5257,42 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AutoRechargeSettings"];
+                };
+            };
+            /** @description Missing or invalid API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Key lacks the required scope */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limited; retry after the Retry-After header */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
         };
@@ -2337,6 +5319,42 @@ export interface operations {
                     "application/json": components["schemas"]["AutoRechargeSettings"];
                 };
             };
+            /** @description Missing or invalid API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Key lacks the required scope */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limited; retry after the Retry-After header */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
         };
     };
     billing_checkout_session: {
@@ -2354,6 +5372,42 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Missing or invalid API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Key lacks the required scope */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limited; retry after the Retry-After header */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
             };
         };
     };
@@ -2373,6 +5427,173 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TenantMeter"][];
+                };
+            };
+            /** @description Missing or invalid API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Key lacks the required scope */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limited; retry after the Retry-After header */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    billing_payment_method_setup: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Returns {"url": <stripe-hosted url>} for a Stripe Checkout in setup mode that puts a card on file without charging it. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Missing or invalid API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Key lacks the required scope */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Card payments are not enabled on this deployment */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limited; retry after the Retry-After header */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    portable_checkpoint_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Portable checkpoint id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Capture status */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PortableCheckpointInfo"];
+                };
+            };
+            /** @description Missing or invalid API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Key lacks the required scope */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limited; retry after the Retry-After header */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
         };
@@ -2396,12 +5617,59 @@ export interface operations {
                 };
                 content?: never;
             };
+            /** @description Missing or invalid API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Key lacks the required scope */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
             /** @description Checkpoint is referenced by a machine */
             409: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limited; retry after the Retry-After header */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
             };
         };
     };
@@ -2424,12 +5692,59 @@ export interface operations {
                 };
                 content?: never;
             };
+            /** @description Missing or invalid API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Key lacks the required scope */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
             /** @description Not found */
             404: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Checkpoint is not available */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limited; retry after the Retry-After header */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
             };
         };
     };
@@ -2458,12 +5773,262 @@ export interface operations {
                     "application/json": components["schemas"]["MachineInfo"];
                 };
             };
+            /** @description Missing or invalid API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Key lacks the required scope */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
             /** @description Checkpoint is not available */
             409: {
                 headers: {
                     [name: string]: unknown;
                 };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limited; retry after the Retry-After header */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    credential_list: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Stored credentials, without their values */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CredentialInfo"][];
+                };
+            };
+            /** @description Missing or invalid API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Key lacks the required scope */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limited; retry after the Retry-After header */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    credential_set: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Credential name */
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SetCredentialRequest"];
+            };
+        };
+        responses: {
+            /** @description Stored; machines bound to it use the new value from their next boot */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CredentialInfo"];
+                };
+            };
+            /** @description Invalid name, variable, hosts or value */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Missing or invalid API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Key lacks the required scope */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limited; retry after the Retry-After header */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    credential_delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Credential name */
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Deleted */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
                 content?: never;
+            };
+            /** @description Missing or invalid API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Key lacks the required scope */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limited; retry after the Retry-After header */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
             };
         };
     };
@@ -2483,6 +6048,42 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["GroupInfo"][];
+                };
+            };
+            /** @description Missing or invalid API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Key lacks the required scope */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limited; retry after the Retry-After header */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
         };
@@ -2509,6 +6110,42 @@ export interface operations {
                     "application/json": components["schemas"]["GroupInfo"];
                 };
             };
+            /** @description Missing or invalid API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Key lacks the required scope */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limited; retry after the Retry-After header */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
         };
     };
     group_get: {
@@ -2532,12 +6169,50 @@ export interface operations {
                     "application/json": components["schemas"]["GroupInfo"];
                 };
             };
+            /** @description Missing or invalid API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Key lacks the required scope */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
             /** @description Not found */
             404: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limited; retry after the Retry-After header */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
             };
         };
     };
@@ -2560,6 +6235,51 @@ export interface operations {
                 };
                 content?: never;
             };
+            /** @description Missing or invalid API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Key lacks the required scope */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limited; retry after the Retry-After header */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
         };
     };
     group_logs: {
@@ -2580,6 +6300,51 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Missing or invalid API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Key lacks the required scope */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limited; retry after the Retry-After header */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
             };
         };
     };
@@ -2604,6 +6369,51 @@ export interface operations {
                     "application/json": components["schemas"]["GroupInfo"];
                 };
             };
+            /** @description Missing or invalid API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Key lacks the required scope */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limited; retry after the Retry-After header */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
         };
     };
     group_redeploy: {
@@ -2625,6 +6435,51 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["GroupInfo"];
+                };
+            };
+            /** @description Missing or invalid API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Key lacks the required scope */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limited; retry after the Retry-After header */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
         };
@@ -2654,11 +6509,59 @@ export interface operations {
                     "application/json": components["schemas"]["GroupInfo"];
                 };
             };
+            /** @description Missing or invalid API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Key lacks the required scope */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limited; retry after the Retry-After header */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
         };
     };
     machine_list: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Only machines carrying this label, as `key=value`. Repeat to require several labels (all must match). */
+                label?: string[];
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -2672,6 +6575,51 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["MachineInfo"][];
+                };
+            };
+            /** @description Missing or invalid API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Key lacks the required scope */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Malformed label filter */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limited; retry after the Retry-After header */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
         };
@@ -2698,19 +6646,59 @@ export interface operations {
                     "application/json": components["schemas"]["MachineInfo"];
                 };
             };
+            /** @description Missing or invalid API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Key lacks the required scope */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
             /** @description Name already exists */
             409: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
             };
-            /** @description Quota exceeded */
+            /** @description Quota exceeded, invalid labels, or nestedVirt requested where the platform does not offer it (code nested_virt_unavailable) */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limited; retry after the Retry-After header */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
             };
         };
     };
@@ -2735,12 +6723,50 @@ export interface operations {
                     "application/json": components["schemas"]["MachineInfo"];
                 };
             };
+            /** @description Missing or invalid API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Key lacks the required scope */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
             /** @description Not found */
             404: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limited; retry after the Retry-After header */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
             };
         };
     };
@@ -2763,6 +6789,51 @@ export interface operations {
                 };
                 content?: never;
             };
+            /** @description Missing or invalid API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Key lacks the required scope */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limited; retry after the Retry-After header */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
         };
     };
     machine_branch: {
@@ -2782,12 +6853,57 @@ export interface operations {
         };
         responses: {
             /** @description Child created */
-            200: {
+            201: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
                     "application/json": components["schemas"]["MachineInfo"];
+                };
+            };
+            /** @description Missing or invalid API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Key lacks the required scope */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limited; retry after the Retry-After header */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
         };
@@ -2809,12 +6925,57 @@ export interface operations {
         };
         responses: {
             /** @description Children created */
-            200: {
+            201: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
                     "application/json": components["schemas"]["ForkBatchResponse"];
+                };
+            };
+            /** @description Missing or invalid API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Key lacks the required scope */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limited; retry after the Retry-After header */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
         };
@@ -2840,11 +7001,59 @@ export interface operations {
                     "application/json": components["schemas"]["PortableCheckpointInfo"][];
                 };
             };
+            /** @description Missing or invalid API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Key lacks the required scope */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limited; retry after the Retry-After header */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
         };
     };
     portable_checkpoint_create: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Defaults to true. False accepts a background capture; poll checkpoint status before restore. */
+                wait?: boolean;
+            };
             header?: never;
             path: {
                 /** @description Running forkable machine id */
@@ -2863,12 +7072,68 @@ export interface operations {
                     "application/json": components["schemas"]["PortableCheckpointInfo"];
                 };
             };
+            /** @description Capture accepted, not yet durable */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PortableCheckpointInfo"];
+                };
+            };
+            /** @description Missing or invalid API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Key lacks the required scope */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
             /** @description Machine is not ready for capture */
             409: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limited; retry after the Retry-After header */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
             };
         };
     };
@@ -2897,6 +7162,133 @@ export interface operations {
                     "application/json": components["schemas"]["MachineExecResponse"];
                 };
             };
+            /** @description Missing or invalid API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Key lacks the required scope */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limited; retry after the Retry-After header */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    machine_connect_token: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Machine id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        /** @description Optional; `ttlSeconds` from 60 to 86400 */
+        requestBody?: {
+            content: {
+                "application/json": null | components["schemas"]["CreateConnectTokenRequest"];
+            };
+        };
+        responses: {
+            /** @description Connect token minted; the token is in this response and nowhere else */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConnectToken"];
+                };
+            };
+            /** @description Missing or invalid API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Key lacks the machine:exec scope */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Machine not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description ttlSeconds is out of range */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limited; retry after the Retry-After header */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
         };
     };
     machine_connect: {
@@ -2919,6 +7311,418 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description The guest service's response, status and body passed through */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Missing or invalid API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Key lacks the required scope */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Machine or published port not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limited; retry after the Retry-After header */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Machine is not running */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    machine_connect_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Machine id */
+                id: string;
+                /** @description Guest port to bridge to */
+                port: number;
+            };
+            cookie?: never;
+        };
+        /** @description Forwarded to the guest service unchanged */
+        requestBody: {
+            content: {
+                "*/*": string;
+            };
+        };
+        responses: {
+            /** @description Switching to the machine's TCP bridge */
+            101: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The guest service's response, status and body passed through */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Missing or invalid API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Key lacks the required scope */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Machine or published port not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limited; retry after the Retry-After header */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Machine is not running */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    machine_connect_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Machine id */
+                id: string;
+                /** @description Guest port to bridge to */
+                port: number;
+            };
+            cookie?: never;
+        };
+        /** @description Forwarded to the guest service unchanged */
+        requestBody: {
+            content: {
+                "*/*": string;
+            };
+        };
+        responses: {
+            /** @description Switching to the machine's TCP bridge */
+            101: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The guest service's response, status and body passed through */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Missing or invalid API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Key lacks the required scope */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Machine or published port not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limited; retry after the Retry-After header */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Machine is not running */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    machine_connect_delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Machine id */
+                id: string;
+                /** @description Guest port to bridge to */
+                port: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Switching to the machine's TCP bridge */
+            101: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The guest service's response, status and body passed through */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Missing or invalid API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Key lacks the required scope */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Machine or published port not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limited; retry after the Retry-After header */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Machine is not running */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    machine_connect_patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Machine id */
+                id: string;
+                /** @description Guest port to bridge to */
+                port: number;
+            };
+            cookie?: never;
+        };
+        /** @description Forwarded to the guest service unchanged */
+        requestBody: {
+            content: {
+                "*/*": string;
+            };
+        };
+        responses: {
+            /** @description Switching to the machine's TCP bridge */
+            101: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The guest service's response, status and body passed through */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Missing or invalid API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Key lacks the required scope */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Machine or published port not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limited; retry after the Retry-After header */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Machine is not running */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
             };
         };
     };
@@ -2943,6 +7747,51 @@ export interface operations {
                     "application/json": components["schemas"]["EventInfo"][];
                 };
             };
+            /** @description Missing or invalid API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Key lacks the required scope */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limited; retry after the Retry-After header */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
         };
     };
     machine_exec: {
@@ -2961,13 +7810,217 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Command result */
+            /** @description Command result. Buffered JSON by default; with `stream: true` in the body the response is an SSE stream of `event: stdout|stderr|error|exit` frames instead, terminated by `exit` carrying `{"exitCode": N}`. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
                     "application/json": components["schemas"]["MachineExecResponse"];
+                    "text/event-stream": string;
+                };
+            };
+            /** @description Missing or invalid API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Key lacks the required scope */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limited; retry after the Retry-After header */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    machine_exec_interactive: {
+        parameters: {
+            query?: {
+                /** @description Program to run, a single path with no arguments (default: `/bin/sh`). `command` is accepted as an alias. */
+                cmd?: string;
+                /** @description Initial terminal width in columns */
+                cols?: number;
+                /** @description Initial terminal height in rows */
+                rows?: number;
+                /** @description API key, for clients that cannot set an Authorization header on a WebSocket, such as browsers */
+                access_token?: string;
+                /** @description The account to act in, for a browser that cannot set the Smol-Tenant header on a WebSocket. Accepted on this handshake only, and only when the header is absent; a value that is not an account id is refused with 400 */
+                smol_tenant?: string;
+            };
+            header?: never;
+            path: {
+                /** @description Machine id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Switching to a terminal WebSocket, started on the machine (a stopped machine is started first). Client to machine: binary frames are keystrokes; a text frame `{"type":"resize","cols":N,"rows":N}` resizes the terminal; `{"type":"stdin","data":"..."}` and any other text frame are typed as input. Machine to client: binary frames are terminal output; a final text frame `{"type":"exit","code":N}` precedes the close. Closing the socket ends the program. The server pings every 30 seconds and ends a session whose client has not answered for 90 seconds; a connection lasts at most one hour, so long sessions should reconnect into a terminal multiplexer. */
+            101: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Missing or invalid credentials */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Key lacks the required scope */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limited; retry after the Retry-After header */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The machine's terminal could not be reached */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    machine_exec_stream: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Machine id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MachineCommandRequest"];
+            };
+        };
+        responses: {
+            /** @description Command output as Server-Sent Events, written as it is produced and never truncated. Frames are `event: stdout|stderr|error|exit` with `data:` lines; the terminal `exit` frame carries `{"exitCode": N}`. Identical to `POST /v1/machines/{id}/exec` with `stream: true` — a dedicated path for clients that route by URL rather than by request body. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/event-stream": string;
+                };
+            };
+            /** @description Missing or invalid API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Key lacks the required scope */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limited; retry after the Retry-After header */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
         };
@@ -2990,6 +8043,51 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Missing or invalid API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Key lacks the required scope */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limited; retry after the Retry-After header */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
             };
         };
     };
@@ -3014,6 +8112,51 @@ export interface operations {
                 };
                 content: {
                     "application/octet-stream": number[];
+                };
+            };
+            /** @description Missing or invalid API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Key lacks the required scope */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limited; retry after the Retry-After header */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
         };
@@ -3043,6 +8186,51 @@ export interface operations {
                 };
                 content?: never;
             };
+            /** @description Missing or invalid API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Key lacks the required scope */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limited; retry after the Retry-After header */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
         };
     };
     machine_fork: {
@@ -3062,12 +8250,57 @@ export interface operations {
         };
         responses: {
             /** @description Clone created */
-            200: {
+            201: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
                     "application/json": components["schemas"]["MachineInfo"];
+                };
+            };
+            /** @description Missing or invalid API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Key lacks the required scope */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limited; retry after the Retry-After header */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
         };
@@ -3089,7 +8322,7 @@ export interface operations {
         };
         responses: {
             /** @description Clones created */
-            200: {
+            201: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -3097,11 +8330,129 @@ export interface operations {
                     "application/json": components["schemas"]["ForkBatchResponse"];
                 };
             };
+            /** @description Missing or invalid API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Key lacks the required scope */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limited; retry after the Retry-After header */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    machine_lineage: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Machine id in the lineage */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Complete branch lineage */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MachineLineage"];
+                };
+            };
+            /** @description Missing or invalid API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Key lacks the required scope */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limited; retry after the Retry-After header */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
         };
     };
     machine_logs: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Keep the stream open and send new output as it is produced. Default false, which sends the backlog and ends the stream, so a client that wants to tail has to ask. */
+                follow?: boolean;
+                /** @description Limit the initial backlog to the last N lines. Absent means the whole retained backlog, which on a long-lived machine is the reason a console asks for a bounded one. */
+                tail?: number;
+            };
             header?: never;
             path: {
                 /** @description Machine id */
@@ -3118,6 +8469,205 @@ export interface operations {
                 };
                 content: {
                     "text/plain": string;
+                };
+            };
+            /** @description Missing or invalid API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Key lacks the required scope */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limited; retry after the Retry-After header */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    machine_pause: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Machine id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Execution saved durably and machine paused */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MachineInfo"];
+                };
+            };
+            /** @description Missing or invalid API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Key lacks the required scope */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Machine cannot be paused in its current state */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limited; retry after the Retry-After header */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    machine_resume: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Machine id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Saved execution resumed */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MachineInfo"];
+                };
+            };
+            /** @description Missing or invalid API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Key lacks the required scope */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description No durable saved execution is ready */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limited; retry after the Retry-After header */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
         };
@@ -3141,6 +8691,51 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["MachineSessionInfo"][];
+                };
+            };
+            /** @description Missing or invalid API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Key lacks the required scope */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limited; retry after the Retry-After header */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
         };
@@ -3170,6 +8765,51 @@ export interface operations {
                     "application/json": components["schemas"]["MachineSessionInfo"];
                 };
             };
+            /** @description Missing or invalid API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Key lacks the required scope */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limited; retry after the Retry-After header */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
         };
     };
     machine_session_delete: {
@@ -3192,6 +8832,51 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Missing or invalid API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Key lacks the required scope */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limited; retry after the Retry-After header */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
             };
         };
     };
@@ -3222,6 +8907,51 @@ export interface operations {
                     "application/json": components["schemas"]["MachineExecResponse"];
                 };
             };
+            /** @description Missing or invalid API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Key lacks the required scope */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limited; retry after the Retry-After header */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
         };
     };
     machine_snapshot_create: {
@@ -3242,6 +8972,51 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Missing or invalid API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Key lacks the required scope */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limited; retry after the Retry-After header */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
             };
         };
     };
@@ -3264,6 +9039,51 @@ export interface operations {
                 };
                 content?: never;
             };
+            /** @description Missing or invalid API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Key lacks the required scope */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limited; retry after the Retry-After header */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
         };
     };
     machine_start: {
@@ -3285,6 +9105,51 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["MachineInfo"];
+                };
+            };
+            /** @description Missing or invalid API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Key lacks the required scope */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limited; retry after the Retry-After header */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
         };
@@ -3310,6 +9175,128 @@ export interface operations {
                     "application/json": components["schemas"]["MachineInfo"];
                 };
             };
+            /** @description Missing or invalid API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Key lacks the required scope */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limited; retry after the Retry-After header */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    machine_tunnel: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Tenant-owned running machine id */
+                id: string;
+                /** @description Published guest TCP port */
+                port: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Binary WebSocket frames carry raw TCP bytes; requires machine:exec scope */
+            101: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Missing or invalid API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Missing machine:exec scope */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Machine or published port not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limited; retry after the Retry-After header */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Machine is not running */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
         };
     };
     machine_usage: {
@@ -3333,6 +9320,51 @@ export interface operations {
                     "application/json": components["schemas"]["MachineUsageResponse"];
                 };
             };
+            /** @description Missing or invalid API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Key lacks the required scope */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limited; retry after the Retry-After header */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
         };
     };
     me_get: {
@@ -3353,6 +9385,42 @@ export interface operations {
                     "application/json": components["schemas"]["MeResponse"];
                 };
             };
+            /** @description Missing or invalid API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Key lacks the required scope */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limited; retry after the Retry-After header */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
         };
     };
     node_list: {
@@ -3371,6 +9439,42 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["NodeInfo"][];
+                };
+            };
+            /** @description Missing or invalid API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Key lacks the required scope */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limited; retry after the Retry-After header */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
         };
@@ -3399,6 +9503,72 @@ export interface operations {
             };
         };
     };
+    node_cordon: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Node id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No new placements land on the node; what runs on it is untouched */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Missing or invalid API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Key lacks the required scope */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limited; retry after the Retry-After header */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     node_credential_revoke: {
         parameters: {
             query?: never;
@@ -3417,6 +9587,51 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Missing or invalid API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Key lacks the required scope */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limited; retry after the Retry-After header */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
             };
         };
     };
@@ -3438,6 +9653,51 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Missing or invalid API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Key lacks the required scope */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limited; retry after the Retry-After header */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
             };
         };
     };
@@ -3462,6 +9722,72 @@ export interface operations {
             };
         };
     };
+    node_uncordon: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Node id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Operator cordon lifted */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Missing or invalid API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Key lacks the required scope */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limited; retry after the Retry-After header */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     operation_list: {
         parameters: {
             query?: never;
@@ -3477,6 +9803,42 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Missing or invalid API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Key lacks the required scope */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limited; retry after the Retry-After header */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
             };
         };
     };
@@ -3499,6 +9861,1205 @@ export interface operations {
                 };
                 content?: never;
             };
+            /** @description Missing or invalid API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Key lacks the required scope */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limited; retry after the Retry-After header */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    org_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The organization context of the account the request acts in, with how many machines it has and runs; the tenant id, slug and display name are null and the counts absent for an individual account. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrgSummary"];
+                };
+            };
+            /** @description Missing or invalid API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Key lacks the required scope */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limited; retry after the Retry-After header */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    org_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateOrgRequest"];
+            };
+        };
+        responses: {
+            /** @description Organization created on the default plan with the caller as its owner; the body carries the tenant id that Smol-Tenant names. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrgSummary"];
+                };
+            };
+            /** @description Slug outside the allowed shape, or display name outside 1 to 100 characters */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Missing or invalid API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The caller authenticated with an API key rather than a user login */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description That identifier is already taken */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limited; retry after the Retry-After header */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    org_delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Organization deleted, with its plan fee subscription ended and its keys, membership rows, registry entries, custom domains, registry credentials and leases gone; the account is marked deleted. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Missing or invalid API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Only an owner can delete an organization, or the caller is an API key */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The organization still owns a machine, a volume, a pool, a checkpoint or a snapshot, holds credit on its balance, or owes for the period, each named in the message */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description An individual account, not an organization */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limited; retry after the Retry-After header */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The plan fee subscription could not be ended at Stripe, or plan billing is not enabled here; nothing was deleted. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    org_rename: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RenameOrgRequest"];
+            };
+        };
+        responses: {
+            /** @description Renamed; only the display label changes, since the slug is final, and the body reads as GET /v1/org does without the counts. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrgSummary"];
+                };
+            };
+            /** @description A display name outside 1 to 100 characters after trimming */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Missing or invalid API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Renaming an organization is an owner or admin action, or the caller is an API key */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description An individual account, not an organization */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limited; retry after the Retry-After header */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    org_convert: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConvertOrgRequest"];
+            };
+        };
+        responses: {
+            /** @description The caller's own account is now an organization with them as its owner; its machines, keys, registry entries, balance and card are unchanged. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrgSummary"];
+                };
+            };
+            /** @description A display name outside 1 to 100 characters after trimming */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Missing or invalid API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The account has no card on file, which an organization needs before it can create anything */
+            402: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The caller authenticated with an API key, or is working in an account other than their own */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The account is already an organization */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limited; retry after the Retry-After header */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    org_invitations_list: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The invitations this organization still waits on, oldest first, without their tokens. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrgInvitation"][];
+                };
+            };
+            /** @description Missing or invalid API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Reading the pending list is an owner or admin action */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description An individual account, not an organization */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limited; retry after the Retry-After header */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    org_invitation_accept: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AcceptInvitationRequest"];
+            };
+        };
+        responses: {
+            /** @description Joined, answering the membership as the switcher lists it; name the invitation by the link's token or the pending list's id, and its address must match the login's verified one. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrgMembership"];
+                };
+            };
+            /** @description Named neither a token nor an id */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Missing or invalid API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The invitation was sent to a different address than the one signed in with, the account has no verified address, or the caller is an API key */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description No such invitation, or it has been taken up or withdrawn */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Already on that organization */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The invitation has expired */
+            410: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limited; retry after the Retry-After header */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    org_invitations_mine: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Every invitation waiting on the login's verified address, oldest first, each naming its organization; no Smol-Tenant header or members scope is needed. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PendingInvitation"][];
+                };
+            };
+            /** @description Missing or invalid API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The caller authenticated with an API key rather than a user login, or has no verified address */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limited; retry after the Retry-After header */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    org_invitation_revoke: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The invitation's id, as the pending list reports it */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Invitation withdrawn; the row is deleted, so the emailed link stops resolving. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Missing or invalid API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Withdrawing an invitation is an owner or admin action, or the caller is an API key */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description No pending invitation with that id on this organization */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description An individual account, not an organization */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limited; retry after the Retry-After header */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    org_invitation_resend: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The invitation's id, as the pending list reports it */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Sent again with a new link on the same row, restarting the seven days; the previous link stops resolving. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InviteResult"];
+                };
+            };
+            /** @description Missing or invalid API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Resending an invitation is an owner or admin action, or the caller is an API key */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description No pending invitation with that id on this organization, or it has been taken up or withdrawn */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The invitation has expired; invite again */
+            410: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description An individual account, not an organization */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limited; retry after the Retry-After header */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    org_members_list: {
+        parameters: {
+            query?: {
+                /** @description How many people to return, 1 to 200, default 100; a larger value is clamped to 200. */
+                limit?: number;
+                /** @description How many people to skip, default 0. */
+                offset?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description One page of the roster, oldest first, each with the person's account id as userId, their membership email and their role as a one-element roles list; empty for an individual account. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrgMember"][];
+                };
+            };
+            /** @description Missing or invalid API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Reading the roster needs members:read or members:write, which every role holds */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limited; retry after the Retry-After header */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    org_member_invite: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["InviteMemberRequest"];
+            };
+        };
+        responses: {
+            /** @description Invitation recorded and, with a mail provider configured, sent; the body carries the accept link, the only readable copy of the token, which lapses in seven days. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InviteResult"];
+                };
+            };
+            /** @description Not an email address, or a role other than owner, admin or member */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Missing or invalid API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The organization has no payment method on file */
+            402: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Inviting is an owner or admin action, or the caller is an API key */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description That address already has an outstanding invitation to this organization, or is already on its roster */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description An individual account, not an organization */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limited; retry after the Retry-After header */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    org_member_remove: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The member's account id as the roster reports it in userId, or "me" to leave, which needs no role. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Removed; the body names the organization's API keys revoked with them and the machines they created that are left running. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RemoveMemberResult"];
+                };
+            };
+            /** @description Missing or invalid API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Taking somebody else off is an owner or admin action, or the caller is an API key */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description That person is not on this organization */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The removal would leave the organization with no owner; the message names the way out */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description An individual account, not an organization */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limited; retry after the Retry-After header */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    org_member_role: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The member's account id, as the roster reports it in userId */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SetRoleRequest"];
+            };
+        };
+        responses: {
+            /** @description Role changed; it takes effect on that person's next request. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description A role other than owner, admin or member */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Missing or invalid API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Changing a role is an owner or admin action, or the caller is an API key */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description That person is not on this organization */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The change would leave the organization with no owner; the message names the way out */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description An individual account, not an organization */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limited; retry after the Retry-After header */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    org_memberships: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Every organization the caller belongs to, most recently used first, with their role and the account's status; empty for a person on none. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrgMembership"][];
+                };
+            };
+            /** @description Missing or invalid API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The caller authenticated with an API key rather than a user login */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limited; retry after the Retry-After header */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
         };
     };
     plan_list: {
@@ -3517,6 +11078,42 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PlanInfo"][];
+                };
+            };
+            /** @description Missing or invalid API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Key lacks the required scope */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limited; retry after the Retry-After header */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
         };
@@ -3543,71 +11140,112 @@ export interface operations {
                     "application/json": components["schemas"]["PlanInfo"];
                 };
             };
-        };
-    };
-    pool_list: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description List pools */
-            200: {
+            /** @description Missing or invalid API key */
+            401: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["PoolInfo"][];
+                    "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-        };
-    };
-    pool_create: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["PoolConfig"];
-            };
-        };
-        responses: {
-            /** @description Pool created */
-            200: {
+            /** @description Key lacks the required scope */
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["PoolInfo"];
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limited; retry after the Retry-After header */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
         };
     };
-    pool_claim: {
+    plan_update: {
         parameters: {
             query?: never;
             header?: never;
             path: {
-                /** @description Pool id */
+                /** @description Plan id */
                 id: string;
             };
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdatePlanRequest"];
+            };
+        };
         responses: {
-            /** @description Claimed machine */
+            /** @description Plan updated; applies from the next machine create */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["MachineInfo"];
+                    "application/json": components["schemas"]["PlanInfo"];
+                };
+            };
+            /** @description Missing or invalid API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Key lacks the required scope */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Plan not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limited; retry after the Retry-After header */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
         };
@@ -3632,6 +11270,26 @@ export interface operations {
             };
         };
     };
+    machine_stats_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Lifetime count of machines started by customers */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PublicMachineStats"];
+                };
+            };
+        };
+    };
     tenant_list: {
         parameters: {
             query?: never;
@@ -3648,6 +11306,42 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TenantInfo"][];
+                };
+            };
+            /** @description Missing or invalid API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Key lacks the required scope */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limited; retry after the Retry-After header */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
         };
@@ -3674,6 +11368,42 @@ export interface operations {
                     "application/json": components["schemas"]["TenantInfo"];
                 };
             };
+            /** @description Missing or invalid API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Key lacks the required scope */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limited; retry after the Retry-After header */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
         };
     };
     tenant_get: {
@@ -3697,12 +11427,50 @@ export interface operations {
                     "application/json": components["schemas"]["TenantInfo"];
                 };
             };
+            /** @description Missing or invalid API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Key lacks the required scope */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
             /** @description Not found */
             404: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limited; retry after the Retry-After header */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
             };
         };
     };
@@ -3731,6 +11499,51 @@ export interface operations {
                     "application/json": components["schemas"]["TenantInfo"];
                 };
             };
+            /** @description Missing or invalid API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Key lacks the required scope */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limited; retry after the Retry-After header */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
         };
     };
     tenant_reactivate: {
@@ -3751,6 +11564,51 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Missing or invalid API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Key lacks the required scope */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limited; retry after the Retry-After header */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
             };
         };
     };
@@ -3773,6 +11631,51 @@ export interface operations {
                 };
                 content?: never;
             };
+            /** @description Missing or invalid API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Key lacks the required scope */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limited; retry after the Retry-After header */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
         };
     };
     token_list: {
@@ -3791,6 +11694,42 @@ export interface operations {
                 };
                 content?: never;
             };
+            /** @description Missing or invalid API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Key lacks the required scope */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limited; retry after the Retry-After header */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
         };
     };
     token_create: {
@@ -3808,6 +11747,42 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Missing or invalid API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Key lacks the required scope */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limited; retry after the Retry-After header */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
             };
         };
     };
@@ -3830,6 +11805,51 @@ export interface operations {
                 };
                 content?: never;
             };
+            /** @description Missing or invalid API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Key lacks the required scope */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limited; retry after the Retry-After header */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
         };
     };
     usage_query: {
@@ -3850,6 +11870,42 @@ export interface operations {
                     "application/json": components["schemas"]["UsageResponse"];
                 };
             };
+            /** @description Missing or invalid API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Key lacks the required scope */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limited; retry after the Retry-After header */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
         };
     };
     volume_list: {
@@ -3868,6 +11924,42 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["VolumeInfo"][];
+                };
+            };
+            /** @description Missing or invalid API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Key lacks the required scope */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limited; retry after the Retry-After header */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
         };
@@ -3894,6 +11986,42 @@ export interface operations {
                     "application/json": components["schemas"]["VolumeInfo"];
                 };
             };
+            /** @description Missing or invalid API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Key lacks the required scope */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limited; retry after the Retry-After header */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
         };
     };
     volume_get: {
@@ -3917,12 +12045,50 @@ export interface operations {
                     "application/json": components["schemas"]["VolumeInfo"];
                 };
             };
+            /** @description Missing or invalid API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Key lacks the required scope */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
             /** @description Not found */
             404: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limited; retry after the Retry-After header */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
             };
         };
     };
@@ -3944,6 +12110,51 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Missing or invalid API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Key lacks the required scope */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limited; retry after the Retry-After header */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
             };
         };
     };

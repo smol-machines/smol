@@ -36,6 +36,47 @@ export interface MachineConfig {
   persistent?: boolean
   /** If true, every start uses cloneable, memfd-backed guest RAM. */
   forkable?: boolean
+  /**
+   * If true, the VM outlives this process: its boot subprocess does not
+   * watch the parent, so it keeps running when this process exits or
+   * crashes, and a later process reattaches with `connect`. Remembered by
+   * the machine, so later starts are detached too.
+   */
+  detached?: boolean
+  /**
+   * Caller metadata stored with the machine and returned by `list`; the
+   * engine never interprets it.
+   */
+  labels?: Record<string, string>
+  /**
+   * Credentials the workload uses without seeing them, as the CLI's
+   * `--credential`.
+   */
+  credentials?: Array<CredentialConfig>
+}
+/** One machine from this host's shared machine database. */
+export interface MachineSummary {
+  /** Machine name. */
+  name: string
+  /**
+   * Lifecycle state as `state()` reports it: `running`, `stopped`,
+   * `frozen`, `paused`, `failed`, ...
+   */
+  state: string
+  /** OCI image the machine boots, when it is an image machine. */
+  image?: string
+  /** Caller metadata given at create. */
+  labels: Record<string, string>
+  /** Host PID of the VM process while it is running. */
+  pid?: number
+  /** Whether the record outlives the process that created it. */
+  persistent: boolean
+  /** Whether the VM outlives the process that starts it. */
+  detached: boolean
+  /** Whether it starts as a live branch source. */
+  branchable: boolean
+  /** Creation time, seconds since the Unix epoch. */
+  createdAt: number
 }
 /** Whether this host can run local machines, from the engine's own checks. */
 export interface HostAvailability {
@@ -89,6 +130,26 @@ export interface MachineResources {
   /** Overlay disk size in GiB, or unset while it has the default size. */
   overlayGib?: number
 }
+/**
+ * A credential the workload uses without seeing it: the guest variable
+ * `env_var` holds a placeholder, and the host substitutes the real value in
+ * request headers of HTTPS requests to `hosts` only.
+ */
+export interface CredentialConfig {
+  /** Binding name. */
+  name: string
+  /** Guest environment variable that holds the placeholder. */
+  envVar: string
+  /** Exact host names the value may be sent to. */
+  hosts: Array<string>
+  /** HTTP methods the value may be used with; all supported ones when unset. */
+  methods?: Array<string>
+  /**
+   * The value, held in this process's memory only. When unset, this
+   * process's own variable named `env_var` is read at each start.
+   */
+  value?: string
+}
 /** VM resource allocation. */
 export interface VmResourcesConfig {
   /** Number of vCPUs (default: src/data/resources.rs default). */
@@ -123,6 +184,22 @@ export interface VmResourcesConfig {
    * CUDA toolkit needed in the image). Local target only (default: false).
    */
   cuda?: boolean
+  /**
+   * Network backend: `"tsi"` (outbound-only, the default for plain network
+   * access) or `"virtio-net"`. A machine that will be checkpointed and have
+   * its egress policy changed later needs virtio-net, since the policy is
+   * enforced by virtio-net's host-side stack and a restore keeps the backend.
+   */
+  networkBackend?: string
+}
+/** A replacement outbound network policy for a stopped machine. */
+export interface EgressPolicyConfig {
+  /** Outbound network access at all. */
+  network: boolean
+  /** Addresses the machine may reach; empty means no address restriction. */
+  cidrs?: Array<string>
+  /** Host names (`api.github.com`, or `*.github.com` for subdomains only). */
+  hosts?: Array<string>
 }
 /** Options for executing a command. */
 export interface ExecOptions {
@@ -218,8 +295,25 @@ export declare class NapiMachine {
    * process — backs the SDK's local `Machine.connect()`.
    */
   static connect(name: string, interceptorAddress?: string | undefined | null, interceptorToken?: string | undefined | null): NapiMachine
-  /** Create a stopped machine from a portable live checkpoint on disk. */
+  /**
+   * Every machine in this host's shared machine database, in name order.
+   * The database is shared with the CLI and every other embedder on the
+   * host, so machines other processes made are listed too — `labels` tell
+   * a process's own apart after it restarts.
+   */
+  static list(): Promise<Array<MachineSummary>>
+  /**
+   * Create a stopped machine from a portable live checkpoint on disk.
+   * `keep_identity` restores it as the same machine going back in time, so
+   * its first start skips the identity reset a clone needs.
+   */
   static restoreCheckpoint(name: string, artifact: string, keepIdentity?: boolean | undefined | null): NapiMachine
+  /**
+   * Replace this stopped machine's outbound network policy, e.g. to give a
+   * machine just restored from a shared checkpoint its own allow list
+   * before it first boots.
+   */
+  setEgressPolicy(policy: EgressPolicyConfig): void
   /** Export a stored checkpoint directory as one portable checkpoint file. */
   static exportCheckpoint(source: string, output: string): number
   /** Remove objects that no retained checkpoint in a local store references. */

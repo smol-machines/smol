@@ -233,6 +233,8 @@ impl NapiMachine {
             .collect();
         let workdir = config.workdir;
         let user = config.user;
+        let (credentials, credential_values) =
+            credential_policy(config.credentials.unwrap_or_default());
         let spec = MachineSpec {
             name: config.name.clone(),
             mounts,
@@ -246,13 +248,19 @@ impl NapiMachine {
             runtime_managed: false,
             remote_volumes,
             allowed_hosts,
+            credentials,
             ..Default::default()
         };
 
-        runtime()
-            .into_napi()?
+        let runtime = runtime().into_napi()?;
+        runtime
             .create_machine_with_workload(spec, env, workdir, user)
             .into_napi()?;
+        // Held in memory for this machine's starts in this process; a binding
+        // without a value is read from this process's environment instead.
+        if !credential_values.is_empty() {
+            runtime.supply_credential_values(&config.name, credential_values);
+        }
 
         Ok(Self { name: config.name })
     }
@@ -808,4 +816,46 @@ impl NapiMachine {
             .map_err(join_error)?
             .into_napi()
     }
+}
+
+/// The engine's credential policy for `configs`, and the values supplied with
+/// them by binding name.
+fn credential_policy(
+    configs: Vec<crate::types::CredentialConfig>,
+) -> (
+    Option<smolvm_protocol::credentials::CredentialPolicy>,
+    std::collections::BTreeMap<String, String>,
+) {
+    if configs.is_empty() {
+        return (None, Default::default());
+    }
+    let mut values = std::collections::BTreeMap::new();
+    let credentials = configs
+        .into_iter()
+        .map(|config| {
+            if let Some(value) = config.value {
+                values.insert(config.name.clone(), value);
+            }
+            smolvm_protocol::credentials::CredentialBinding {
+                name: config.name,
+                environment_variable: config.env_var,
+                allowed_hosts: config
+                    .hosts
+                    .into_iter()
+                    .map(|host| host.trim().to_ascii_lowercase())
+                    .collect(),
+                injection_location: Default::default(),
+                methods: config.methods.unwrap_or_else(|| {
+                    smolvm_protocol::credentials::DEFAULT_METHODS
+                        .iter()
+                        .map(|method| method.to_string())
+                        .collect()
+                }),
+            }
+        })
+        .collect();
+    (
+        Some(smolvm_protocol::credentials::CredentialPolicy { credentials }),
+        values,
+    )
 }

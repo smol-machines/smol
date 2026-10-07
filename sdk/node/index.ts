@@ -37,6 +37,7 @@ export type { CloudCheckpointInfo } from './transport';
 export type { LocalAvailability, LocalUnavailableCode } from './availability';
 export type {
   MachineConfig,
+  CredentialSpec,
   NetworkPolicy,
   RestoreCheckpointOptions,
   MachineState,
