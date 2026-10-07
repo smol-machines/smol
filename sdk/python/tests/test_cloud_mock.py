@@ -300,6 +300,8 @@ class Handler(BaseHTTPRequestHandler):
         if self.path == f"/v1/machines/{MACHINE_ID}/share":
             captured["unshared"] = True
             return self._send(204)
+        if self.path == "/v1/checkpoints/ckpt-old":
+            return self._send(204)
         if self.path == f"/v1/machines/{MACHINE_ID}":
             return self._send(204)
         if self.path == f"/v1/machines/{CLONE_ID}":
@@ -463,6 +465,11 @@ def main() -> int:
         check("request() reaches the guest port through the authed bridge",
               body.get("ok") is True and captured.get("connect_path") == f"/v1/machines/{MACHINE_ID}/connect/80/healthz",
               str(captured.get("connect_path")))
+
+        # --- delete a stored checkpoint by id ---
+        Machine.delete_checkpoint("ckpt-old", ConnectOptions(target="cloud", base_url=base, api_key="smk_testkey"))
+        check("delete_checkpoint sends DELETE /v1/checkpoints/<id>",
+              "DELETE /v1/checkpoints/ckpt-old" in captured["hits"])
 
         # --- resize: grow the running machine in place ---
         grown = m.resize(cpus=4, memory_mb=4096, storage_gb=40)

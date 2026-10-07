@@ -1342,6 +1342,8 @@ class CloudTransport:
                 self._key,
                 "POST",
                 f"/v1/machines/{self._id}/branches",
+                # Waits out the control plane's per-source branch queue.
+                timeout=CLOUD_START_TIMEOUT_S,
                 json_body={
                     "name": name,
                     "ports": port_body,
@@ -1358,6 +1360,8 @@ class CloudTransport:
                 self._key,
                 "POST",
                 f"/v1/machines/{self._id}/fork",
+                # Waits out the control plane's per-source branch queue.
+                timeout=CLOUD_START_TIMEOUT_S,
                 json_body={
                     "name": name,
                     "ports": port_body,
@@ -1400,6 +1404,7 @@ class CloudTransport:
                 "POST",
                 f"/v1/machines/{self._id}/branches/batch",
                 json_body=body,
+                timeout=CLOUD_START_TIMEOUT_S,
             )
         except SmolError as error:
             if error.code != "NOT_FOUND":
@@ -1410,6 +1415,7 @@ class CloudTransport:
                 "POST",
                 f"/v1/machines/{self._id}/fork-batch",
                 json_body=body,
+                timeout=CLOUD_START_TIMEOUT_S,
             )
         resp = resp or {}
         clones = resp.get("clones") or []
@@ -2203,6 +2209,31 @@ def upload_checkpoint(
     restored in the cloud. Returns the checkpoint as the cloud describes it."""
     base_url, api_key = _cloud_credentials(conn or ConnectOptions(target="cloud"), "upload_checkpoint")
     return _cloud_upload_checkpoint(base_url, api_key, os.path.abspath(os.fspath(path)), on_progress)
+
+
+def delete_checkpoint_transport(checkpoint_id: str, conn: Optional[ConnectOptions] = None) -> None:
+    """Delete one local checkpoint artifact or durable cloud checkpoint."""
+    if not checkpoint_id:
+        raise InvalidConfigError("checkpoint id is required.")
+    if conn is None:
+        local_path = os.fspath(checkpoint_id)
+        looks_local = (
+            os.path.isfile(local_path)
+            or local_path.endswith(".smolcheckpoint")
+            or os.path.isabs(local_path)
+            or os.path.dirname(local_path) != ""
+        )
+        conn = ConnectOptions(target="local" if looks_local else "cloud")
+    explicit_key = conn.api_key or os.environ.get("SMOL_CLOUD_TOKEN")
+    use_cloud = conn.target == "cloud" or (conn.target != "local" and bool(explicit_key))
+    if not use_cloud:
+        try:
+            os.remove(os.fspath(checkpoint_id))
+        except FileNotFoundError:
+            raise SmolError("NOT_FOUND", f"no checkpoint at {checkpoint_id}") from None
+        return
+    base_url, api_key = _cloud_credentials(conn, "delete_checkpoint")
+    _cloud_fetch(base_url, api_key, "DELETE", f"/v1/checkpoints/{quote(checkpoint_id, safe='')}")
 
 
 def restore_checkpoint_transport(

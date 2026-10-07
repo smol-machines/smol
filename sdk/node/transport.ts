@@ -7,7 +7,7 @@
  *  Cloud-only/local-only capability gaps surface as `NotSupportedError`.
  */
 
-import { createReadStream, existsSync, readFileSync, statSync } from "node:fs";
+import { createReadStream, existsSync, readFileSync, statSync, unlinkSync } from "node:fs";
 import { request as httpRequest } from "node:http";
 import { request as httpsRequest } from "node:https";
 import { createConnection } from "node:net";
@@ -1536,6 +1536,8 @@ class CloudTransport implements Transport {
         "POST",
         `/v1/machines/${this.id}/branches`,
         {
+          // Waits out the control plane's per-source branch queue.
+          timeoutMs: CLOUD_START_TIMEOUT_MS,
           json: {
             name,
             ports: portBody,
@@ -1553,6 +1555,8 @@ class CloudTransport implements Transport {
         "POST",
         `/v1/machines/${this.id}/fork`,
         {
+          // Waits out the control plane's per-source branch queue.
+          timeoutMs: CLOUD_START_TIMEOUT_MS,
           json: {
             name,
             ports: portBody,
@@ -1586,7 +1590,7 @@ class CloudTransport implements Transport {
         this.conn,
         "POST",
         `/v1/machines/${this.id}/branches/batch`,
-        { json: body },
+        { json: body, timeoutMs: CLOUD_START_TIMEOUT_MS },
       );
     } catch (error) {
       if (!(error instanceof SmolError) || error.code !== "NOT_FOUND") throw error;
@@ -1594,7 +1598,7 @@ class CloudTransport implements Transport {
         this.conn,
         "POST",
         `/v1/machines/${this.id}/fork-batch`,
-        { json: body },
+        { json: body, timeoutMs: CLOUD_START_TIMEOUT_MS },
       );
     }
     const clones = resp.clones ?? [];
@@ -2079,6 +2083,28 @@ export async function connectTransport(
 
 /** Restore a durable cloud checkpoint into a new machine, then return only once
  * the restored guest is ready. */
+/** Delete one local checkpoint artifact or durable cloud checkpoint. */
+export async function deleteCheckpointTransport(
+  checkpointId: string,
+  conn?: ConnectOptions,
+): Promise<void> {
+  if (!checkpointId) throw new InvalidConfigError("checkpoint id is required.");
+  conn ??= { target: looksLikeLocalCheckpoint(checkpointId) ? "local" : "cloud" };
+  if (!selectsCloud(conn)) {
+    try {
+      unlinkSync(resolvePath(checkpointId));
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+        throw new SmolError("NOT_FOUND", `no checkpoint at ${checkpointId}`);
+      }
+      throw error;
+    }
+    return;
+  }
+  const cloudConn = cloudConnFor(conn, "deleteCheckpoint");
+  await cloudFetch(cloudConn, "DELETE", `/v1/checkpoints/${encodeURIComponent(checkpointId)}`);
+}
+
 export async function restoreCheckpointTransport(
   checkpointId: string,
   name: string,

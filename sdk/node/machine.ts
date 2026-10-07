@@ -17,6 +17,7 @@ import {
   makeTransport,
   connectTransport,
   listMachines,
+  deleteCheckpointTransport,
   restoreCheckpointTransport,
   uploadCheckpoint,
   type CloudCheckpointInfo,
@@ -142,6 +143,13 @@ export class Machine {
     onProgress?: (sent: number, total: number) => void,
   ): Promise<CloudCheckpointInfo> {
     return uploadCheckpoint(path, conn, onProgress);
+  }
+
+  /** Delete a local `.smolcheckpoint` file or a durable cloud checkpoint by id.
+   *  A cloud checkpoint that a machine was restored from, or that holds a paused
+   *  machine's saved execution, is refused until that machine is gone. */
+  static async deleteCheckpoint(checkpointId: string, conn?: ConnectOptions): Promise<void> {
+    return deleteCheckpointTransport(checkpointId, conn);
   }
 
   /** Restore a local `.smolcheckpoint` path or durable cloud checkpoint id into
