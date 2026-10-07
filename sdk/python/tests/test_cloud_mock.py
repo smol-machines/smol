@@ -110,6 +110,16 @@ class Handler(BaseHTTPRequestHandler):
             }).encode())
         if self.path == "/v1/machines/mach-restored/start":
             return self._send(200, json.dumps({"id": "mach-restored", "state": "started"}).encode())
+        if self.path == f"/v1/machines/{MACHINE_ID}/resize":
+            captured["resize_body"] = json.loads(self._read() or b"{}")
+            body = captured["resize_body"]
+            return self._send(200, json.dumps({
+                "id": MACHINE_ID, "name": "py-golden", "state": "started",
+                "source": {"type": "image", "reference": "alpine:latest"},
+                "resources": {"cpus": body.get("cpus", 2), "memoryMb": body.get("memoryMb", 1024),
+                              "diskGb": body.get("diskGb")},
+                "network": {"mode": "blocked"}, "env": {}, "ephemeral": False, "ports": [],
+            }).encode())
         if self.path == f"/v1/machines/{MACHINE_ID}/branches":
             captured["fork_body"] = json.loads(self._read() or b"{}")
             if captured["fork_body"].get("name") == "legacy-branch":
@@ -453,6 +463,20 @@ def main() -> int:
         check("request() reaches the guest port through the authed bridge",
               body.get("ok") is True and captured.get("connect_path") == f"/v1/machines/{MACHINE_ID}/connect/80/healthz",
               str(captured.get("connect_path")))
+
+        # --- resize: grow the running machine in place ---
+        grown = m.resize(cpus=4, memory_mb=4096, storage_gb=40)
+        check("resize hit POST /resize", f"POST /v1/machines/{MACHINE_ID}/resize" in captured["hits"])
+        check("resize sends the cloud field names (diskGb for the one disk)",
+              captured.get("resize_body") == {"cpus": 4, "memoryMb": 4096, "diskGb": 40},
+              str(captured.get("resize_body")))
+        check("resize returns the new size",
+              (grown.cpus, grown.memory_mb, grown.storage_gb) == (4, 4096, 40), str(grown))
+        try:
+            m.resize(overlay_gb=10)
+            check("resize refuses overlay_gb on the cloud", False, "did not raise")
+        except SmolError:
+            check("resize refuses overlay_gb on the cloud", True)
 
         # --- branch: live-RAM child over the cloud ---
         clone = m.branch(

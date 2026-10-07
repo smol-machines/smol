@@ -13,7 +13,9 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
-use smolmachines::{BranchOptions, ConnectOptions, ErrorKind, ExecEvent, ExecOptions, Machine};
+use smolmachines::{
+    BranchOptions, ConnectOptions, ErrorKind, ExecEvent, ExecOptions, Machine, Resize,
+};
 
 /// One request the SDK made.
 #[derive(Debug, Clone)]
@@ -571,6 +573,49 @@ fn freezing_the_source_is_asked_for_on_a_branch_and_a_batch() {
     assert!(bodies[0].get("freezeSource").is_none());
     assert_eq!(bodies[1]["freezeSource"], true);
     assert_eq!(bodies[2]["freezeSource"], true);
+}
+
+#[test]
+fn resizing_on_the_cloud_sends_one_disk_size_and_reads_back_the_new_size() {
+    let cloud = MockCloud::start(routes(vec![
+        (
+            "GET /v1/machines/m-8",
+            Box::new(|_| Reply::json(ready_machine("m-8"))),
+        ),
+        (
+            "POST /v1/machines/m-8/resize",
+            Box::new(|_| {
+                Reply::json(
+                    r#"{"id":"m-8","state":"started","resources":{"cpus":4,"memoryMb":4096,"diskGb":40},"ports":[]}"#,
+                )
+            }),
+        ),
+    ]));
+
+    let machine = Machine::connect_with("m-8", &cloud.connect()).expect("attach");
+    let grown = machine
+        .resize(&Resize::new().cpus(4).memory_mib(4096).storage_gib(40))
+        .expect("resize");
+    assert_eq!(
+        (grown.cpus, grown.memory_mib, grown.storage_gib),
+        (4, 4096, Some(40))
+    );
+    let sent = cloud.requests();
+    let resize = sent
+        .iter()
+        .find(|r| r.path == "/v1/machines/m-8/resize")
+        .expect("the resize route was called");
+    let body: serde_json::Value = serde_json::from_str(&resize.body).expect("valid JSON body");
+    assert_eq!(
+        body,
+        serde_json::json!({ "cpus": 4, "memoryMb": 4096, "diskGb": 40 })
+    );
+
+    // A cloud machine has one disk, so an overlay size is refused before any request.
+    let error = machine
+        .resize(&Resize::new().overlay_gib(10))
+        .expect_err("overlay is local only");
+    assert_eq!(error.kind(), ErrorKind::Config);
 }
 
 #[test]

@@ -352,7 +352,8 @@ class Machine:
     ) -> MachineResources:
         """Add CPUs, RAM or disk to this running machine without rebooting it.
         Sizes are totals. Every target is checked before anything changes, then
-        RAM, CPUs and disks are applied in that order. Local target only."""
+        RAM, CPUs and disks are applied in that order. On the cloud the machine
+        has one disk, set with ``storage_gb``, and memory and disk only grow."""
         return self._t.resize(
             cpus=cpus, memory_mb=memory_mb, storage_gb=storage_gb, overlay_gb=overlay_gb
         )

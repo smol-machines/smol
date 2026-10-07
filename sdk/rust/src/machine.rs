@@ -899,7 +899,8 @@ impl Machine {
     /// Add CPUs, RAM or disk to this running machine without rebooting it.
     ///
     /// Sizes are totals. Every target is checked before anything changes, then
-    /// RAM, CPUs and disks are applied in that order. Local only.
+    /// RAM, CPUs and disks are applied in that order. On the cloud the machine
+    /// has one disk, set with `storage_gib`, and memory and disk only grow.
     pub fn resize(&self, resize: &Resize) -> Result<MachineResources> {
         self.transport.resize(resize)
     }

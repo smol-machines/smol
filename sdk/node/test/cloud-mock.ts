@@ -156,6 +156,20 @@ const server = createServer(async (req, res) => {
   if (method === "POST" && url === "/v1/machines/m-restored/start") {
     return json(200, { id: "m-restored", state: "started" });
   }
+  if (method === "POST" && url === "/v1/machines/m1/resize") {
+    seen.resizeBody = JSON.parse((await readBody(req)).toString() || "{}");
+    return json(200, {
+      id: "m1",
+      name: "golden",
+      state: "started",
+      resources: {
+        cpus: seen.resizeBody.cpus ?? 2,
+        memoryMb: seen.resizeBody.memoryMb ?? 1024,
+        diskGb: seen.resizeBody.diskGb ?? null,
+      },
+      ports: [],
+    });
+  }
   if (method === "POST" && url === "/v1/machines/m1/branches/batch") {
     seen.forkBatchBody = JSON.parse((await readBody(req)).toString() || "{}");
     if (seen.forkBatchBody.namePrefix === "legacy") {
@@ -672,6 +686,26 @@ async function main(): Promise<void> {
       legacyBranch.name === "legacy-branch",
     JSON.stringify(seen.legacyForkBody),
   );
+
+  // --- resize: grow the running machine in place ---
+  const grown = await m.resize({ cpus: 4, memoryMb: 4096, storageGb: 40 });
+  check(
+    "resize sends the cloud field names (diskGb for the one disk)",
+    JSON.stringify(seen.resizeBody) === JSON.stringify({ cpus: 4, memoryMb: 4096, diskGb: 40 }),
+    JSON.stringify(seen.resizeBody),
+  );
+  check(
+    "resize returns the new size",
+    grown.cpus === 4 && grown.memoryMb === 4096 && grown.storageGb === 40,
+    JSON.stringify(grown),
+  );
+  let overlayRefused = false;
+  try {
+    await m.resize({ overlayGb: 10 });
+  } catch (e) {
+    overlayRefused = e instanceof SmolError;
+  }
+  check("resize refuses overlayGb on the cloud", overlayRefused);
 
   // --- branch batch: fan out N children in one transactional call ---
   const batch = await m.branchBatch({ count: 3, namePrefix: "rollout" });
