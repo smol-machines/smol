@@ -291,6 +291,11 @@ class Handler(BaseHTTPRequestHandler):
         if self.path.startswith(f"/v1/machines/{MACHINE_ID}/files/"):
             captured["file"] = self._read()
             return self._send(200, b"{}")
+        if self.path.startswith("/v1/credentials/"):
+            captured.setdefault("credential_puts", []).append(
+                {"name": self.path[len("/v1/credentials/"):], "body": json.loads(self._read() or b"{}")}
+            )
+            return self._send(200, b'{"name":"n","envVar":"K","hosts":[],"createdAt":"","updatedAt":""}')
         return self._send(404, b"no route")
 
     def do_DELETE(self):
@@ -623,6 +628,51 @@ def main() -> int:
             check("cloud sync is gated as NotSupported", False, "did not raise")
         except NotSupportedError:
             check("cloud sync is gated as NotSupported", True)
+
+        # A credential with a value is stored for the account first; the machine
+        # then binds every credential by name, including one already stored.
+        from smol import CredentialSpec
+
+        captured["credential_puts"] = []
+        Machine.create(
+            MachineConfig(
+                image="alpine:3.20",
+                credentials=[
+                    CredentialSpec(
+                        name="notion",
+                        env_var="NOTION_API_KEY",
+                        hosts=["api.notion.com", "files.notion.com"],
+                        value="secret_x",
+                    ),
+                    CredentialSpec(name="github", env_var="GITHUB_TOKEN", hosts=["api.github.com"]),
+                ],
+            ),
+            ConnectOptions(target="cloud", base_url=base, api_key="smk_testkey"),
+        )
+        check("cloud create stores a credential that carries a value",
+              captured["credential_puts"] == [{
+                  "name": "notion",
+                  "body": {"envVar": "NOTION_API_KEY", "hosts": ["api.notion.com", "files.notion.com"],
+                           "value": "secret_x"},
+              }],
+              str(captured["credential_puts"]))
+        check("cloud create binds every credential by name",
+              captured["create_body"].get("credentials") == ["notion", "github"],
+              str(captured["create_body"].get("credentials")))
+        captured["credential_puts"] = []
+        try:
+            Machine.create(
+                MachineConfig(image="alpine:3.20", credentials=[
+                    CredentialSpec(name="gh", env_var="GH", hosts=["api.github.com"], methods=["GET"], value="v")
+                ]),
+                ConnectOptions(target="cloud", base_url=base, api_key="smk_testkey"),
+            )
+            refused = False
+        except NotSupportedError:
+            refused = True
+        check("a method restriction is refused on the cloud before anything is stored",
+              refused and captured["credential_puts"] == [],
+              f"{refused} {captured['credential_puts']}")
 
         # Published ports ARE a cloud feature: create sends only the guest port;
         # the control plane allocates the node host port. (Contrast: mounts above.)

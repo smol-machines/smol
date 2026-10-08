@@ -60,6 +60,9 @@ pub struct MachineConfig {
     /// Caller metadata stored with the machine and returned by `list`; the
     /// engine never interprets it.
     pub labels: Option<HashMap<String, String>>,
+    /// Credentials the workload uses without seeing them, as the CLI's
+    /// `--credential`.
+    pub credentials: Option<Vec<CredentialConfig>>,
 }
 
 /// One machine from this host's shared machine database.
@@ -150,6 +153,25 @@ pub struct MachineResources {
     pub storage_gib: Option<f64>,
     /// Overlay disk size in GiB, or unset while it has the default size.
     pub overlay_gib: Option<f64>,
+}
+
+/// A credential the workload uses without seeing it: the guest variable
+/// `env_var` holds a placeholder, and the host substitutes the real value in
+/// request headers of HTTPS requests to `hosts` only.
+#[napi(object)]
+#[derive(Debug, Clone)]
+pub struct CredentialConfig {
+    /// Binding name.
+    pub name: String,
+    /// Guest environment variable that holds the placeholder.
+    pub env_var: String,
+    /// Exact host names the value may be sent to.
+    pub hosts: Vec<String>,
+    /// HTTP methods the value may be used with; all supported ones when unset.
+    pub methods: Option<Vec<String>>,
+    /// The value, held in this process's memory only. When unset, this
+    /// process's own variable named `env_var` is read at each start.
+    pub value: Option<String>,
 }
 
 /// VM resource allocation.

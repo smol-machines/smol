@@ -249,6 +249,34 @@ const session = await Machine.restoreCheckpoint('prepared.smolcheckpoint', 'sess
   allow lists on the host. A restored machine keeps its checkpoint's backend, so
   an allow list on a TSI checkpoint is refused rather than left unenforced.
 
+### API keys the workload uses without seeing
+
+Bind a credential to the hosts it is for. The guest variable holds a
+placeholder, and the real value is substituted only in the headers of HTTPS
+requests to those hosts:
+
+```ts
+const machine = await Machine.create({
+  image: 'alpine:3.20',
+  credentials: [
+    {
+      name: 'notion',
+      envVar: 'NOTION_API_KEY',
+      hosts: ['api.notion.com', 'files.notion.com'],
+      value: process.env.NOTION_API_KEY,
+    },
+  ],
+});
+await machine.exec(['sh', '-c', 'curl -H "Authorization: Bearer $NOTION_API_KEY" https://api.notion.com/v1/users/me']);
+```
+
+- Hosts are exact names; list each subdomain.
+- Locally the value stays in this process's memory. Without `value`, this
+  process's own `envVar` is read at each start, which is how a machine reopened
+  by a later process gets it. `methods: ['GET', 'HEAD']` limits a read-only token.
+- On the cloud, a credential with a `value` is stored for your account under
+  `name`; one without refers to a credential already stored there.
+
 ## Building from source
 
 This package's native core lives alongside it (Rust, `src/*.rs`) and links the

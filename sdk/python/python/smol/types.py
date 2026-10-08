@@ -100,6 +100,31 @@ class EgressInterceptor:
 
 
 @dataclass
+class CredentialSpec:
+    """A credential the workload uses without ever seeing it, like the CLI's
+    ``--credential``. The guest variable ``env_var`` holds a placeholder; the
+    real value is substituted only in the headers of HTTPS requests to
+    ``hosts``, so no other destination can receive it."""
+
+    name: str
+    """Binding name: 1-64 lowercase letters, digits, ``-`` and ``_``. On the
+    cloud it names the credential stored for your account."""
+    env_var: str
+    """Guest environment variable that holds the placeholder."""
+    hosts: list[str]
+    """Exact host names the value may be sent to. No wildcards: list each
+    subdomain."""
+    value: Optional[str] = field(default=None, repr=False)
+    """The real value. Locally it is held in this process's memory only;
+    when omitted, this process's own ``env_var`` is read at each start. On the
+    cloud it is stored sealed under ``name``; when omitted, the credential
+    already stored under ``name`` is used."""
+    methods: Optional[list[str]] = None
+    """HTTP methods the value may be used with, e.g. ``["GET", "HEAD"]`` for a
+    read-only token. Every method when omitted (local)."""
+
+
+@dataclass
 class MachineConfig:
     """Configuration for creating a machine."""
 
@@ -144,6 +169,9 @@ class MachineConfig:
     """Deprecated alias for :attr:`branchable`; checkpoints are durable artifacts."""
     env: Optional[dict[str, str]] = None
     """Environment variables for the image workload launched at create."""
+    credentials: Optional[list[CredentialSpec]] = None
+    """Credentials the workload uses without seeing them. Implies network
+    access. See :class:`CredentialSpec`."""
     workdir: Optional[str] = None
     """Working directory for the image workload, set at create. Overrides the
     image's own workdir."""

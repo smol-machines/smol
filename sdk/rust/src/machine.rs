@@ -435,9 +435,25 @@ impl Machine {
                 // is a bad config whether or not an engine is installed, and
                 // reporting "no smolvm on PATH" for it sends the caller to fix
                 // the wrong thing.
-                let (args, ports) = config.into_local_args()?;
+                let credential_env = config.credential_env();
+                let smolfile = config.credential_smolfile();
+                let (mut args, ports) = config.into_local_args()?;
                 let cli = crate::transport::local::resolve_cli()?;
-                let mut transport = crate::transport::local::create(&cli, args, &name, ports)?;
+                let smolfile = smolfile
+                    .map(crate::transport::local::TempSmolfile::write)
+                    .transpose()?;
+                if let Some(file) = &smolfile {
+                    // Right after `--name NAME`, ahead of any `-- command`.
+                    args.splice(4..4, ["-s".to_string(), file.path().display().to_string()]);
+                }
+                let mut transport = crate::transport::local::create(
+                    &cli,
+                    args,
+                    &name,
+                    ports,
+                    crate::transport::local::CredentialEnv::new(credential_env),
+                )?;
+                drop(smolfile);
                 if let Some(binding) = interceptor {
                     transport.set_interceptor(binding)?;
                 }
@@ -452,8 +468,12 @@ impl Machine {
                 }
                 let branchable = config.branchable;
                 let wait_for_ports = config.wait_for_ports.unwrap_or(true);
+                let credentials = config.cloud_credentials();
                 let request = config.into_cloud_request()?;
                 let client = connect.client()?;
+                for (name, credential) in &credentials {
+                    client.set_credential(name, credential)?;
+                }
                 Ok(Self::from_transport(Box::new(cloud::create(
                     &client,
                     &request,
@@ -523,7 +543,13 @@ impl Machine {
             artifact.as_ref().to_string_lossy().to_string(),
         ];
         Ok(Self::from_transport(Box::new(
-            crate::transport::local::create(&cli, args, &name, Vec::new())?,
+            crate::transport::local::create(
+                &cli,
+                args,
+                &name,
+                Vec::new(),
+                crate::transport::local::CredentialEnv::default(),
+            )?,
         )))
     }
 

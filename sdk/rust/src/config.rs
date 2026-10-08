@@ -6,6 +6,74 @@
 
 use crate::error::{Error, ErrorKind, Result};
 
+/// A credential the workload uses without ever seeing it, like the CLI's
+/// `--credential`. The guest variable `env_var` holds a placeholder; the real
+/// value is substituted only in the headers of HTTPS requests to `hosts`, so no
+/// other destination can receive it.
+#[derive(Clone, PartialEq, Eq)]
+pub struct Credential {
+    /// Binding name: 1-64 lowercase letters, digits, `-` and `_`. On the cloud
+    /// it names the credential stored for your account.
+    pub name: String,
+    /// Guest environment variable that holds the placeholder.
+    pub env_var: String,
+    /// Exact host names the value may be sent to. No wildcards.
+    pub hosts: Vec<String>,
+    /// The real value. Locally it reaches only the engine processes this SDK
+    /// runs; when unset, this process's own `env_var` is read at each start.
+    /// On the cloud it is stored sealed under `name`; when unset, the
+    /// credential already stored under `name` is used.
+    pub value: Option<String>,
+    /// HTTP methods the value may be used with. Every method when empty.
+    /// Local only.
+    pub methods: Vec<String>,
+}
+
+impl Credential {
+    /// Bind `name` to `env_var` for these hosts.
+    pub fn new<I, S>(name: impl Into<String>, env_var: impl Into<String>, hosts: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        Self {
+            name: name.into(),
+            env_var: env_var.into(),
+            hosts: hosts.into_iter().map(Into::into).collect(),
+            value: None,
+            methods: Vec::new(),
+        }
+    }
+
+    /// Supply the value rather than reading it from this process's environment.
+    pub fn value(mut self, value: impl Into<String>) -> Self {
+        self.value = Some(value.into());
+        self
+    }
+
+    /// Allow only these HTTP methods, e.g. `["GET", "HEAD"]` for a read-only token.
+    pub fn methods<I, S>(mut self, methods: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        self.methods = methods.into_iter().map(Into::into).collect();
+        self
+    }
+}
+
+impl std::fmt::Debug for Credential {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Credential")
+            .field("name", &self.name)
+            .field("env_var", &self.env_var)
+            .field("hosts", &self.hosts)
+            .field("value", &self.value.as_ref().map(|_| "<redacted>"))
+            .field("methods", &self.methods)
+            .finish()
+    }
+}
+
 /// Trusted loopback egress service for one local machine launch.
 #[derive(Clone, PartialEq, Eq)]
 pub struct EgressInterceptor {
@@ -155,6 +223,8 @@ pub struct MachineConfig {
     /// `(guest_path, host_path)`. Carried over vsock, so a machine without
     /// networking keeps no network device for them. Local only.
     pub exposed_sockets: Vec<(String, String)>,
+    /// Credentials the workload uses without seeing them. Implies networking.
+    pub credentials: Vec<Credential>,
     /// Inbound port forwards.
     pub ports: Vec<Port>,
     /// VM sizing and devices.
@@ -266,6 +336,17 @@ impl MachineConfig {
             args.push("--expose-socket".into());
             args.push(format!("{guest}:{host}"));
         }
+        // The flag carries no method list; a restricted binding goes through
+        // a Smolfile, which never holds the value.
+        for credential in self.credentials.iter().filter(|c| c.methods.is_empty()) {
+            args.push("--credential".into());
+            args.push(format!(
+                "{}={}@{}",
+                credential.name,
+                credential.env_var,
+                credential.hosts.join(",")
+            ));
+        }
         for port in &self.ports {
             args.push("-p".into());
             args.push(format!("{}:{}", port.host, port.guest));
@@ -315,6 +396,64 @@ impl MachineConfig {
 }
 
 impl MachineConfig {
+    /// The `(variable, value)` pairs the engine reads a supplied credential
+    /// value from: the CLI resolves a binding from its own environment.
+    pub(crate) fn credential_env(&self) -> Vec<(String, String)> {
+        self.credentials
+            .iter()
+            .filter_map(|c| Some((c.env_var.clone(), c.value.clone()?)))
+            .collect()
+    }
+
+    /// The credentials that carry a value, as the cloud stores them.
+    pub(crate) fn cloud_credentials(&self) -> Vec<(String, smol_cloud::types::SetCredential)> {
+        self.credentials
+            .iter()
+            .filter_map(|c| {
+                Some((
+                    c.name.clone(),
+                    smol_cloud::types::SetCredential {
+                        env_var: c.env_var.clone(),
+                        hosts: c.hosts.clone(),
+                        value: c.value.clone()?,
+                    },
+                ))
+            })
+            .collect()
+    }
+
+    /// A Smolfile declaring the credentials that restrict their methods,
+    /// which the `--credential` flag cannot express. It names hosts and
+    /// methods only; values never go in it.
+    pub(crate) fn credential_smolfile(&self) -> Option<String> {
+        let quote = |s: &str| serde_json::to_string(s).unwrap_or_default();
+        let list = |items: &[String]| {
+            format!(
+                "[{}]",
+                items
+                    .iter()
+                    .map(|i| quote(i))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )
+        };
+        let entries: Vec<String> = self
+            .credentials
+            .iter()
+            .filter(|c| !c.methods.is_empty())
+            .map(|c| {
+                format!(
+                    "[[network.credentials]]\nname = {}\nenvironment_variable = {}\nallowed_hosts = {}\nmethods = {}\n",
+                    quote(&c.name),
+                    quote(&c.env_var),
+                    list(&c.hosts),
+                    list(&c.methods)
+                )
+            })
+            .collect();
+        (!entries.is_empty()).then(|| entries.join("\n"))
+    }
+
     /// Translate into the control plane's create request.
     ///
     /// Two things are rejected rather than silently dropped. A cloud machine
@@ -336,6 +475,16 @@ impl MachineConfig {
             return Err(Error::new(
                 ErrorKind::NotSupported,
                 "exposing a guest Unix socket is local-only",
+            ));
+        }
+        if let Some(credential) = self.credentials.iter().find(|c| !c.methods.is_empty()) {
+            return Err(Error::new(
+                ErrorKind::NotSupported,
+                format!(
+                    "credential \"{}\": methods are enforced on the local target only; \
+                     omit them for a cloud machine",
+                    credential.name
+                ),
             ));
         }
 
@@ -413,6 +562,7 @@ impl MachineConfig {
             auto_stop_seconds: self.auto_stop_seconds,
             ttl_seconds: self.ttl_seconds,
             branchable: self.branchable,
+            credentials: self.credentials.into_iter().map(|c| c.name).collect(),
         })
     }
 }
@@ -468,6 +618,12 @@ impl MachineBuilder {
     /// Expose a directory in the guest.
     pub fn mount(mut self, mount: Mount) -> Self {
         self.config.mounts.push(mount);
+        self
+    }
+
+    /// Bind a credential the workload uses without seeing it.
+    pub fn credential(mut self, credential: Credential) -> Self {
+        self.config.credentials.push(credential);
         self
     }
 
@@ -671,6 +827,104 @@ mod tests {
             "{joined}"
         );
         assert!(!joined.contains("--net"), "{joined}");
+    }
+
+    fn credentialed() -> MachineConfig {
+        MachineBuilder::new("creds")
+            .image("alpine")
+            .credential(
+                Credential::new(
+                    "notion",
+                    "NOTION_API_KEY",
+                    ["api.notion.com", "files.notion.com"],
+                )
+                .value("secret_x"),
+            )
+            .credential(
+                Credential::new("github", "GITHUB_TOKEN", ["api.github.com"])
+                    .methods(["GET", "HEAD"]),
+            )
+            .build()
+    }
+
+    #[test]
+    fn a_credential_reaches_the_engine_as_a_flag_and_its_value_as_a_variable() {
+        let config = credentialed();
+        assert_eq!(
+            config.credential_env(),
+            vec![("NOTION_API_KEY".to_string(), "secret_x".to_string())]
+        );
+        let (args, _) = config.into_local_args().unwrap();
+        let joined = args.join(" ");
+        assert!(
+            joined.contains("--credential notion=NOTION_API_KEY@api.notion.com,files.notion.com"),
+            "{joined}"
+        );
+        assert!(
+            !joined.contains("secret_x"),
+            "the value never goes on the command line: {joined}"
+        );
+        assert!(
+            !joined.contains("github="),
+            "a method restriction goes through the Smolfile: {joined}"
+        );
+    }
+
+    #[test]
+    fn a_method_restriction_goes_through_a_smolfile_without_the_value() {
+        let smolfile = credentialed()
+            .credential_smolfile()
+            .expect("one restricted binding");
+        assert!(smolfile.contains("[[network.credentials]]"), "{smolfile}");
+        assert!(smolfile.contains(r#"name = "github""#), "{smolfile}");
+        assert!(
+            smolfile.contains(r#"environment_variable = "GITHUB_TOKEN""#),
+            "{smolfile}"
+        );
+        assert!(
+            smolfile.contains(r#"allowed_hosts = ["api.github.com"]"#),
+            "{smolfile}"
+        );
+        assert!(
+            smolfile.contains(r#"methods = ["GET", "HEAD"]"#),
+            "{smolfile}"
+        );
+        assert!(
+            !smolfile.contains("notion"),
+            "unrestricted bindings use the flag: {smolfile}"
+        );
+        assert!(!smolfile.contains("secret_x"), "{smolfile}");
+        assert!(MachineBuilder::new("m")
+            .build()
+            .credential_smolfile()
+            .is_none());
+    }
+
+    #[test]
+    fn a_cloud_machine_binds_credentials_by_name_and_refuses_methods() {
+        let config = MachineBuilder::new("creds")
+            .image("alpine")
+            .credential(
+                Credential::new("notion", "NOTION_API_KEY", ["api.notion.com"]).value("secret_x"),
+            )
+            .credential(Credential::new("stored", "STORED_KEY", ["api.example.com"]))
+            .build();
+        let stored = config.cloud_credentials();
+        assert_eq!(stored.len(), 1, "only a credential with a value is stored");
+        assert_eq!(stored[0].0, "notion");
+        assert_eq!(stored[0].1.value, "secret_x");
+        let request = config.into_cloud_request().unwrap();
+        assert_eq!(request.credentials, vec!["notion", "stored"]);
+
+        let error = credentialed().into_cloud_request().unwrap_err();
+        assert_eq!(error.kind(), ErrorKind::NotSupported);
+    }
+
+    #[test]
+    fn a_credential_value_never_shows_in_debug_output() {
+        let config = credentialed();
+        assert!(!format!("{config:?}").contains("secret_x"));
+        assert!(!format!("{:?}", config.cloud_credentials()).contains("secret_x"));
     }
 
     #[test]

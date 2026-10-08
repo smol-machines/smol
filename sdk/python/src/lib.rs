@@ -337,6 +337,66 @@ fn spawn_exec_stream(
     });
 }
 
+/// The engine's credential policy for `config["credentials"]`, a list of
+/// `{name, env_var, hosts, methods, value}` dicts, and the values supplied
+/// with them by binding name.
+#[allow(clippy::type_complexity)]
+fn credential_policy(
+    config: &Bound<'_, PyDict>,
+) -> PyResult<(
+    Option<smolvm_protocol::credentials::CredentialPolicy>,
+    std::collections::BTreeMap<String, String>,
+)> {
+    let Some(list) = config.get_item("credentials")?.filter(|v| !v.is_none()) else {
+        return Ok((None, Default::default()));
+    };
+    let entries: Vec<Bound<'_, PyDict>> = list.extract()?;
+    if entries.is_empty() {
+        return Ok((None, Default::default()));
+    }
+    let mut values = std::collections::BTreeMap::new();
+    let mut credentials = Vec::with_capacity(entries.len());
+    for entry in entries {
+        let field = |key: &str| -> PyResult<Bound<'_, PyAny>> {
+            entry
+                .get_item(key)?
+                .filter(|v| !v.is_none())
+                .ok_or_else(|| {
+                    PyRuntimeError::new_err(format!("[INVALID_CONFIG] a credential needs '{key}'"))
+                })
+        };
+        let name: String = field("name")?.extract()?;
+        let hosts: Vec<String> = field("hosts")?.extract()?;
+        let methods: Option<Vec<String>> = entry
+            .get_item("methods")?
+            .filter(|v| !v.is_none())
+            .map(|v| v.extract())
+            .transpose()?;
+        if let Some(value) = entry.get_item("value")?.filter(|v| !v.is_none()) {
+            values.insert(name.clone(), value.extract::<String>()?);
+        }
+        credentials.push(smolvm_protocol::credentials::CredentialBinding {
+            environment_variable: field("env_var")?.extract()?,
+            allowed_hosts: hosts
+                .into_iter()
+                .map(|host| host.trim().to_ascii_lowercase())
+                .collect(),
+            injection_location: Default::default(),
+            methods: methods.unwrap_or_else(|| {
+                smolvm_protocol::credentials::DEFAULT_METHODS
+                    .iter()
+                    .map(|method| method.to_string())
+                    .collect()
+            }),
+            name,
+        });
+    }
+    Ok((
+        Some(smolvm_protocol::credentials::CredentialPolicy { credentials }),
+        values,
+    ))
+}
+
 /// A microVM sandbox handle. Mirrors `smol-node`'s `NapiMachine`.
 #[pyclass]
 struct Machine {
@@ -533,6 +593,7 @@ impl Machine {
             .transpose()?
             .unwrap_or_default();
 
+        let (credentials, credential_values) = credential_policy(config)?;
         let spec = MachineSpec {
             name: name.clone(),
             mounts,
@@ -545,11 +606,17 @@ impl Machine {
             forkable,
             runtime_managed: false,
             remote_volumes,
+            credentials,
             ..Default::default()
         };
         let runtime = runtime().map_err(err)?;
         py.allow_threads(|| runtime.create_machine_with_workload(spec, env, workdir, user))
             .map_err(err)?;
+        // Held in memory for this machine's starts in this process; a binding
+        // without a value is read from this process's environment instead.
+        if !credential_values.is_empty() {
+            runtime.supply_credential_values(&name, credential_values);
+        }
         Ok(Self { name })
     }
 

@@ -29,6 +29,7 @@ import {
 } from "./errors";
 import type {
   CheckpointOptions,
+  CredentialSpec,
   MachineResources,
   ResizeOptions,
   ConnectOptions,
@@ -336,6 +337,39 @@ export function resolveBranchable(config: MachineConfig): boolean | undefined {
   return config.branchable ?? config.forkable ?? config.checkpoint;
 }
 
+/**
+ * Store each credential that carries a value for the account, so a cloud
+ * machine can bind it by name. A credential without a value refers to one
+ * already stored. The cloud enforces hosts but not methods, so a method
+ * restriction is refused rather than silently dropped.
+ */
+async function storeCloudCredentials(
+  conn: CloudConn,
+  credentials: CredentialSpec[] | undefined,
+): Promise<void> {
+  for (const credential of credentials ?? []) {
+    if (credential.methods?.length) {
+      throw new NotSupportedError(
+        `credential "${credential.name}": methods are enforced on the local target only; ` +
+          "omit methods for a cloud machine.",
+      );
+    }
+    if (credential.value === undefined) continue;
+    await cloudFetch(
+      conn,
+      "PUT",
+      `/v1/credentials/${encodeURIComponent(credential.name)}`,
+      {
+        json: {
+          envVar: credential.envVar,
+          hosts: credential.hosts,
+          value: credential.value,
+        },
+      },
+    );
+  }
+}
+
 export function toNativeConfig(
   name: string,
   config: MachineConfig,
@@ -353,6 +387,13 @@ export function toNativeConfig(
     forkable: resolveBranchable(config),
     detached: config.detach,
     labels: config.labels,
+    credentials: config.credentials?.map((c) => ({
+      name: c.name,
+      envVar: c.envVar,
+      hosts: c.hosts,
+      methods: c.methods,
+      value: c.value,
+    })),
     mounts: config.mounts?.map((m) => ({
       source: m.source,
       target: m.target,
@@ -1809,6 +1850,7 @@ export async function makeTransport(
       DEFAULT_CLOUD_URL
     ).replace(/\/+$/, "");
     const cloudConn: CloudConn = { baseUrl, apiKey: key };
+    await storeCloudCredentials(cloudConn, config.credentials);
 
     // smolfleet CreateMachineRequest (camelCase): source (tagged), nested
     // resources, network {mode}, autoStopSeconds, ttlSeconds. Optional numeric
@@ -1849,6 +1891,9 @@ export async function makeTransport(
         ? { env: config.env }
         : {}),
       ...(config.workdir !== undefined ? { workdir: config.workdir } : {}),
+      ...(config.credentials?.length
+        ? { credentials: config.credentials.map((c) => c.name) }
+        : {}),
       autoStopSeconds: config.autoStopSeconds ?? null,
       ttlSeconds: config.ttlSeconds ?? null,
       // Forkable is a CREATE-time property: the control plane persists it and the

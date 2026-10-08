@@ -330,6 +330,31 @@ Machine::builder("build")
     .create()?;
 ```
 
+## Credentials
+
+Bind a credential to the hosts it is for. The guest variable holds a
+placeholder, and the real value is substituted only in the headers of HTTPS
+requests to those hosts:
+
+```rust
+use smolmachines::{Credential, Machine};
+
+let machine = Machine::builder("notes")
+    .image("alpine:3.20")
+    .credential(
+        Credential::new("notion", "NOTION_API_KEY", ["api.notion.com", "files.notion.com"])
+            .value(std::env::var("NOTION_API_KEY")?),
+    )
+    .create()?;
+```
+
+- Hosts are exact names; list each subdomain.
+- Locally the value reaches only the engine processes the SDK runs. Without
+  `.value(...)`, this process's own variable is read at each start.
+  `.methods(["GET", "HEAD"])` limits a read-only token.
+- On the cloud, a credential with a value is stored for your account under its
+  name; one without refers to a credential already stored there.
+
 ## Blocking
 
 Every call blocks. The engine is synchronous, so an async caller should run
