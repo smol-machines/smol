@@ -48,6 +48,19 @@ from .types import (
 
 DEFAULT_CLOUD_URL = "https://api.smolmachines.com"
 CLOUD_TIMEOUT_S = 30.0
+# A file transfer is given time for the slowest link it should survive: a
+# large file over a slow uplink must not fail at CLOUD_TIMEOUT_S while it is
+# still moving. Python's socket timeout caps the whole send, not each chunk.
+CLOUD_TRANSFER_FLOOR_BYTES_PER_S = 256 * 1024
+# The largest file the cloud's file routes accept. The control fetches a whole
+# file from the node before it answers a read, so a read waits that long.
+CLOUD_MAX_FILE_BYTES = 100 * 1024 * 1024
+
+
+def _transfer_timeout(nbytes: int) -> float:
+    """How long moving ``nbytes`` may take: the request timeout plus the time
+    ``nbytes`` needs at the floor rate."""
+    return CLOUD_TIMEOUT_S + -(-nbytes // CLOUD_TRANSFER_FLOOR_BYTES_PER_S)
 # Starting can include a cold image pull. Keep ordinary API calls short, but
 # give this explicitly long-running operation the same bounded window already
 # used by checkpoint restore.
@@ -1226,12 +1239,22 @@ class CloudTransport:
 
     def read_file(self, path: str) -> bytes:
         return _cloud_fetch(
-            self._base, self._key, "GET", f"/v1/machines/{self._id}/files/{_encode_path(path)}", accept="bytes"
+            self._base,
+            self._key,
+            "GET",
+            f"/v1/machines/{self._id}/files/{_encode_path(path)}",
+            accept="bytes",
+            timeout=_transfer_timeout(CLOUD_MAX_FILE_BYTES),
         )
 
     def write_file(self, path: str, data: bytes, mode: Optional[int] = None) -> None:
         _cloud_fetch(
-            self._base, self._key, "PUT", f"/v1/machines/{self._id}/files/{_encode_path(path)}", raw_body=data
+            self._base,
+            self._key,
+            "PUT",
+            f"/v1/machines/{self._id}/files/{_encode_path(path)}",
+            raw_body=data,
+            timeout=_transfer_timeout(len(data)),
         )
         # The cloud /files PUT carries no file mode, so apply it with chmod when
         # requested — e.g. writing an executable script the caller then runs.
