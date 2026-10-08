@@ -10,7 +10,7 @@
 
 import { randomUUID } from "node:crypto";
 import { resolve as resolvePath } from "node:path";
-import { ExecutionError, wrapNativeError } from "./errors";
+import { ExecutionError, NotSupportedError, wrapNativeError } from "./errors";
 import { getNapiMachine } from "./native";
 import { localAvailability, type LocalAvailability } from "./availability";
 import {
@@ -51,6 +51,7 @@ import type {
   NetworkPolicy,
   RestoreCheckpointOptions,
   StartOptions,
+  ResumeOptions,
   MachineUsageReport,
   ShareLink,
   PortableCheckpointInfo,
@@ -62,6 +63,7 @@ import type {
 function makeExecResult(r: RawExec): ExecResult {
   const success = r.exitCode === 0;
   return {
+    ...(r.pid !== undefined ? { pid: r.pid } : {}),
     exitCode: r.exitCode,
     stdout: r.stdout,
     stderr: r.stderr,
@@ -141,6 +143,14 @@ export class Machine {
     options: ListOptions = {},
   ): Promise<MachineSummary[]> {
     return listMachines(conn, options);
+  }
+
+  /** Check that a cloud connection works: the key is accepted and the base URL
+   *  answers with a machine list. Throws otherwise, including when a proxy or
+   *  a wrong URL answers with something that is not a machine list. */
+  static async probe(conn: ConnectOptions = {}): Promise<void> {
+    if (conn.target === "local") throw new NotSupportedError("probe is cloud-only.");
+    await listMachines({ ...conn, target: "cloud" });
   }
 
   /** Upload a `.checkpoint` file taken on this computer to the cloud, so it
@@ -227,6 +237,27 @@ export class Machine {
    *  `ready()` or `waitUntilReady()` before doing work. */
   state(): Promise<string> {
     return this.transport.state();
+  }
+
+  /** The machine's full cloud record, every field the control plane returns
+   *  (env, readiness, ports, …). Cloud only. */
+  info(): Promise<Record<string, unknown>> {
+    if (!this.transport.info) throw new NotSupportedError("info is cloud-only.");
+    return this.transport.info();
+  }
+
+  /** The last `tail` lines of the machine's console log. Cloud only. */
+  logs(tail = 100): Promise<string> {
+    if (!this.transport.logs) throw new NotSupportedError("logs is cloud-only.");
+    return this.transport.logs(tail);
+  }
+
+  /** Export this stopped machine as a `.smolmachine` in your registry
+   *  namespace, re-deployable anywhere. Distinct from a portable checkpoint,
+   *  which also keeps live memory. Cloud only. */
+  exportArtifact(): Promise<Record<string, unknown>> {
+    if (!this.transport.exportArtifact) throw new NotSupportedError("exportArtifact is cloud-only.");
+    return this.transport.exportArtifact();
   }
 
   /** Whether the machine is READY to do work. `state()` becoming "started"
@@ -350,12 +381,14 @@ export class Machine {
   pause(): Promise<void> { return this.transport.pause(); }
 
   /** Resume saved execution in this machine. */
-  resume(): Promise<void> { return this.transport.resume(); }
+  resume(options: ResumeOptions = {}): Promise<void> {
+    return this.transport.resume(options.waitUntilReady ?? true);
+  }
 
   /** Boot a stopped machine with its disk state, not its previous RAM.
    *  The local handle reuses its interceptor binding or accepts a fresh one. */
   start(options: StartOptions = {}): Promise<void> {
-    return this.transport.start(options.egressInterceptor);
+    return this.transport.start(options.egressInterceptor, options.waitUntilReady ?? true);
   }
 
   /** Stop the machine and delete its storage. On the cloud target, pass

@@ -80,6 +80,8 @@ type MachineInfo = Schemas["MachineInfo"] & {
 
 /** Raw exec result (the ergonomic wrapper is added in machine.ts). */
 export interface RawExec {
+  /** The detached process's pid, for a background exec. */
+  pid?: number;
   exitCode: number;
   stdout: string;
   stderr: string;
@@ -110,6 +112,12 @@ function decodeExecBytes(b64: unknown, text: string): Uint8Array {
 
 export interface Transport {
   readonly name: string;
+  /** Cloud only: the machine's full record as the control plane returns it. */
+  info?(): Promise<Record<string, unknown>>;
+  /** Cloud only: the last `tail` lines of the machine's console log. */
+  logs?(tail: number): Promise<string>;
+  /** Cloud only: export the stopped machine as a `.smolmachine` in the registry. */
+  exportArtifact?(): Promise<Record<string, unknown>>;
   state(): Promise<string>;
   ready(): Promise<boolean>;
   readyAt(): Promise<string | null>;
@@ -128,8 +136,8 @@ export interface Transport {
   setNetworkPolicy(policy: NetworkPolicy): Promise<void>;
   stop(): Promise<void>;
   pause(): Promise<void>;
-  resume(): Promise<void>;
-  start(interceptor?: EgressInterceptor): Promise<void>;
+  resume(waitUntilReady?: boolean): Promise<void>;
+  start(interceptor?: EgressInterceptor, waitUntilReady?: boolean): Promise<void>;
   delete(): Promise<void>;
   /** Cloud only: delete and return the settled usage + cost in one call. */
   deleteWithUsage(): Promise<MachineUsageReport>;
@@ -685,13 +693,13 @@ class LocalTransport implements Transport {
     liveLocal.delete(this);
   }
 
-  async resume(): Promise<void> {
+  async resume(waitUntilReady = true): Promise<void> {
     try { await this.inner.resume(); } catch (e) { throw wrapNativeError(e); }
     if (this.cleanupOnExit) liveLocal.add(this);
-    await this.waitUntilReady();
+    if (waitUntilReady) await this.waitUntilReady();
   }
 
-  async start(interceptor?: EgressInterceptor): Promise<void> {
+  async start(interceptor?: EgressInterceptor, waitUntilReady = true): Promise<void> {
     try {
       const binding = interceptor ?? this.interceptor;
       if (binding) await this.inner.start(binding.address, binding.token);
@@ -701,7 +709,7 @@ class LocalTransport implements Transport {
       throw wrapNativeError(e);
     }
     if (this.cleanupOnExit) liveLocal.add(this);
-    await this.waitUntilReady();
+    if (waitUntilReady) await this.waitUntilReady();
   }
 
   async delete(): Promise<void> {
@@ -893,6 +901,19 @@ class LocalTransport implements Transport {
 interface CloudConn {
   baseUrl: string;
   apiKey: string;
+  /** The caller's `fetch` (ConnectOptions.fetch), when it supplied one. */
+  fetch?: typeof fetch;
+  readResponseBytes?: (response: Response) => Promise<Uint8Array>;
+}
+
+/** A cloud connection carrying the caller's transport hooks. */
+function cloudConnOf(conn: ConnectOptions, baseUrl: string, apiKey: string): CloudConn {
+  return {
+    baseUrl,
+    apiKey,
+    ...(conn.fetch ? { fetch: conn.fetch } : {}),
+    ...(conn.readResponseBytes ? { readResponseBytes: conn.readResponseBytes } : {}),
+  };
 }
 
 const DEFAULT_CLOUD_URL = "https://api.smolmachines.com";
@@ -949,7 +970,7 @@ async function cloudFetch<T = unknown>(
   opts: {
     json?: unknown;
     body?: Buffer;
-    accept?: "json" | "bytes";
+    accept?: "json" | "bytes" | "text";
     timeoutMs?: number;
     /** Caller abort; rejects with `signal.reason` rather than TIMEOUT. */
     signal?: AbortSignal | undefined;
@@ -978,7 +999,7 @@ async function cloudFetch<T = unknown>(
   opts.signal?.addEventListener("abort", onAbort, { once: true });
   let res: Response;
   try {
-    res = await fetch(`${conn.baseUrl}${path}`, {
+    res = await (conn.fetch ?? fetch)(`${conn.baseUrl}${path}`, {
       method,
       headers,
       body: body ?? null,
@@ -992,6 +1013,8 @@ async function cloudFetch<T = unknown>(
         `cloud ${method} ${path} timed out after ${opts.timeoutMs ?? CLOUD_TIMEOUT_MS}ms`,
       );
     }
+    // A caller's own fetch owns its failure modes (retries, typed errors).
+    if (conn.fetch) throw e;
     throw new SmolError(
       "CONNECTION",
       `cloud request failed: ${(e as Error).message}`,
@@ -1015,7 +1038,14 @@ async function cloudFetch<T = unknown>(
       `cloud ${method} ${path} → ${res.status}${text ? `: ${text}` : ""}${rid ? ` [request id: ${rid}]` : ""}`,
     );
   }
-  if (opts.accept === "bytes") return Buffer.from(await res.arrayBuffer()) as T;
+  if (opts.accept === "text") return (await res.text()) as T;
+  if (opts.accept === "bytes") {
+    if (conn.readResponseBytes) {
+      const bytes = await conn.readResponseBytes(res);
+      return Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength) as T;
+    }
+    return Buffer.from(await res.arrayBuffer()) as T;
+  }
   if (res.status === 204) return undefined as T;
   const ct = res.headers.get("content-type") ?? "";
   return (ct.includes("application/json") ? await res.json() : undefined) as T;
@@ -1228,6 +1258,7 @@ class CloudTransport implements Transport {
       cwd: opts?.workdir ?? null,
       timeoutSeconds: opts?.timeout ?? null,
       ...(opts?.user !== undefined ? { user: opts.user } : {}),
+      ...(opts?.background ? { background: true } : {}),
     };
     // The command may legitimately run far longer than the default cloud
     // timeout, so size the request abort timeout off the request's own timeout
@@ -1260,7 +1291,10 @@ class CloudTransport implements Transport {
     // `stdoutB64`/`stderrB64` are byte-exact and untruncated; the generated
     // schema type may lag the server, so read them off the raw object.
     const raw = r as Record<string, unknown>;
+    // A detached command reports its pid as `pid=<n>` on stdout.
+    const pidMatch = opts?.background ? /^pid=(\d+)/m.exec(stdout) : null;
     return {
+      ...(pidMatch ? { pid: Number(pidMatch[1]) } : {}),
       exitCode: r.exitCode ?? 0,
       stdout,
       stderr,
@@ -1301,7 +1335,7 @@ class CloudTransport implements Transport {
     };
     let res: Response;
     try {
-      res = await fetch(
+      res = await (this.conn.fetch ?? fetch)(
         `${this.conn.baseUrl}/v1/machines/${this.id}/exec/stream`,
         {
           method: "POST",
@@ -1460,18 +1494,35 @@ class CloudTransport implements Transport {
     await cloudFetch(this.conn, "POST", `/v1/machines/${this.id}/pause`, { timeoutMs: CLOUD_START_TIMEOUT_MS });
   }
 
-  async resume(): Promise<void> {
+  async resume(waitUntilReady = true): Promise<void> {
     await cloudFetch(this.conn, "POST", `/v1/machines/${this.id}/resume`, { timeoutMs: CLOUD_START_TIMEOUT_MS });
-    await waitForReady(this.conn, this.id);
+    if (waitUntilReady) await waitForReady(this.conn, this.id);
   }
 
-  async start(interceptor?: EgressInterceptor): Promise<void> {
+  async start(interceptor?: EgressInterceptor, waitUntilReady = true): Promise<void> {
     if (interceptor) throw new NotSupportedError("egressInterceptor is local-only.");
     // Resume a stopped machine, then wait for its agent so the handle is usable.
     await cloudFetch(this.conn, "POST", `/v1/machines/${this.id}/start`, {
       timeoutMs: CLOUD_START_TIMEOUT_MS,
     });
-    await waitForReady(this.conn, this.id);
+    if (waitUntilReady) await waitForReady(this.conn, this.id);
+  }
+
+  async info(): Promise<Record<string, unknown>> {
+    return cloudFetch<Record<string, unknown>>(this.conn, "GET", `/v1/machines/${this.id}`);
+  }
+
+  async logs(tail: number): Promise<string> {
+    return cloudFetch<string>(this.conn, "GET", `/v1/machines/${this.id}/logs?tail=${tail}`, {
+      accept: "text",
+    });
+  }
+
+  async exportArtifact(): Promise<Record<string, unknown>> {
+    return cloudFetch<Record<string, unknown>>(this.conn, "POST", `/v1/machines/${this.id}/export`, {
+      json: {},
+      timeoutMs: CLOUD_START_TIMEOUT_MS,
+    });
   }
 
   async delete(): Promise<void> {
@@ -1876,7 +1927,7 @@ export async function makeTransport(
       cliUrl ??
       DEFAULT_CLOUD_URL
     ).replace(/\/+$/, "");
-    const cloudConn: CloudConn = { baseUrl, apiKey: key };
+    const cloudConn = cloudConnOf(conn, baseUrl, key);
     await storeCloudCredentials(cloudConn, config.credentials);
 
     // smolfleet CreateMachineRequest (camelCase): source (tagged), nested
@@ -1885,6 +1936,7 @@ export async function makeTransport(
     // (exactOptionalPropertyTypes forbids passing `undefined` explicitly).
     const createBody: CreateMachineRequest = {
       name: config.name ?? null,
+      ...(config.labels && Object.keys(config.labels).length ? { labels: config.labels } : {}),
       source: { type: "image", reference: config.image },
       resources: {
         ...(config.resources?.cpus !== undefined
@@ -2065,19 +2117,32 @@ export async function listMachines(
       cliUrl ??
       DEFAULT_CLOUD_URL
     ).replace(/\/+$/, "");
+    // The control plane filters by label itself; the client-side filter below
+    // stays as the backstop for an older control plane that ignores it.
+    const labelQuery = Object.entries(options.labels ?? {})
+      .map(([k, v]) => `label=${encodeURIComponent(`${k}=${v}`)}`)
+      .join("&");
     const listed = await cloudFetch<{ machines?: MachineInfo[] } | MachineInfo[]>(
-      { baseUrl, apiKey: key },
+      cloudConnOf(conn, baseUrl, key),
       "GET",
-      "/v1/machines",
+      `/v1/machines${labelQuery ? `?${labelQuery}` : ""}`,
     );
-    const rows = Array.isArray(listed) ? listed : (listed.machines ?? []);
+    // Anything but a machine list (a proxy's page, a wrong base URL) is an
+    // error, not an account with no machines.
+    const rows = Array.isArray(listed)
+      ? listed
+      : Array.isArray((listed as { machines?: unknown } | undefined)?.machines)
+        ? (listed as { machines: MachineInfo[] }).machines
+        : undefined;
+    if (!rows) {
+      throw new SmolError("SMOLVM_ERROR", `cloud GET /v1/machines at ${baseUrl} did not return a machine list`);
+    }
     all = rows.map((m) => ({
       name: m.name ?? m.id,
       id: m.id,
       state: m.state,
       ...(m.source?.type === "image" && { image: m.source.reference }),
-      // The cloud API carries no caller labels yet.
-      labels: {},
+      labels: (m as { labels?: Record<string, string> }).labels ?? {},
       persistent: !m.ephemeral,
       // Remote machines never depend on a client process.
       detached: true,
@@ -2148,7 +2213,7 @@ export async function connectTransport(
     cliUrl ??
     DEFAULT_CLOUD_URL
   ).replace(/\/+$/, "");
-  const cloudConn: CloudConn = { baseUrl, apiKey: key };
+  const cloudConn = cloudConnOf(conn, baseUrl, key);
   // Resolve like the CLI does: try the id path first, and when that 404s,
   // list machines and match by NAME. `machine.name` returns the human name,
   // so `Machine.connect(other.name)` — the natural composition of this API —
@@ -2275,7 +2340,7 @@ function cloudConnFor(conn: ConnectOptions, operation: string): CloudConn {
     cliUrl ??
     DEFAULT_CLOUD_URL
   ).replace(/\/+$/, "");
-  return { baseUrl, apiKey: key };
+  return cloudConnOf(conn, baseUrl, key);
 }
 
 /** Create a cache disk; its version 0 is an empty filesystem. Cloud only. */

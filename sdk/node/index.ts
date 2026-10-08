@@ -71,6 +71,7 @@ export type {
   ConnectOptions,
   EgressInterceptor,
   StartOptions,
+  ResumeOptions,
   WaitReadyOptions,
   PortEndpoint,
 } from './types';
