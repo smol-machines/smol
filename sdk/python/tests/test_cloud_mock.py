@@ -34,6 +34,15 @@ def readiness_response(machine_id: str, ready_after: int, state: str = "started"
     }
 
 
+def cache_disk_info(version: int) -> dict:
+    return {
+        "id": "cdisk-1", "name": "deps", "sizeGb": 20, "mountPath": "/cache",
+        "latestVersion": version,
+        "versions": [{"version": version, "sizeBytes": 262144, "sha256": "ab" * 32, "createdAt": ""}],
+        "createdAt": "",
+    }
+
+
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, *a):  # silence
         pass
@@ -60,6 +69,13 @@ class Handler(BaseHTTPRequestHandler):
         captured["hits"].append(f"POST {self.path}")
         if not self._auth_ok():
             return self._send(401, b"bad token")
+        if self.path == "/v1/cache-disks":
+            captured["cache_disk_create"] = json.loads(self._read() or b"{}")
+            return self._send(201, json.dumps(cache_disk_info(0)).encode())
+        if self.path.endswith("/cache-disk/publish"):
+            captured["cache_disk_publish"] = self.path
+            return self._send(200, json.dumps({"cacheDisk": cache_disk_info(1),
+                                               "version": cache_disk_info(1)["versions"][0]}).encode())
         if self.path == "/v1/machines":
             captured["create_body"] = json.loads(self._read() or b"{}")
             return self._send(201, json.dumps({
@@ -233,6 +249,11 @@ class Handler(BaseHTTPRequestHandler):
         captured["hits"].append(f"GET {self.path}")
         if not self._auth_ok():
             return self._send(401, b"bad token")
+        if self.path == "/v1/cache-disks":
+            return self._send(200, json.dumps({"cacheDisks": [cache_disk_info(0)]}).encode())
+        if self.path.startswith("/v1/cache-disks/"):
+            captured["cache_disk_get"] = self.path[len("/v1/cache-disks/"):]
+            return self._send(200, json.dumps(cache_disk_info(0)).encode())
         if self.path == f"/v1/machines/{MACHINE_ID}":
             return self._send(200, json.dumps(readiness_response(MACHINE_ID, 2)).encode())
         if self.path == f"/v1/machines/{MACHINE_ID}/checkpoints":
@@ -302,6 +323,9 @@ class Handler(BaseHTTPRequestHandler):
         captured["hits"].append(f"DELETE {self.path}")
         if not self._auth_ok():
             return self._send(401, b"bad token")
+        if self.path.startswith("/v1/cache-disks/"):
+            captured["cache_disk_delete"] = self.path[len("/v1/cache-disks/"):]
+            return self._send(204)
         if self.path == f"/v1/machines/{MACHINE_ID}/share":
             captured["unshared"] = True
             return self._send(204)
@@ -717,6 +741,40 @@ def main() -> int:
         check("stop hit POST /stop", f"POST /v1/machines/{MACHINE_ID}/stop" in captured["hits"])
         m.delete()
         check("delete uses DELETE /v1/machines/{id}", f"DELETE /v1/machines/{MACHINE_ID}" in captured["hits"])
+        # Cache disks: the account API, a machine started from one, and publishing.
+        from smol import CacheDisk, CacheDiskRef, NotSupportedError as _NSE
+
+        cloud = ConnectOptions(target="cloud", base_url=base, api_key="smk_testkey")
+        created = CacheDisk.create("deps", size_gb=10, conn=cloud)
+        check("CacheDisk.create posts name and size",
+              captured["cache_disk_create"] == {"name": "deps", "sizeGb": 10} and created.latest_version == 0,
+              str(captured.get("cache_disk_create")))
+        listed = CacheDisk.list(cloud)
+        check("CacheDisk.list unwraps cacheDisks", len(listed) == 1 and listed[0].name == "deps")
+        CacheDisk.get("deps", cloud)
+        check("CacheDisk.get addresses by name", captured.get("cache_disk_get") == "deps")
+        with_cache = Machine.create(
+            MachineConfig(image="alpine:3.20", cache_disk=CacheDiskRef("deps", version=0, mount_path="/deps")),
+            cloud,
+        )
+        check("cloud create sends cacheDisk",
+              captured["create_body"].get("cacheDisk") == {"cache": "deps", "version": 0, "mountPath": "/deps"},
+              str(captured["create_body"].get("cacheDisk")))
+        published = with_cache.publish_cache_disk()
+        check("publish_cache_disk posts to the machine and returns the new version",
+              str(captured.get("cache_disk_publish", "")).endswith("/cache-disk/publish")
+              and published.version.version == 1 and published.cache_disk.latest_version == 1)
+        CacheDisk.delete("deps", cloud)
+        check("CacheDisk.delete addresses by name", captured.get("cache_disk_delete") == "deps")
+        local_refused = False
+        try:
+            Machine.create(MachineConfig(image="alpine:3.20", cache_disk=CacheDiskRef("deps")),
+                           ConnectOptions(target="local"))
+        except _NSE:
+            local_refused = True
+        except Exception as e:  # noqa: BLE001 - report what was raised instead
+            print("   local raised", type(e).__name__, e)
+        check("a local cache_disk is refused as NotSupported", local_refused)
     finally:
         server.shutdown()
 

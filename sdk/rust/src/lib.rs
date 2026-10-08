@@ -139,9 +139,13 @@ pub use connect::{ConnectOptions, Target};
 pub use error::{Error, ErrorKind, Result};
 pub use exec::{ExecEvent, ExecOptions, ExecResult, ExecStream, KillHandle};
 pub use machine::{
-    list_cloud_machines, BranchOptions, Checkpoint, CheckpointOptions, CheckpointResult,
+    list_cloud_machines, BranchOptions, CacheDisk, Checkpoint, CheckpointOptions, CheckpointResult,
     CloudCheckpoint, CostBreakdown, ImageInfo, Machine, MachineResources, MachineState,
     MachineSummary, PortEndpoint, Resize, ShareLink, UsageReport, UsageTotals,
+};
+pub use smol_cloud::types::{
+    CacheDisk as CacheDiskInfo, CacheDiskVersion, MachineCacheDisk as CacheDiskRef,
+    PublishedCacheDisk,
 };
 pub use transport::ReadyOptions;
 pub use tunnel::Tunnel;

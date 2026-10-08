@@ -2168,6 +2168,355 @@
         ]
       }
     },
+    "/v1/cache-disks": {
+      "get": {
+        "tags": [
+          "cache-disks"
+        ],
+        "summary": "List cache disks.",
+        "description": "Every cache disk in the caller's account, with its versions newest first. Requires the `machine:read` scope.",
+        "operationId": "cache_disk_list",
+        "responses": {
+          "200": {
+            "description": "Cache disks",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListCacheDisksResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid API key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Key lacks the required scope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limited; retry after the Retry-After header",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "cache-disks"
+        ],
+        "summary": "Create a cache disk.",
+        "description": "Creates a cache disk whose version 0 is an empty filesystem of `sizeGb`. Machines start from a version with `cacheDisk` on create, each through its own copy-on-write layer. Requires the `machine:create` scope.",
+        "operationId": "cache_disk_create",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateCacheDiskRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Cache disk created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CacheDiskInfo"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid name, size or mount path",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid API key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Key lacks the required scope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "A cache disk with that name exists",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Cache disks are not available on this platform",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limited; retry after the Retry-After header",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ]
+      }
+    },
+    "/v1/cache-disks/{id}": {
+      "get": {
+        "tags": [
+          "cache-disks"
+        ],
+        "summary": "Get a cache disk.",
+        "description": "One cache disk by id or name, with its versions newest first. Requires the `machine:read` scope.",
+        "operationId": "cache_disk_get",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Cache disk id or name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Cache disk",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CacheDiskInfo"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid API key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Key lacks the required scope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limited; retry after the Retry-After header",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "cache-disks"
+        ],
+        "summary": "Delete a cache disk.",
+        "description": "Deletes a cache disk and every version. Refused while a machine runs with it. Requires the `machine:delete` scope.",
+        "operationId": "cache_disk_delete",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Cache disk id or name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted"
+          },
+          "401": {
+            "description": "Missing or invalid API key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Key lacks the required scope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "A machine still runs with it",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limited; retry after the Retry-After header",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ]
+      }
+    },
     "/v1/checkpoints/{id}": {
       "get": {
         "tags": [
@@ -3985,6 +4334,124 @@
           },
           "404": {
             "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limited; retry after the Retry-After header",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ]
+      }
+    },
+    "/v1/machines/{id}/cache-disk/publish": {
+      "post": {
+        "tags": [
+          "cache-disks"
+        ],
+        "summary": "Publish a machine's cache disk.",
+        "description": "Publishes a stopped machine's cache disk (the version it started from plus everything it wrote) as its cache disk's next version, which later machines can start from. Requires the `machine:create` scope.",
+        "operationId": "machine_cache_disk_publish",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Machine id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "New version published",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PublishCacheDiskResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The machine has no cache disk",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid API key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Key lacks the required scope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Machine not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The machine is running or has never run",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Cache disks are not available on this platform",
             "content": {
               "application/json": {
                 "schema": {
@@ -6161,6 +6628,124 @@
           },
           "409": {
             "description": "Machine cannot be paused in its current state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limited; retry after the Retry-After header",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ]
+      }
+    },
+    "/v1/machines/{id}/resize": {
+      "post": {
+        "tags": [
+          "machines"
+        ],
+        "summary": "Resize a running machine.",
+        "description": "Changes a running machine's vCPUs, memory or disk in place, without a restart. Fields left out keep their current value. Memory and disk only grow; vCPUs can also shrink. The new size must fit the plan's per-machine limits and the machine's node. Requires the `machine:create` scope.",
+        "operationId": "machine_resize",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Machine id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResizeMachineRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Machine resized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MachineInfo"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid size, or memory or disk asked to shrink",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid API key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Key lacks the required scope, or the size exceeds the plan",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Machine is not running, or its node has no room for the new size",
             "content": {
               "application/json": {
                 "schema": {
@@ -11147,6 +11732,87 @@
           }
         }
       },
+      "CacheDiskInfo": {
+        "type": "object",
+        "description": "A cache disk: a disk image many machines start from, each through its own\ncopy-on-write layer, published in immutable versions.",
+        "required": [
+          "id",
+          "name",
+          "sizeGb",
+          "mountPath",
+          "latestVersion",
+          "versions",
+          "createdAt"
+        ],
+        "properties": {
+          "createdAt": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "latestVersion": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "mountPath": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "sizeGb": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "versions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CacheDiskVersionInfo"
+            },
+            "description": "Newest first."
+          }
+        }
+      },
+      "CacheDiskVersionInfo": {
+        "type": "object",
+        "description": "One immutable version of a cache disk.",
+        "required": [
+          "version",
+          "sizeBytes",
+          "sha256",
+          "createdAt"
+        ],
+        "properties": {
+          "createdAt": {
+            "type": "string"
+          },
+          "sha256": {
+            "type": "string",
+            "description": "SHA-256 (hex) of the version's disk image."
+          },
+          "sizeBytes": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "sourceMachineId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The machine whose cache this version was published from; `null` for v0."
+          },
+          "version": {
+            "type": "integer",
+            "format": "int32",
+            "description": "0 is the empty filesystem a cache disk starts as; each publish adds one.",
+            "minimum": 0
+          }
+        }
+      },
       "ChangePlanRequest": {
         "type": "object",
         "description": "Ask to move this tenant onto a different plan. Only plans whose\n`self_serve` flag is set may be chosen; operator tiers are assigned by an\nadmin.",
@@ -11493,6 +12159,37 @@
           }
         }
       },
+      "CreateCacheDiskRequest": {
+        "type": "object",
+        "description": "Create a cache disk.",
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "mountPath": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Absolute guest path machines mount it at unless they say otherwise.\nDefault `/cache`."
+          },
+          "name": {
+            "type": "string",
+            "description": "Unique within your account: 1-63 chars of `[a-z0-9]([a-z0-9._-]*[a-z0-9])?`.",
+            "example": "deps"
+          },
+          "sizeGb": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "Size of the cache filesystem in GiB (1-500). Default 20.",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
       "CreateConnectTokenRequest": {
         "type": "object",
         "description": "Body for `POST /v1/machines/{id}/connect-token`. Empty is fine.",
@@ -11525,6 +12222,17 @@
           "branchable": {
             "type": "boolean",
             "description": "Create this machine as a branch source: it boots with cloneable live RAM\nso `POST /v1/machines/:id/branches` can create independent copy-on-write\nchildren. Default false."
+          },
+          "cacheDisk": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/MachineCacheDiskSpec",
+                "description": "A cache disk the machine starts from: a published version of one of your\ncache disks, read through the machine's own copy-on-write layer and\nmounted at `mountPath`. Branches carry it."
+              }
+            ]
           },
           "command": {
             "type": "array",
@@ -12398,6 +13106,73 @@
           }
         }
       },
+      "ListCacheDisksResponse": {
+        "type": "object",
+        "required": [
+          "cacheDisks"
+        ],
+        "properties": {
+          "cacheDisks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CacheDiskInfo"
+            }
+          }
+        }
+      },
+      "MachineCacheDisk": {
+        "type": "object",
+        "description": "The cache disk a machine runs with.",
+        "required": [
+          "cacheDiskId",
+          "version",
+          "mountPath"
+        ],
+        "properties": {
+          "cacheDiskId": {
+            "type": "string"
+          },
+          "mountPath": {
+            "type": "string"
+          },
+          "version": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          }
+        }
+      },
+      "MachineCacheDiskSpec": {
+        "type": "object",
+        "description": "Which cache disk a machine starts from, on create.",
+        "required": [
+          "cache"
+        ],
+        "properties": {
+          "cache": {
+            "type": "string",
+            "description": "The cache disk's id or name.",
+            "example": "deps"
+          },
+          "mountPath": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Absolute guest path to mount it at; the cache disk's own mount path when\nleft out."
+          },
+          "version": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "Version to start from; the latest when left out.",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
       "MachineCapabilities": {
         "type": "object",
         "description": "Dynamic machine operations for clients that must feature-detect instead of\nguessing from a server or engine version.",
@@ -12654,6 +13429,17 @@
           "branchable": {
             "type": "boolean",
             "description": "Whether this machine can produce live copy-on-write branches."
+          },
+          "cacheDisk": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/MachineCacheDisk",
+                "description": "The cache disk the machine runs with, if any."
+              }
+            ]
           },
           "capabilities": {
             "$ref": "#/components/schemas/MachineCapabilities",
@@ -13824,6 +14610,22 @@
           }
         }
       },
+      "PublishCacheDiskResponse": {
+        "type": "object",
+        "description": "The version a publish created, and the cache disk it now belongs to.",
+        "required": [
+          "cacheDisk",
+          "version"
+        ],
+        "properties": {
+          "cacheDisk": {
+            "$ref": "#/components/schemas/CacheDiskInfo"
+          },
+          "version": {
+            "$ref": "#/components/schemas/CacheDiskVersionInfo"
+          }
+        }
+      },
       "RemoteMountSpec": {
         "type": "object",
         "description": "An S3-compatible bucket mounted into the machine.\n\nDeliberately separate from [`MachineMountSpec`], which references a\nprovisioned cloud volume. The two are opposite kinds of resource: a cloud\nvolume is stateful, claimed exclusively and pins the machine to its node,\nwhile a bucket is stateless, shareable and reachable from any node. Reusing\nthe volume type would drag a bucket through claim and node-pinning logic\nthat works against it.\n\nCredentials come from the machine's `env` (`AWS_ACCESS_KEY_ID` /\n`AWS_SECRET_ACCESS_KEY`, optional `AWS_ENDPOINT_URL` and `AWS_REGION`), the\nsame place every AWS SDK reads them. Without them the bucket is read\nanonymously, which is how public datasets are consumed.",
@@ -13880,6 +14682,39 @@
           "displayName": {
             "type": "string",
             "description": "The new display name, trimmed, 1 to 100 characters, same bound as at creation."
+          }
+        }
+      },
+      "ResizeMachineRequest": {
+        "type": "object",
+        "description": "Change the size of a running machine. Set any of the fields; each one left\nout keeps its current value. RAM and disk only grow; CPUs can also shrink.",
+        "properties": {
+          "cpus": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "Online vCPU count.",
+            "minimum": 0
+          },
+          "diskGb": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Storage disk size in GiB. Grow only.",
+            "minimum": 0
+          },
+          "memoryMb": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "Total guest RAM in MiB. Grow only.",
+            "minimum": 0
           }
         }
       },
@@ -14485,6 +15320,10 @@
     {
       "name": "machines",
       "description": "First-class machine lifecycle and exec"
+    },
+    {
+      "name": "cache-disks",
+      "description": "Disk images many machines start from, each through its own copy-on-write layer, published in versions"
     },
     {
       "name": "credentials",

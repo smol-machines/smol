@@ -500,6 +500,54 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/cache-disks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List cache disks.
+         * @description Every cache disk in the caller's account, with its versions newest first. Requires the `machine:read` scope.
+         */
+        get: operations["cache_disk_list"];
+        put?: never;
+        /**
+         * Create a cache disk.
+         * @description Creates a cache disk whose version 0 is an empty filesystem of `sizeGb`. Machines start from a version with `cacheDisk` on create, each through its own copy-on-write layer. Requires the `machine:create` scope.
+         */
+        post: operations["cache_disk_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/cache-disks/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get a cache disk.
+         * @description One cache disk by id or name, with its versions newest first. Requires the `machine:read` scope.
+         */
+        get: operations["cache_disk_get"];
+        put?: never;
+        post?: never;
+        /**
+         * Delete a cache disk.
+         * @description Deletes a cache disk and every version. Refused while a machine runs with it. Requires the `machine:delete` scope.
+         */
+        delete: operations["cache_disk_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/checkpoints/{id}": {
         parameters: {
             query?: never;
@@ -824,6 +872,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/machines/{id}/cache-disk/publish": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Publish a machine's cache disk.
+         * @description Publishes a stopped machine's cache disk (the version it started from plus everything it wrote) as its cache disk's next version, which later machines can start from. Requires the `machine:create` scope.
+         */
+        post: operations["machine_cache_disk_publish"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/machines/{id}/checkpoints": {
         parameters: {
             query?: never;
@@ -1142,6 +1210,26 @@ export interface paths {
          * @description Checkpoints the machine's memory and disks, then stops it so it can resume where it left off. Requires the `machine:create` scope.
          */
         post: operations["machine_pause"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/machines/{id}/resize": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Resize a running machine.
+         * @description Changes a running machine's vCPUs, memory or disk in place, without a restart. Fields left out keep their current value. Memory and disk only grow; vCPUs can also shrink. The new size must fit the plan's per-machine limits and the machine's node. Requires the `machine:create` scope.
+         */
+        post: operations["machine_resize"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2271,6 +2359,37 @@ export interface components {
             current?: null | components["schemas"]["PlanInfo"];
         };
         /**
+         * @description A cache disk: a disk image many machines start from, each through its own
+         *     copy-on-write layer, published in immutable versions.
+         */
+        CacheDiskInfo: {
+            createdAt: string;
+            id: string;
+            /** Format: int32 */
+            latestVersion: number;
+            mountPath: string;
+            name: string;
+            /** Format: int32 */
+            sizeGb: number;
+            /** @description Newest first. */
+            versions: components["schemas"]["CacheDiskVersionInfo"][];
+        };
+        /** @description One immutable version of a cache disk. */
+        CacheDiskVersionInfo: {
+            createdAt: string;
+            /** @description SHA-256 (hex) of the version's disk image. */
+            sha256: string;
+            /** Format: int64 */
+            sizeBytes: number;
+            /** @description The machine whose cache this version was published from; `null` for v0. */
+            sourceMachineId?: string | null;
+            /**
+             * Format: int32
+             * @description 0 is the empty filesystem a cache disk starts as; each publish adds one.
+             */
+            version: number;
+        };
+        /**
          * @description Ask to move this tenant onto a different plan. Only plans whose
          *     `self_serve` flag is set may be chosen; operator tiers are assigned by an
          *     admin.
@@ -2457,6 +2576,24 @@ export interface components {
              */
             tenantId?: string | null;
         };
+        /** @description Create a cache disk. */
+        CreateCacheDiskRequest: {
+            /**
+             * @description Absolute guest path machines mount it at unless they say otherwise.
+             *     Default `/cache`.
+             */
+            mountPath?: string | null;
+            /**
+             * @description Unique within your account: 1-63 chars of `[a-z0-9]([a-z0-9._-]*[a-z0-9])?`.
+             * @example deps
+             */
+            name: string;
+            /**
+             * Format: int32
+             * @description Size of the cache filesystem in GiB (1-500). Default 20.
+             */
+            sizeGb?: number | null;
+        };
         /** @description Body for `POST /v1/machines/{id}/connect-token`. Empty is fine. */
         CreateConnectTokenRequest: {
             /**
@@ -2475,6 +2612,7 @@ export interface components {
              *     children. Default false.
              */
             branchable?: boolean;
+            cacheDisk?: null | components["schemas"]["MachineCacheDiskSpec"];
             /**
              * @description Optional workload command (argv) that overrides the source image's or
              *     `.smolmachine` artifact's own entrypoint+cmd when the machine starts, so a
@@ -2839,6 +2977,34 @@ export interface components {
             /** @description The accept link, carrying the only readable copy of the token. */
             invitationUrl?: string | null;
         };
+        ListCacheDisksResponse: {
+            cacheDisks: components["schemas"]["CacheDiskInfo"][];
+        };
+        /** @description The cache disk a machine runs with. */
+        MachineCacheDisk: {
+            cacheDiskId: string;
+            mountPath: string;
+            /** Format: int32 */
+            version: number;
+        };
+        /** @description Which cache disk a machine starts from, on create. */
+        MachineCacheDiskSpec: {
+            /**
+             * @description The cache disk's id or name.
+             * @example deps
+             */
+            cache: string;
+            /**
+             * @description Absolute guest path to mount it at; the cache disk's own mount path when
+             *     left out.
+             */
+            mountPath?: string | null;
+            /**
+             * Format: int32
+             * @description Version to start from; the latest when left out.
+             */
+            version?: number | null;
+        };
         /**
          * @description Dynamic machine operations for clients that must feature-detect instead of
          *     guessing from a server or engine version.
@@ -2957,6 +3123,7 @@ export interface components {
             branchState?: null | components["schemas"]["CheckpointState"];
             /** @description Whether this machine can produce live copy-on-write branches. */
             branchable?: boolean;
+            cacheDisk?: null | components["schemas"]["MachineCacheDisk"];
             /** @description Operations the control plane can safely offer for this machine right now. */
             capabilities?: components["schemas"]["MachineCapabilities"];
             checkpointState?: null | components["schemas"]["CheckpointState"];
@@ -3500,6 +3667,11 @@ export interface components {
             /** @description Graduated volume-discount bands, low bound → high. */
             volumeTiers: components["schemas"]["VolumeTier"][];
         };
+        /** @description The version a publish created, and the cache disk it now belongs to. */
+        PublishCacheDiskResponse: {
+            cacheDisk: components["schemas"]["CacheDiskInfo"];
+            version: components["schemas"]["CacheDiskVersionInfo"];
+        };
         /**
          * @description An S3-compatible bucket mounted into the machine.
          *
@@ -3534,6 +3706,27 @@ export interface components {
         RenameOrgRequest: {
             /** @description The new display name, trimmed, 1 to 100 characters, same bound as at creation. */
             displayName: string;
+        };
+        /**
+         * @description Change the size of a running machine. Set any of the fields; each one left
+         *     out keeps its current value. RAM and disk only grow; CPUs can also shrink.
+         */
+        ResizeMachineRequest: {
+            /**
+             * Format: int32
+             * @description Online vCPU count.
+             */
+            cpus?: number | null;
+            /**
+             * Format: int64
+             * @description Storage disk size in GiB. Grow only.
+             */
+            diskGb?: number | null;
+            /**
+             * Format: int32
+             * @description Total guest RAM in MiB. Grow only.
+             */
+            memoryMb?: number | null;
         };
         /** @description Create a stopped machine from a durable portable checkpoint. */
         RestorePortableCheckpointRequest: {
@@ -5530,6 +5723,292 @@ export interface operations {
             };
         };
     };
+    cache_disk_list: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Cache disks */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ListCacheDisksResponse"];
+                };
+            };
+            /** @description Missing or invalid API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Key lacks the required scope */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limited; retry after the Retry-After header */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    cache_disk_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateCacheDiskRequest"];
+            };
+        };
+        responses: {
+            /** @description Cache disk created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CacheDiskInfo"];
+                };
+            };
+            /** @description Invalid name, size or mount path */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Missing or invalid API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Key lacks the required scope */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description A cache disk with that name exists */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Cache disks are not available on this platform */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limited; retry after the Retry-After header */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    cache_disk_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Cache disk id or name */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Cache disk */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CacheDiskInfo"];
+                };
+            };
+            /** @description Missing or invalid API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Key lacks the required scope */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limited; retry after the Retry-After header */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    cache_disk_delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Cache disk id or name */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Deleted */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Missing or invalid API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Key lacks the required scope */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description A machine still runs with it */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limited; retry after the Retry-After header */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     portable_checkpoint_get: {
         parameters: {
             query?: never;
@@ -6953,6 +7432,101 @@ export interface operations {
             };
             /** @description Not found */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limited; retry after the Retry-After header */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    machine_cache_disk_publish: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Machine id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description New version published */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PublishCacheDiskResponse"];
+                };
+            };
+            /** @description The machine has no cache disk */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Missing or invalid API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Key lacks the required scope */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Machine not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The machine is running or has never run */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Cache disks are not available on this platform */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -8567,6 +9141,96 @@ export interface operations {
                 };
             };
             /** @description Machine cannot be paused in its current state */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limited; retry after the Retry-After header */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    machine_resize: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Machine id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ResizeMachineRequest"];
+            };
+        };
+        responses: {
+            /** @description Machine resized */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MachineInfo"];
+                };
+            };
+            /** @description Invalid size, or memory or disk asked to shrink */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Missing or invalid API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Key lacks the required scope, or the size exceeds the plan */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Machine is not running, or its node has no room for the new size */
             409: {
                 headers: {
                     [name: string]: unknown;

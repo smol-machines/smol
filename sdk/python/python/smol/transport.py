@@ -32,6 +32,9 @@ from urllib.parse import quote
 from .errors import InvalidConfigError, NotSupportedError, SmolError, wrap_native_error
 from .types import (
     ConnectOptions,
+    CacheDiskInfo,
+    CacheDiskVersion,
+    PublishedCacheDisk,
     CredentialSpec,
     EgressInterceptor,
     ExecOptions,
@@ -153,6 +156,7 @@ class Transport(Protocol):
     def usage(self) -> MachineUsageReport: ...
     def share(self) -> ShareLink: ...
     def unshare(self) -> None: ...
+    def publish_cache_disk(self) -> PublishedCacheDisk: ...
     def checkpoint(
         self, output: Optional[str] = None, *, store: Optional[str] = None
     ) -> PortableCheckpointInfo: ...
@@ -409,6 +413,11 @@ def _store_cloud_credentials(
 
 
 def _native_config(name: str, config: MachineConfig) -> dict:
+    if config.cache_disk is not None:
+        raise NotSupportedError(
+            "cache_disk is cloud-only for now; locally, pass the base with "
+            "`smolvm machine create --cache-disk`."
+        )
     cfg: dict[str, Any] = {
         "name": name,
         "persistent": config.persistent,
@@ -826,6 +835,11 @@ class LocalTransport:
     def unshare(self) -> None:
         raise NotSupportedError(
             "unshare() is cloud-only; a local machine has no share link to revoke."
+        )
+
+    def publish_cache_disk(self) -> PublishedCacheDisk:
+        raise NotSupportedError(
+            "publish_cache_disk() is cloud-only; a local machine has no cache disk."
         )
 
     def checkpoint(
@@ -1323,6 +1337,15 @@ class CloudTransport:
 
     def unshare(self) -> None:
         _cloud_fetch(self._base, self._key, "DELETE", f"/v1/machines/{self._id}/share")
+
+    def publish_cache_disk(self) -> PublishedCacheDisk:
+        r = _cloud_fetch(
+            self._base, self._key, "POST", f"/v1/machines/{self._id}/cache-disk/publish"
+        ) or {}
+        return PublishedCacheDisk(
+            cache_disk=_cache_disk_from(r.get("cacheDisk") or {}),
+            version=_cache_disk_version_from(r.get("version") or {}),
+        )
 
     def checkpoint(
         self, output: Optional[str] = None, *, store: Optional[str] = None
@@ -1987,6 +2010,13 @@ def make_transport(config: MachineConfig, conn: Optional[ConnectOptions] = None)
             body["command"] = list(config.command)
         if config.credentials:
             body["credentials"] = [c.name for c in config.credentials]
+        if config.cache_disk is not None:
+            cache_disk: dict[str, Any] = {"cache": config.cache_disk.cache}
+            if config.cache_disk.version is not None:
+                cache_disk["version"] = config.cache_disk.version
+            if config.cache_disk.mount_path is not None:
+                cache_disk["mountPath"] = config.cache_disk.mount_path
+            body["cacheDisk"] = cache_disk
 
         created = _cloud_fetch(base_url, api_key, "POST", "/v1/machines", json_body=body) or {}
         machine_id = created["id"]
@@ -2265,6 +2295,65 @@ def _cloud_credentials(conn: ConnectOptions, operation: str) -> tuple:
         conn.base_url or os.environ.get("SMOL_CLOUD_URL") or cli_url or DEFAULT_CLOUD_URL
     ).rstrip("/")
     return base_url, api_key
+
+
+def _cache_disk_version_from(r: dict[str, Any]) -> CacheDiskVersion:
+    return CacheDiskVersion(
+        version=int(r.get("version", 0)),
+        size_bytes=int(r.get("sizeBytes", 0)),
+        sha256=str(r.get("sha256", "")),
+        created_at=str(r.get("createdAt", "")),
+        source_machine_id=r.get("sourceMachineId"),
+    )
+
+
+def _cache_disk_from(r: dict[str, Any]) -> CacheDiskInfo:
+    return CacheDiskInfo(
+        id=str(r.get("id", "")),
+        name=str(r.get("name", "")),
+        size_gb=int(r.get("sizeGb", 0)),
+        mount_path=str(r.get("mountPath", "")),
+        latest_version=int(r.get("latestVersion", 0)),
+        versions=[_cache_disk_version_from(v) for v in r.get("versions") or []],
+        created_at=str(r.get("createdAt", "")),
+    )
+
+
+def create_cache_disk(
+    name: str,
+    size_gb: Optional[int] = None,
+    mount_path: Optional[str] = None,
+    conn: Optional[ConnectOptions] = None,
+) -> CacheDiskInfo:
+    """Create a cache disk; its version 0 is an empty filesystem. Cloud only."""
+    base_url, api_key = _cloud_credentials(conn or ConnectOptions(target="cloud"), "CacheDisk.create")
+    body: dict[str, Any] = {"name": name}
+    if size_gb is not None:
+        body["sizeGb"] = size_gb
+    if mount_path is not None:
+        body["mountPath"] = mount_path
+    return _cache_disk_from(_cloud_fetch(base_url, api_key, "POST", "/v1/cache-disks", json_body=body) or {})
+
+
+def list_cache_disks(conn: Optional[ConnectOptions] = None) -> list[CacheDiskInfo]:
+    """Every cache disk in the account, versions newest first. Cloud only."""
+    base_url, api_key = _cloud_credentials(conn or ConnectOptions(target="cloud"), "CacheDisk.list")
+    r = _cloud_fetch(base_url, api_key, "GET", "/v1/cache-disks") or {}
+    return [_cache_disk_from(d) for d in r.get("cacheDisks") or []]
+
+
+def get_cache_disk(id_or_name: str, conn: Optional[ConnectOptions] = None) -> CacheDiskInfo:
+    """One cache disk by id or name. Cloud only."""
+    base_url, api_key = _cloud_credentials(conn or ConnectOptions(target="cloud"), "CacheDisk.get")
+    return _cache_disk_from(
+        _cloud_fetch(base_url, api_key, "GET", f"/v1/cache-disks/{quote(id_or_name, safe='')}") or {}
+    )
+
+
+def delete_cache_disk(id_or_name: str, conn: Optional[ConnectOptions] = None) -> None:
+    """Delete a cache disk and all its versions; refused while a machine uses it. Cloud only."""
+    base_url, api_key = _cloud_credentials(conn or ConnectOptions(target="cloud"), "CacheDisk.delete")
+    _cloud_fetch(base_url, api_key, "DELETE", f"/v1/cache-disks/{quote(id_or_name, safe='')}")
 
 
 def upload_checkpoint(

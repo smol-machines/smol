@@ -379,6 +379,22 @@ with Machine.create(MachineConfig(
 - On the cloud, a credential with a `value` is stored for your account under
   `name`; one without refers to a credential already stored there.
 
+## Cache disks (cloud)
+
+A cache disk is a disk image many machines start from, each through its own
+copy-on-write layer: dependencies, build caches, datasets. Publish a stopped
+machine's cache as the next version, and later machines start from it.
+
+```python
+from smol import CacheDisk, CacheDiskRef, Machine, MachineConfig
+
+CacheDisk.create("deps")                                          # v0: empty
+m = Machine.create(MachineConfig(image="node:22", cache_disk=CacheDiskRef("deps")))
+m.exec(["sh", "-c", "cd /cache && npm install"])
+m.stop()
+m.publish_cache_disk()                                            # v1
+```
+
 ## Install / build from source
 The cloud path is pure Python. The local path needs the native extension, which
 links `libkrun` from the sibling `smolvm` repo (three levels up).

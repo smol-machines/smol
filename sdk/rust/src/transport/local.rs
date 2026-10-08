@@ -993,6 +993,13 @@ impl Transport for LocalTransport {
             "a local machine has no public ingress to share; this is a cloud target operation",
         ))
     }
+
+    fn publish_cache_disk(&self) -> Result<smol_cloud::types::PublishedCacheDisk> {
+        Err(unsupported(
+            "publish_cache_disk()",
+            "a local machine has no cache disk; this is a cloud target operation",
+        ))
+    }
 }
 
 /// Create a machine on this host and return a handle to it.

@@ -930,6 +930,13 @@ impl Machine {
         self.transport.unshare()
     }
 
+    /// Publish this machine's cache disk, the version it started from plus
+    /// everything it wrote, as its cache disk's next version. Stop the machine
+    /// first: a running machine is still writing it. Cloud only.
+    pub fn publish_cache_disk(&self) -> Result<smol_cloud::types::PublishedCacheDisk> {
+        self.transport.publish_cache_disk()
+    }
+
     /// Shut the machine down, keeping its disks.
     pub fn stop(&self) -> Result<()> {
         self.transport.stop()
@@ -1087,6 +1094,65 @@ pub fn list_cloud_machines(connect: &ConnectOptions) -> Result<Vec<Machine>> {
             )))
         })
         .collect())
+}
+
+/// Cache disks: disk images many machines start from, each through its own
+/// copy-on-write layer, published in immutable versions. Cloud only.
+///
+/// ```no_run
+/// # fn main() -> smolmachines::Result<()> {
+/// use smolmachines::{CacheDisk, ConnectOptions, Machine};
+/// let cloud = ConnectOptions::cloud();
+/// CacheDisk::create(&cloud, "deps", None, None)?;              // v0: empty
+/// let m = Machine::builder("dev").image("node:22").cache_disk("deps").create_with(&cloud)?;
+/// m.exec(["sh", "-c", "cd /cache && npm install"])?;
+/// m.stop()?;
+/// m.publish_cache_disk()?;                                      // v1
+/// # Ok(()) }
+/// ```
+pub struct CacheDisk;
+
+impl CacheDisk {
+    fn client(connect: &ConnectOptions) -> Result<smol_cloud::blocking::Client> {
+        if connect.target() != Target::Cloud {
+            return Err(Error::new(
+                ErrorKind::NotSupported,
+                "cache disks are a cloud target feature",
+            ));
+        }
+        connect.client()
+    }
+
+    /// Create a cache disk; its version 0 is an empty filesystem.
+    pub fn create(
+        connect: &ConnectOptions,
+        name: &str,
+        size_gb: Option<u32>,
+        mount_path: Option<&str>,
+    ) -> Result<smol_cloud::types::CacheDisk> {
+        Ok(
+            Self::client(connect)?.create_cache_disk(&smol_cloud::types::CreateCacheDisk {
+                name: name.to_string(),
+                size_gb,
+                mount_path: mount_path.map(str::to_string),
+            })?,
+        )
+    }
+
+    /// Every cache disk in the account, versions newest first.
+    pub fn list(connect: &ConnectOptions) -> Result<Vec<smol_cloud::types::CacheDisk>> {
+        Ok(Self::client(connect)?.cache_disks()?)
+    }
+
+    /// One cache disk by id or name.
+    pub fn get(connect: &ConnectOptions, id_or_name: &str) -> Result<smol_cloud::types::CacheDisk> {
+        Ok(Self::client(connect)?.cache_disk(id_or_name)?)
+    }
+
+    /// Delete a cache disk and all its versions; refused while a machine uses it.
+    pub fn delete(connect: &ConnectOptions, id_or_name: &str) -> Result<()> {
+        Ok(Self::client(connect)?.delete_cache_disk(id_or_name)?)
+    }
 }
 
 #[cfg(test)]

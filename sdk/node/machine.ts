@@ -20,11 +20,18 @@ import {
   deleteCheckpointTransport,
   restoreCheckpointTransport,
   uploadCheckpoint,
+  createCacheDisk,
+  listCacheDisks,
+  getCacheDisk,
+  deleteCacheDisk,
   type CloudCheckpointInfo,
   type RawExec,
   type Transport,
 } from "./transport";
 import type {
+  CacheDiskInfo,
+  CreateCacheDiskOptions,
+  PublishedCacheDisk,
   MachineResources,
   ResizeOptions,
   AssignOptions,
@@ -384,6 +391,13 @@ export class Machine {
     return this.transport.unshare();
   }
 
+  /** Publish this machine's cache disk, the version it started from plus
+   *  everything it wrote, as its cache disk's next version (cloud target).
+   *  Stop the machine first: a running machine is still writing it. */
+  publishCacheDisk(): Promise<PublishedCacheDisk> {
+    return this.transport.publishCacheDisk();
+  }
+
   /** Capture this running checkpointable machine. Local capture requires an
    * output path; with `store`, it is a self-contained directory, otherwise a
    * `.smolcheckpoint` file. Cloud capture stores the artifact durably. */
@@ -560,5 +574,40 @@ export class Episode {
    *  `reason`, `score`, `result`) — how a trainer collects the per-task score. */
   async status(): Promise<Record<string, unknown>> {
     return this.#leaseTransport.getLease(this.leaseId);
+  }
+}
+
+/**
+ * Cache disks: disk images many machines start from, each through its own
+ * copy-on-write layer, published in immutable versions (cloud target).
+ *
+ * ```ts
+ * const deps = await CacheDisk.create({ name: "deps" });           // v0: empty
+ * const m = await Machine.create({ image: "node:22", cacheDisk: { cache: "deps" } });
+ * await m.exec(["sh", "-c", "cd /cache && npm install"]);
+ * await m.stop();
+ * await m.publishCacheDisk();                                      // v1
+ * // Every later machine with cacheDisk: { cache: "deps" } starts from v1.
+ * ```
+ */
+export class CacheDisk {
+  /** Create a cache disk; its version 0 is an empty filesystem. */
+  static create(options: CreateCacheDiskOptions, conn: ConnectOptions = {}): Promise<CacheDiskInfo> {
+    return createCacheDisk(options, conn);
+  }
+
+  /** Every cache disk in the account, versions newest first. */
+  static list(conn: ConnectOptions = {}): Promise<CacheDiskInfo[]> {
+    return listCacheDisks(conn);
+  }
+
+  /** One cache disk by id or name. */
+  static get(idOrName: string, conn: ConnectOptions = {}): Promise<CacheDiskInfo> {
+    return getCacheDisk(idOrName, conn);
+  }
+
+  /** Delete a cache disk and all its versions; refused while a machine uses it. */
+  static delete(idOrName: string, conn: ConnectOptions = {}): Promise<void> {
+    return deleteCacheDisk(idOrName, conn);
   }
 }

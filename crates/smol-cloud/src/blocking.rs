@@ -897,6 +897,61 @@ impl Client {
         )
     }
 
+    /// Create a cache disk; its version 0 is an empty filesystem.
+    pub fn create_cache_disk(
+        &self,
+        request: &crate::types::CreateCacheDisk,
+    ) -> Result<crate::types::CacheDisk> {
+        self.json(
+            reqwest::Method::POST,
+            "/v1/cache-disks",
+            Body::Json(serde_json::to_value(request).map_err(serialize_error)?),
+            REQUEST_TIMEOUT,
+        )
+    }
+
+    /// Every cache disk in the account, versions newest first.
+    pub fn cache_disks(&self) -> Result<Vec<crate::types::CacheDisk>> {
+        let list: crate::types::CacheDiskList = self.json(
+            reqwest::Method::GET,
+            "/v1/cache-disks",
+            Body::None,
+            REQUEST_TIMEOUT,
+        )?;
+        Ok(list.cache_disks)
+    }
+
+    /// One cache disk by id or name.
+    pub fn cache_disk(&self, id_or_name: &str) -> Result<crate::types::CacheDisk> {
+        self.json(
+            reqwest::Method::GET,
+            &format!("/v1/cache-disks/{}", encode_path(id_or_name)),
+            Body::None,
+            REQUEST_TIMEOUT,
+        )
+    }
+
+    /// Delete a cache disk and all its versions; refused while a machine uses it.
+    pub fn delete_cache_disk(&self, id_or_name: &str) -> Result<()> {
+        self.empty(
+            reqwest::Method::DELETE,
+            &format!("/v1/cache-disks/{}", encode_path(id_or_name)),
+            Body::None,
+            REQUEST_TIMEOUT,
+        )
+    }
+
+    /// Publish a stopped machine's cache disk as its cache disk's next version.
+    pub fn publish_cache_disk(&self, id: &str) -> Result<crate::types::PublishedCacheDisk> {
+        // Flattening and uploading a large cache can take minutes.
+        self.json(
+            reqwest::Method::POST,
+            &format!("/v1/machines/{id}/cache-disk/publish"),
+            Body::None,
+            std::time::Duration::from_secs(30 * 60),
+        )
+    }
+
     /// The authenticated bridge URL for a published guest port.
     ///
     /// A bare path must stay `connect/<port>` with no trailing slash — that is

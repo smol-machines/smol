@@ -31,6 +31,7 @@ from typing import Any, AsyncIterator, Optional
 
 from .machine import Machine
 from .types import (
+    PublishedCacheDisk,
     ConnectOptions,
     EgressInterceptor,
     ExecOptions,
@@ -288,6 +289,11 @@ class AsyncMachine:
     async def unshare(self) -> None:
         """Revoke this machine's anonymous share link (cloud target)."""
         await asyncio.to_thread(self._m.unshare)
+
+    async def publish_cache_disk(self) -> "PublishedCacheDisk":
+        """Publish this machine's cache disk as its cache disk's next version
+        (cloud target). Stop the machine first."""
+        return await asyncio.to_thread(self._m.publish_cache_disk)
 
     async def checkpoint(
         self, output: Optional[str] = None, *, store: Optional[str] = None

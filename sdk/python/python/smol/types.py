@@ -172,6 +172,10 @@ class MachineConfig:
     credentials: Optional[list[CredentialSpec]] = None
     """Credentials the workload uses without seeing them. Implies network
     access. See :class:`CredentialSpec`."""
+    cache_disk: Optional["CacheDiskRef"] = None
+    """Start from a published version of one of your cache disks, mounted at
+    its mount path (or ``mount_path``) through the machine's own copy-on-write
+    layer. Cloud only. See :class:`smol.CacheDisk`."""
     workdir: Optional[str] = None
     """Working directory for the image workload, set at create. Overrides the
     image's own workdir."""
@@ -355,3 +359,51 @@ class PortEndpoint:
     """``wss://…/v1/machines/:id/connect/:port[/path]`` — for WebSocket upgrades."""
     headers: dict
     """Headers to send (the tenant Bearer token)."""
+
+
+@dataclass
+class CacheDiskRef:
+    """Which cache disk a machine starts from."""
+
+    cache: str
+    """The cache disk's id or name."""
+    version: Optional[int] = None
+    """Version to start from; the latest when ``None``."""
+    mount_path: Optional[str] = None
+    """Absolute guest path to mount it at; the cache disk's own when ``None``."""
+
+
+@dataclass
+class CacheDiskVersion:
+    """One immutable version of a cache disk."""
+
+    version: int
+    """0 is the empty filesystem a cache disk starts as; each publish adds one."""
+    size_bytes: int
+    sha256: str
+    created_at: str
+    source_machine_id: Optional[str] = None
+    """The machine this version was published from; ``None`` for v0."""
+
+
+@dataclass
+class CacheDiskInfo:
+    """A cache disk: a disk image many machines start from, each through its
+    own copy-on-write layer, published in immutable versions."""
+
+    id: str
+    name: str
+    size_gb: int
+    mount_path: str
+    latest_version: int
+    versions: list[CacheDiskVersion]
+    """Newest first."""
+    created_at: str
+
+
+@dataclass
+class PublishedCacheDisk:
+    """What publishing a machine's cache disk created."""
+
+    cache_disk: CacheDiskInfo
+    version: CacheDiskVersion

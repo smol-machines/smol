@@ -21,6 +21,10 @@ from .transport import (
     Transport,
     _load_native,
     connect_transport,
+    create_cache_disk,
+    delete_cache_disk,
+    get_cache_disk,
+    list_cache_disks,
     delete_checkpoint_transport,
     make_transport,
     restore_checkpoint_transport,
@@ -28,7 +32,9 @@ from .transport import (
 )
 from .errors import wrap_native_error
 from .types import (
+    CacheDiskInfo,
     ConnectOptions,
+    PublishedCacheDisk,
     ExecOptions,
     ExecResult,
     EgressInterceptor,
@@ -342,6 +348,12 @@ class Machine:
         existing URL immediately stops granting access."""
         self._t.unshare()
 
+    def publish_cache_disk(self) -> PublishedCacheDisk:
+        """Publish this machine's cache disk, the version it started from plus
+        everything it wrote, as its cache disk's next version (cloud target).
+        Stop the machine first: a running machine is still writing it."""
+        return self._t.publish_cache_disk()
+
     def checkpoint(
         self, output: Optional[str] = None, *, store: Optional[str] = None
     ) -> PortableCheckpointInfo:
@@ -602,3 +614,42 @@ class Episode:
             self.complete("done" if exc_type is None else "agent_failed")
         except Exception:
             pass
+
+
+class CacheDisk:
+    """Cache disks: disk images many machines start from, each through its own
+    copy-on-write layer, published in immutable versions (cloud target).
+
+    .. code-block:: python
+
+        CacheDisk.create("deps")                                  # v0: empty
+        m = Machine.create(MachineConfig(image="node:22", cache_disk=CacheDiskRef("deps")), conn)
+        m.exec(["sh", "-c", "cd /cache && npm install"])
+        m.stop()
+        m.publish_cache_disk()                                    # v1
+    """
+
+    @staticmethod
+    def create(
+        name: str,
+        size_gb: Optional[int] = None,
+        mount_path: Optional[str] = None,
+        conn: Optional[ConnectOptions] = None,
+    ) -> CacheDiskInfo:
+        """Create a cache disk; its version 0 is an empty filesystem."""
+        return create_cache_disk(name, size_gb, mount_path, conn)
+
+    @staticmethod
+    def list(conn: Optional[ConnectOptions] = None) -> list[CacheDiskInfo]:
+        """Every cache disk in the account, versions newest first."""
+        return list_cache_disks(conn)
+
+    @staticmethod
+    def get(id_or_name: str, conn: Optional[ConnectOptions] = None) -> CacheDiskInfo:
+        """One cache disk by id or name."""
+        return get_cache_disk(id_or_name, conn)
+
+    @staticmethod
+    def delete(id_or_name: str, conn: Optional[ConnectOptions] = None) -> None:
+        """Delete a cache disk and all its versions; refused while a machine uses it."""
+        delete_cache_disk(id_or_name, conn)

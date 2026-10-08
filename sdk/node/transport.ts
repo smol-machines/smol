@@ -29,7 +29,10 @@ import {
 } from "./errors";
 import type {
   CheckpointOptions,
+  CacheDiskInfo,
+  CreateCacheDiskOptions,
   CredentialSpec,
+  PublishedCacheDisk,
   MachineResources,
   ResizeOptions,
   ConnectOptions,
@@ -137,6 +140,8 @@ export interface Transport {
   share(): Promise<ShareLink>;
   /** Cloud only: revoke the machine's anonymous share link. */
   unshare(): Promise<void>;
+  /** Cloud only: publish a stopped machine's cache disk as its next version. */
+  publishCacheDisk(): Promise<PublishedCacheDisk>;
   checkpoint(output?: string, options?: CheckpointOptions): Promise<PortableCheckpointInfo>;
   checkpoints(): Promise<PortableCheckpointInfo[]>;
   /** Local only: grow the running machine without rebooting it. */
@@ -374,6 +379,11 @@ export function toNativeConfig(
   name: string,
   config: MachineConfig,
 ): NativeMachineConfig {
+  if (config.cacheDisk) {
+    throw new NotSupportedError(
+      "cacheDisk is cloud-only for now; locally, pass the base with `smolvm machine create --cache-disk`.",
+    );
+  }
   return {
     name,
     image: config.image,
@@ -724,6 +734,12 @@ class LocalTransport implements Transport {
   async unshare(): Promise<void> {
     throw new NotSupportedError(
       "unshare() is cloud-only; a local machine has no share link to revoke.",
+    );
+  }
+
+  async publishCacheDisk(): Promise<PublishedCacheDisk> {
+    throw new NotSupportedError(
+      "publishCacheDisk() is cloud-only; a local machine has no cache disk.",
     );
   }
 
@@ -1500,6 +1516,16 @@ class CloudTransport implements Transport {
     );
   }
 
+  async publishCacheDisk(): Promise<PublishedCacheDisk> {
+    // Flattening and uploading a large cache can take minutes.
+    return cloudFetch<PublishedCacheDisk>(
+      this.conn,
+      "POST",
+      `/v1/machines/${this.id}/cache-disk/publish`,
+      { timeoutMs: 30 * 60 * 1000 },
+    );
+  }
+
   async checkpoint(
     output?: string,
     options: CheckpointOptions = {},
@@ -1894,6 +1920,15 @@ export async function makeTransport(
       ...(config.credentials?.length
         ? { credentials: config.credentials.map((c) => c.name) }
         : {}),
+      ...(config.cacheDisk
+        ? {
+            cacheDisk: {
+              cache: config.cacheDisk.cache,
+              ...(config.cacheDisk.version !== undefined ? { version: config.cacheDisk.version } : {}),
+              ...(config.cacheDisk.mountPath !== undefined ? { mountPath: config.cacheDisk.mountPath } : {}),
+            },
+          }
+        : {}),
       autoStopSeconds: config.autoStopSeconds ?? null,
       ttlSeconds: config.ttlSeconds ?? null,
       // Forkable is a CREATE-time property: the control plane persists it and the
@@ -1958,7 +1993,10 @@ export async function makeTransport(
   }
   let transport: LocalTransport | undefined;
   try {
-    const inner = new (getNapiMachine())(toNativeConfig(name, config));
+    // Validate the config before loading the engine, so a config the local
+    // target cannot honour fails the same way whether or not it is installed.
+    const nativeConfig = toNativeConfig(name, config);
+    const inner = new (getNapiMachine())(nativeConfig);
     // A detached machine is nobody's to stop on a signal — it was created to
     // survive this process — and its branches inherit that.
     const owned = !config.detach && (conn.handleSignals ?? true);
@@ -2233,6 +2271,48 @@ function cloudConnFor(conn: ConnectOptions, operation: string): CloudConn {
     DEFAULT_CLOUD_URL
   ).replace(/\/+$/, "");
   return { baseUrl, apiKey: key };
+}
+
+/** Create a cache disk; its version 0 is an empty filesystem. Cloud only. */
+export function createCacheDisk(
+  options: CreateCacheDiskOptions,
+  conn: ConnectOptions = {},
+): Promise<CacheDiskInfo> {
+  return cloudFetch<CacheDiskInfo>(cloudConnFor(conn, "CacheDisk.create"), "POST", "/v1/cache-disks", {
+    json: {
+      name: options.name,
+      ...(options.sizeGb !== undefined ? { sizeGb: options.sizeGb } : {}),
+      ...(options.mountPath !== undefined ? { mountPath: options.mountPath } : {}),
+    },
+  });
+}
+
+/** Every cache disk in the account, versions newest first. Cloud only. */
+export async function listCacheDisks(conn: ConnectOptions = {}): Promise<CacheDiskInfo[]> {
+  const out = await cloudFetch<{ cacheDisks: CacheDiskInfo[] }>(
+    cloudConnFor(conn, "CacheDisk.list"),
+    "GET",
+    "/v1/cache-disks",
+  );
+  return out.cacheDisks;
+}
+
+/** One cache disk by id or name. Cloud only. */
+export function getCacheDisk(idOrName: string, conn: ConnectOptions = {}): Promise<CacheDiskInfo> {
+  return cloudFetch<CacheDiskInfo>(
+    cloudConnFor(conn, "CacheDisk.get"),
+    "GET",
+    `/v1/cache-disks/${encodeURIComponent(idOrName)}`,
+  );
+}
+
+/** Delete a cache disk and all its versions; refused while a machine uses it. Cloud only. */
+export async function deleteCacheDisk(idOrName: string, conn: ConnectOptions = {}): Promise<void> {
+  await cloudFetch<unknown>(
+    cloudConnFor(conn, "CacheDisk.delete"),
+    "DELETE",
+    `/v1/cache-disks/${encodeURIComponent(idOrName)}`,
+  );
 }
 
 /** Upload a checkpoint file to the cloud; see {@link uploadCheckpointFile}. */
