@@ -324,9 +324,30 @@ const server = createServer(async (req, res) => {
     res.writeHead(204);
     return res.end();
   }
+  if (method === "GET" && url.startsWith("/v1/machines?") || (method === "GET" && url === "/v1/machines")) {
+    seen.listUrl = url;
+    return json(200, {
+      machines: [
+        { id: "m1", name: "cloud-test", state: "started", ephemeral: false, labels: { team: "x" },
+          source: { type: "image", reference: "alpine" } },
+      ],
+    });
+  }
+  if (method === "GET" && url.startsWith("/v1/machines/m1/logs")) {
+    seen.logsUrl = url;
+    res.writeHead(200, { "content-type": "text/plain; charset=utf-8" });
+    return res.end("boot ok\nserving\n");
+  }
+  if (method === "POST" && url === "/v1/machines/m1/export") {
+    seen.exported = true;
+    return json(200, { reference: "registry.smolmachines.com/t/cloud-test:latest" });
+  }
   if (method === "POST" && url === "/v1/machines/m1/exec") {
     seen.execBody = JSON.parse((await readBody(req)).toString() || "{}");
     seen.execBodies.push(seen.execBody);
+    if (seen.execBody.background) {
+      return json(200, { exitCode: 0, stdout: "pid=4242\n", stderr: "" });
+    }
     return json(200, {
       ...(echoUser && seen.execBody.user !== undefined ? { user: seen.execBody.user } : {}),
       exitCode: 0,
@@ -1033,6 +1054,39 @@ async function main(): Promise<void> {
     localCacheRefused = e instanceof NotSupportedError;
   }
   check("a local cacheDisk is refused as NotSupported", localCacheRefused);
+
+  // ---- platform surface Gini patched into 1.22.1 ----
+  let viaHook = 0;
+  const hooked = { ...cloud, fetch: (async (u: any, i: any) => { viaHook++; return fetch(u, i); }) as typeof fetch };
+  await Machine.probe(hooked);
+  check("a caller's fetch carries cloud requests", viaHook > 0, String(viaHook));
+  class HookError extends Error {}
+  let hookErr: unknown;
+  try {
+    await Machine.probe({ ...cloud, fetch: (async () => { throw new HookError("proxy down"); }) as typeof fetch });
+  } catch (e) { hookErr = e; }
+  check("a caller's fetch error reaches the caller unchanged", hookErr instanceof HookError);
+  let notAList: unknown;
+  try {
+    await Machine.probe({ ...cloud, fetch: (async () => new Response("{}", { headers: { "content-type": "application/json" } })) as typeof fetch });
+  } catch (e) { notAList = e; }
+  check("probe rejects a reply that is not a machine list", notAList instanceof SmolError);
+  const labelled = await Machine.list(cloud, { labels: { team: "x" } });
+  check("cloud list asks the server to filter by label", String(seen.listUrl).includes("label=team%3Dx"), String(seen.listUrl));
+  check("cloud list keeps the server's labels", labelled.length === 1 && labelled[0]!.labels.team === "x", JSON.stringify(labelled));
+  const lm = await Machine.create({ image: "alpine", labels: { team: "x" } }, cloud);
+  check("cloud create sends labels", seen.createBody?.labels?.team === "x", JSON.stringify(seen.createBody?.labels));
+  const bg = await lm.exec(["sleep", "999"], { background: true });
+  check("background exec sends background and returns the pid", seen.execBody.background === true && bg.pid === 4242, `${JSON.stringify(seen.execBody)} pid=${bg.pid}`);
+  const logText = await lm.logs(5);
+  check("logs returns the console text", logText === "boot ok\nserving\n" && String(seen.logsUrl).endsWith("tail=5"), String(seen.logsUrl));
+  const exported = await lm.exportArtifact();
+  check("exportArtifact posts to export", seen.exported === true && typeof exported.reference === "string");
+  const fullRecord = await lm.info();
+  check("info returns the raw cloud record", fullRecord.id === "m1", JSON.stringify(fullRecord));
+  const pollsBefore = readinessGets["m1"] ?? 0;
+  await lm.start({ waitUntilReady: false });
+  check("start({ waitUntilReady: false }) does not poll readiness", (readinessGets["m1"] ?? 0) === pollsBefore, `${pollsBefore} -> ${readinessGets["m1"]}`);
 
   console.log(`\n${passed} passed, ${failed} failed`);
   server.close();

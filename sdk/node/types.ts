@@ -373,6 +373,9 @@ export interface ExecOptions {
    *  Ignored (both families, as before) on older control planes and on the
    *  local target. */
   output?: "text" | "b64" | "both";
+  /** Cloud only: start the command detached and return at once with its
+   *  `pid`, leaving it running (a dev server, an agent) after the call ends. */
+  background?: boolean;
 }
 
 /** Result of a command execution. */
@@ -397,6 +400,8 @@ export interface ExecResult {
    *  the lossy `stdout`); on the local target it is the UTF-8 encoding of `stdout`.
    *  Prefer this over `stdout` for binary or >1 MiB output. */
   stdoutBytes: Uint8Array;
+  /** The detached process's pid, for an exec run with `background: true`. */
+  pid?: number;
   /** Byte-exact, untruncated stderr; see `stdoutBytes`. */
   stderrBytes: Uint8Array;
   /** True when exitCode === 0. */
@@ -531,6 +536,14 @@ export interface ConnectOptions {
   baseUrl?: string;
   /** Cloud API key, `smk_…` (cloud target only). */
   apiKey?: string;
+  /** Cloud only: the `fetch` every cloud request goes through, for a proxy,
+   *  retries, tracing, or a runtime without a global `fetch`. Its own errors
+   *  reach the caller unchanged; timeouts and aborts are still reported as
+   *  `TIMEOUT` and the abort reason. Default: the global `fetch`. */
+  fetch?: typeof fetch;
+  /** Cloud only: read a binary response body, for a `fetch` whose responses
+   *  lack a working `arrayBuffer()`. */
+  readResponseBytes?: (response: Response) => Promise<Uint8Array>;
 }
 
 /** Per-launch trusted host service. Keep the token out of logs and persistent config. */
@@ -543,6 +556,16 @@ export interface EgressInterceptor {
 
 export interface StartOptions {
   egressInterceptor?: EgressInterceptor;
+  /** Wait for the guest to be ready before returning (default true). Pass
+   *  false to return once the start is accepted, e.g. when starting many
+   *  machines and polling `ready()` yourself. */
+  waitUntilReady?: boolean;
+}
+
+/** Options for `Machine.resume`. */
+export interface ResumeOptions {
+  /** Wait for the guest to be ready before returning (default true). */
+  waitUntilReady?: boolean;
 }
 
 /** Which cache disk a machine starts from. */
