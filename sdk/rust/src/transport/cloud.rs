@@ -444,6 +444,10 @@ impl Transport for CloudTransport {
     fn unshare(&self) -> Result<()> {
         Ok(self.client.unshare(&self.id)?)
     }
+
+    fn publish_cache_disk(&self) -> Result<smol_cloud::types::PublishedCacheDisk> {
+        Ok(self.client.publish_cache_disk(&self.id)?)
+    }
 }
 
 impl From<wire::Checkpoint> for CloudCheckpoint {

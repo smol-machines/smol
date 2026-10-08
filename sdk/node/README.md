@@ -277,6 +277,23 @@ await machine.exec(['sh', '-c', 'curl -H "Authorization: Bearer $NOTION_API_KEY"
 - On the cloud, a credential with a `value` is stored for your account under
   `name`; one without refers to a credential already stored there.
 
+## Cache disks (cloud)
+
+A cache disk is a disk image many machines start from, each through its own
+copy-on-write layer: dependencies, build caches, datasets. Publish a stopped
+machine's cache as the next version, and later machines start from it.
+
+```ts
+import { CacheDisk, Machine } from "smolmachines";
+
+await CacheDisk.create({ name: "deps" });                        // v0: empty
+const m = await Machine.create({ image: "node:22", cacheDisk: { cache: "deps" } });
+await m.exec(["sh", "-c", "cd /cache && npm install"]);
+await m.stop();
+await m.publishCacheDisk();                                       // v1
+// Every machine created with cacheDisk: { cache: "deps" } now starts from v1.
+```
+
 ## Building from source
 
 This package's native core lives alongside it (Rust, `src/*.rs`) and links the

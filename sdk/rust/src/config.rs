@@ -225,6 +225,8 @@ pub struct MachineConfig {
     pub exposed_sockets: Vec<(String, String)>,
     /// Credentials the workload uses without seeing them. Implies networking.
     pub credentials: Vec<Credential>,
+    /// Start from a published version of one of your cache disks (cloud only).
+    pub cache_disk: Option<smol_cloud::types::MachineCacheDisk>,
     /// Inbound port forwards.
     pub ports: Vec<Port>,
     /// VM sizing and devices.
@@ -277,6 +279,13 @@ impl MachineConfig {
     /// local machine is described in the same flags a person would type. That
     /// is what keeps this crate publishable.
     pub(crate) fn into_local_args(self) -> Result<(Vec<String>, Vec<Port>)> {
+        if self.cache_disk.is_some() {
+            return Err(Error::new(
+                ErrorKind::NotSupported,
+                "cache_disk is cloud-only for now; locally, pass the base with \
+                 `smolvm machine create --cache-disk`",
+            ));
+        }
         if self.egress_interceptor.is_some() && self.branchable {
             return Err(Error::new(
                 ErrorKind::Config,
@@ -563,6 +572,7 @@ impl MachineConfig {
             ttl_seconds: self.ttl_seconds,
             branchable: self.branchable,
             credentials: self.credentials.into_iter().map(|c| c.name).collect(),
+            cache_disk: self.cache_disk,
         })
     }
 }
@@ -624,6 +634,33 @@ impl MachineBuilder {
     /// Bind a credential the workload uses without seeing it.
     pub fn credential(mut self, credential: Credential) -> Self {
         self.config.credentials.push(credential);
+        self
+    }
+
+    /// Start from the latest version of cache disk `cache` (id or name),
+    /// mounted at its own mount path. Cloud only.
+    pub fn cache_disk(mut self, cache: impl Into<String>) -> Self {
+        self.config.cache_disk = Some(smol_cloud::types::MachineCacheDisk {
+            cache: cache.into(),
+            version: None,
+            mount_path: None,
+        });
+        self
+    }
+
+    /// Start from cache disk `cache` at a specific version and/or mount path.
+    /// Cloud only.
+    pub fn cache_disk_at(
+        mut self,
+        cache: impl Into<String>,
+        version: Option<u32>,
+        mount_path: Option<String>,
+    ) -> Self {
+        self.config.cache_disk = Some(smol_cloud::types::MachineCacheDisk {
+            cache: cache.into(),
+            version,
+            mount_path,
+        });
         self
     }
 

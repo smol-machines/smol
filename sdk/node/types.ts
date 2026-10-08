@@ -269,6 +269,10 @@ export interface MachineConfig {
   /** Credentials the workload uses without seeing them. Implies network
    *  access. See {@link CredentialSpec}. */
   credentials?: CredentialSpec[];
+  /** Start from a published version of one of your cache disks, mounted at
+   *  its mount path (or `mountPath`) through the machine's own copy-on-write
+   *  layer. Cloud only. See {@link CacheDisk}. */
+  cacheDisk?: CacheDiskRef;
   /** Working directory for the image workload, set at create. Overrides
    *  the image's own workdir. */
   workdir?: string;
@@ -527,4 +531,54 @@ export interface EgressInterceptor {
 
 export interface StartOptions {
   egressInterceptor?: EgressInterceptor;
+}
+
+/** Which cache disk a machine starts from. */
+export interface CacheDiskRef {
+  /** The cache disk's id or name. */
+  cache: string;
+  /** Version to start from; the latest when omitted. */
+  version?: number;
+  /** Absolute guest path to mount it at; the cache disk's own when omitted. */
+  mountPath?: string;
+}
+
+/** Options for creating a cache disk. */
+export interface CreateCacheDiskOptions {
+  /** Unique within your account: lowercase letters, digits, `.`, `_`, `-`. */
+  name: string;
+  /** Size of the cache filesystem in GiB (1-500). Default 20. */
+  sizeGb?: number;
+  /** Absolute guest path machines mount it at by default. Default `/cache`. */
+  mountPath?: string;
+}
+
+/** One immutable version of a cache disk. */
+export interface CacheDiskVersion {
+  /** 0 is the empty filesystem a cache disk starts as; each publish adds one. */
+  version: number;
+  sizeBytes: number;
+  sha256: string;
+  createdAt: string;
+  /** The machine this version was published from; absent for v0. */
+  sourceMachineId?: string;
+}
+
+/** A cache disk: a disk image many machines start from, each through its own
+ *  copy-on-write layer, published in immutable versions. */
+export interface CacheDiskInfo {
+  id: string;
+  name: string;
+  sizeGb: number;
+  mountPath: string;
+  latestVersion: number;
+  /** Newest first. */
+  versions: CacheDiskVersion[];
+  createdAt: string;
+}
+
+/** What publishing a machine's cache disk created. */
+export interface PublishedCacheDisk {
+  cacheDisk: CacheDiskInfo;
+  version: CacheDiskVersion;
 }

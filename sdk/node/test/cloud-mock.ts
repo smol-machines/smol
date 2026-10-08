@@ -9,7 +9,7 @@
 
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
-import { Machine, NotSupportedError, SmolError } from "../index";
+import { CacheDisk, Machine, NotSupportedError, SmolError } from "../index";
 
 let passed = 0;
 let failed = 0;
@@ -69,6 +69,35 @@ const server = createServer(async (req, res) => {
       body: JSON.parse((await readBody(req)).toString() || "{}"),
     });
     return json(200, { name: "notion", envVar: "NOTION_API_KEY", hosts: [], createdAt: "", updatedAt: "" });
+  }
+  const cacheDiskInfo = (version: number) => ({
+    id: "cdisk-1",
+    name: "deps",
+    sizeGb: 20,
+    mountPath: "/cache",
+    latestVersion: version,
+    versions: [{ version, sizeBytes: 262144, sha256: "ab".repeat(32), createdAt: "" }],
+    createdAt: "",
+  });
+  if (method === "POST" && url === "/v1/cache-disks") {
+    seen.cacheDiskCreate = JSON.parse((await readBody(req)).toString() || "{}");
+    return json(201, cacheDiskInfo(0));
+  }
+  if (method === "GET" && url === "/v1/cache-disks") {
+    return json(200, { cacheDisks: [cacheDiskInfo(0)] });
+  }
+  if (method === "GET" && url.startsWith("/v1/cache-disks/")) {
+    seen.cacheDiskGet = decodeURIComponent(url.slice("/v1/cache-disks/".length));
+    return json(200, cacheDiskInfo(0));
+  }
+  if (method === "DELETE" && url.startsWith("/v1/cache-disks/")) {
+    seen.cacheDiskDelete = decodeURIComponent(url.slice("/v1/cache-disks/".length));
+    res.statusCode = 204;
+    return res.end();
+  }
+  if (method === "POST" && /^\/v1\/machines\/[^/]+\/cache-disk\/publish$/.test(url)) {
+    seen.cacheDiskPublish = url;
+    return json(200, { cacheDisk: cacheDiskInfo(1), version: cacheDiskInfo(1).versions[0] });
   }
   if (method === "POST" && url === "/v1/machines") {
     seen.createBody = JSON.parse((await readBody(req)).toString() || "{}");
@@ -967,6 +996,43 @@ async function main(): Promise<void> {
   await m.stop();
   await m.delete();
   check("stop + delete over REST (no throw)", true);
+
+  // Cache disks: the account API, a machine started from one, and publishing.
+  const cloud = { target: "cloud" as const, baseUrl, apiKey: "smk_test123" };
+  const created = await CacheDisk.create({ name: "deps", sizeGb: 10 }, cloud);
+  check(
+    "CacheDisk.create posts name and size",
+    JSON.stringify(seen.cacheDiskCreate) === JSON.stringify({ name: "deps", sizeGb: 10 }) && created.latestVersion === 0,
+    JSON.stringify(seen.cacheDiskCreate),
+  );
+  const listed = await CacheDisk.list(cloud);
+  check("CacheDisk.list unwraps cacheDisks", listed.length === 1 && listed[0].name === "deps");
+  await CacheDisk.get("deps", cloud);
+  check("CacheDisk.get addresses by name", seen.cacheDiskGet === "deps", String(seen.cacheDiskGet));
+  const withCache = await Machine.create(
+    { image: "alpine", cacheDisk: { cache: "deps", version: 0, mountPath: "/deps" } },
+    cloud,
+  );
+  check(
+    "cloud create sends cacheDisk",
+    JSON.stringify(seen.createBody?.cacheDisk) === JSON.stringify({ cache: "deps", version: 0, mountPath: "/deps" }),
+    JSON.stringify(seen.createBody?.cacheDisk),
+  );
+  const published = await withCache.publishCacheDisk();
+  check(
+    "publishCacheDisk posts to the machine and returns the new version",
+    String(seen.cacheDiskPublish).endsWith("/cache-disk/publish") && published.version.version === 1,
+    String(seen.cacheDiskPublish),
+  );
+  await CacheDisk.delete("deps", cloud);
+  check("CacheDisk.delete addresses by name", seen.cacheDiskDelete === "deps", String(seen.cacheDiskDelete));
+  let localCacheRefused = false;
+  try {
+    await Machine.create({ image: "alpine", cacheDisk: { cache: "deps" } }, { target: "local" });
+  } catch (e) {
+    localCacheRefused = e instanceof NotSupportedError;
+  }
+  check("a local cacheDisk is refused as NotSupported", localCacheRefused);
 
   console.log(`\n${passed} passed, ${failed} failed`);
   server.close();

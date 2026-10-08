@@ -17,7 +17,7 @@
  * cloud — same API, backend selected via ConnectOptions / SMOL_CLOUD_TOKEN.
  */
 
-export { Machine, Episode } from './machine';
+export { Machine, Episode, CacheDisk } from './machine';
 export { RolloutClient, RolloutError, adapterSha256 } from './rollout';
 export type {
   BuildRolloutJobOptions,
@@ -38,6 +38,11 @@ export type { LocalAvailability, LocalUnavailableCode } from './availability';
 export type {
   MachineConfig,
   CredentialSpec,
+  CacheDiskRef,
+  CacheDiskInfo,
+  CacheDiskVersion,
+  CreateCacheDiskOptions,
+  PublishedCacheDisk,
   NetworkPolicy,
   RestoreCheckpointOptions,
   MachineState,

@@ -355,6 +355,23 @@ let machine = Machine::builder("notes")
 - On the cloud, a credential with a value is stored for your account under its
   name; one without refers to a credential already stored there.
 
+## Cache disks (cloud)
+
+A cache disk is a disk image many machines start from, each through its own
+copy-on-write layer. Publish a stopped machine's cache as the next version.
+
+```rust,no_run
+use smolmachines::{CacheDisk, ConnectOptions, Machine};
+# fn main() -> smolmachines::Result<()> {
+let cloud = ConnectOptions::cloud();
+CacheDisk::create(&cloud, "deps", None, None)?;                   // v0: empty
+let m = Machine::builder("dev").image("node:22").cache_disk("deps").create_with(&cloud)?;
+m.exec(["sh", "-c", "cd /cache && npm install"])?;
+m.stop()?;
+m.publish_cache_disk()?;                                          // v1
+# Ok(()) }
+```
+
 ## Blocking
 
 Every call blocks. The engine is synchronous, so an async caller should run

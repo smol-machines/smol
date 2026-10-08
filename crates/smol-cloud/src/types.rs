@@ -209,6 +209,93 @@ pub struct CreateMachine {
     /// only on HTTPS requests to the credential's hosts.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub credentials: Vec<String>,
+    /// The cache disk the machine starts from.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cache_disk: Option<MachineCacheDisk>,
+}
+
+/// Which cache disk a machine starts from.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MachineCacheDisk {
+    /// The cache disk's id or name.
+    pub cache: String,
+    /// Version to start from; the latest when `None`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub version: Option<u32>,
+    /// Absolute guest path to mount it at; the cache disk's own when `None`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mount_path: Option<String>,
+}
+
+/// Create a cache disk.
+#[derive(Debug, Clone, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateCacheDisk {
+    /// Unique within the account: lowercase letters, digits, `.`, `_`, `-`.
+    pub name: String,
+    /// Size of the cache filesystem in GiB (1-500); 20 when `None`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub size_gb: Option<u32>,
+    /// Guest path machines mount it at by default; `/cache` when `None`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mount_path: Option<String>,
+}
+
+/// One immutable version of a cache disk.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CacheDiskVersion {
+    /// 0 is the empty filesystem a cache disk starts as; each publish adds one.
+    pub version: u32,
+    /// Bytes the version's disk image occupies.
+    pub size_bytes: u64,
+    /// SHA-256 (hex) of the version's disk image.
+    pub sha256: String,
+    /// When the version was created (RFC 3339).
+    pub created_at: String,
+    /// The machine this version was published from; `None` for v0.
+    #[serde(default)]
+    pub source_machine_id: Option<String>,
+}
+
+/// A cache disk: a disk image many machines start from, each through its own
+/// copy-on-write layer, published in immutable versions.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CacheDisk {
+    /// Cache disk id (`cdisk-…`).
+    pub id: String,
+    /// Name, unique within the account.
+    pub name: String,
+    /// Size of the cache filesystem in GiB.
+    pub size_gb: u32,
+    /// Guest path machines mount it at by default.
+    pub mount_path: String,
+    /// The newest version.
+    pub latest_version: u32,
+    /// Every version, newest first.
+    pub versions: Vec<CacheDiskVersion>,
+    /// When the cache disk was created (RFC 3339).
+    pub created_at: String,
+}
+
+/// What publishing a machine's cache disk created.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PublishedCacheDisk {
+    /// The cache disk, now including the new version.
+    pub cache_disk: CacheDisk,
+    /// The version the publish created.
+    pub version: CacheDiskVersion,
+}
+
+/// `GET /v1/cache-disks`.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CacheDiskList {
+    /// Every cache disk in the account.
+    pub cache_disks: Vec<CacheDisk>,
 }
 
 /// A credential to store for the account, which machines then bind by name.
@@ -475,6 +562,47 @@ mod tests {
         // False must not be sent either: it is the absence that means default.
         assert!(body.get("branchable").is_none());
         assert!(body.get("command").is_none());
+    }
+
+    #[test]
+    fn a_cache_disk_is_sent_only_when_asked_for() {
+        let plain = serde_json::to_value(CreateMachine::default()).expect("serialize");
+        assert!(plain.get("cacheDisk").is_none());
+        let request = CreateMachine {
+            cache_disk: Some(MachineCacheDisk {
+                cache: "deps".into(),
+                version: Some(2),
+                mount_path: None,
+            }),
+            ..Default::default()
+        };
+        let body = serde_json::to_value(&request).expect("serialize");
+        assert_eq!(
+            body["cacheDisk"],
+            serde_json::json!({"cache": "deps", "version": 2})
+        );
+    }
+
+    #[test]
+    fn a_published_cache_disk_parses() {
+        let published: PublishedCacheDisk = serde_json::from_value(serde_json::json!({
+            "cacheDisk": {
+                "id": "cdisk-1", "name": "deps", "sizeGb": 20, "mountPath": "/cache",
+                "latestVersion": 1, "createdAt": "t",
+                "versions": [
+                    {"version": 1, "sizeBytes": 10, "sha256": "ab", "createdAt": "t", "sourceMachineId": "mach-1"},
+                    {"version": 0, "sizeBytes": 262144, "sha256": "cd", "createdAt": "t"}
+                ]
+            },
+            "version": {"version": 1, "sizeBytes": 10, "sha256": "ab", "createdAt": "t", "sourceMachineId": "mach-1"}
+        }))
+        .expect("parse");
+        assert_eq!(published.cache_disk.latest_version, 1);
+        assert_eq!(published.cache_disk.versions[1].source_machine_id, None);
+        assert_eq!(
+            published.version.source_machine_id.as_deref(),
+            Some("mach-1")
+        );
     }
 
     #[test]

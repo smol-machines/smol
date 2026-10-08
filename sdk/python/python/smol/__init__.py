@@ -24,12 +24,16 @@ from .device_handoff import (
     DeviceTensor,
     publish_device_adapter,
 )
-from .machine import Episode, Machine
+from .machine import CacheDisk, Episode, Machine
 from .transport import ExecStream, local_availability
 from .rollout import RolloutClient, RolloutError, adapter_sha256
 from .types import (
+    CacheDiskInfo,
+    CacheDiskRef,
+    CacheDiskVersion,
     ConnectOptions,
     CredentialSpec,
+    PublishedCacheDisk,
     EgressInterceptor,
     ExecOptions,
     ExecResult,
@@ -54,6 +58,11 @@ __all__ = [
     "AsyncEpisode",
     "MachineConfig",
     "CredentialSpec",
+    "CacheDisk",
+    "CacheDiskInfo",
+    "CacheDiskRef",
+    "CacheDiskVersion",
+    "PublishedCacheDisk",
     "ResourceSpec",
     "MountSpec",
     "PortSpec",

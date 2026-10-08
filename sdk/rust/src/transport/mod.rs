@@ -145,6 +145,9 @@ pub(crate) trait Transport: Send + Sync + std::fmt::Debug {
     /// Publish a shareable link to the machine.
     fn share(&self) -> Result<ShareLink>;
 
+    /// Publish a stopped machine's cache disk as its next version. Cloud only.
+    fn publish_cache_disk(&self) -> Result<smol_cloud::types::PublishedCacheDisk>;
+
     /// Withdraw a previously published link.
     fn unshare(&self) -> Result<()>;
 }
