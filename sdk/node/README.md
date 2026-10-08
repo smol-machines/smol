@@ -109,6 +109,11 @@ try {
 }
 ```
 
+When reconnecting to clean up a local machine whose published service has
+stopped, `Machine.connect(name, { target: 'local', waitForPorts: false })`
+attaches after the agent is ready, so `delete()` can run without a listener.
+The default continues waiting for all published ports.
+
 To reach a service **inside** the VM, use the authenticated connect bridge —
 **no Cloudflare/localhost.run tunnel, no public exposure, no egress allow-list.**
 Have the worker LISTEN on a published port and connect *inbound*:

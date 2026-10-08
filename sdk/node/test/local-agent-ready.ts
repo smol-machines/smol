@@ -29,18 +29,27 @@ async function main(): Promise<void> {
     },
     { target: "local", handleSignals: false },
   );
+  let deleted = false;
   try {
     assert.equal(await machine.ready(), false, "port is not yet serving after create");
     const result = await machine.exec([
       "sh", "-c",
-      `nohup node -e "require('http').createServer((_, res) => res.end('ok')).listen(80, '0.0.0.0')" >/tmp/server.log 2>&1 &`,
+      `nohup node -e "require('http').createServer((_, res) => res.end('ok')).listen(80, '0.0.0.0')" >/tmp/server.log 2>&1 & echo $! >/tmp/server.pid`,
     ]);
     result.assertSuccess();
     await machine.waitUntilReady({ timeoutMs: 15_000, intervalMs: 100 });
     assert.equal(await (await machine.fetch(80)).text(), "ok");
-    console.log("local create returned with agent ready; published port became ready after exec");
+    (await machine.exec(["sh", "-c", "kill $(cat /tmp/server.pid)"])).assertSuccess();
+    assert.equal(await machine.ready(), false, "the listener stopped");
+    const attached = await Machine.connect(machine.name, {
+      target: "local", handleSignals: false, waitForPorts: false,
+    });
+    assert.equal(await attached.ready(), false, "connect returned without its port");
+    await attached.delete();
+    deleted = true;
+    console.log("local create and connect returned with agent ready; both worked without a published listener");
   } finally {
-    await machine.delete();
+    if (!deleted) await machine.delete();
   }
 }
 

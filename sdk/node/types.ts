@@ -508,6 +508,12 @@ export interface PortableCheckpointInfo {
 
 /** Selects and configures the backend. Local (embedded) is the default. */
 export interface ConnectOptions {
+  /** Locally, allow `Machine.connect()` to return after the guest agent is
+   *  ready even when a published port is not serving. Useful when reconnecting
+   *  to stop or delete a worker whose listener has exited. Default true;
+   *  false is local-only and rejected on cloud. For `create`, put this setting
+   *  on `MachineConfig` instead. */
+  waitForPorts?: boolean;
   /** Binding for a stopped local machine that requires intercepted egress. */
   egressInterceptor?: EgressInterceptor;
   /** 'local' = embedded engine; 'cloud' = smolfleet remote. When unset, the

@@ -110,6 +110,8 @@ export class Machine {
    * machine made elsewhere (another process, the console, the REST API).
    *  - local (default): re-opens a persisted machine by NAME, starting it if
    *    stopped — pairs with `Machine.create({ name, … }, …)` + `persistent`.
+   *    Set `conn.waitForPorts: false` to attach after agent readiness when a
+   *    published service is not listening (for example, to delete it).
    *  - cloud: looks up the machine by id; throws if it doesn't exist.
    *    This does not wait for readiness; call `waitUntilReady()` before `exec`,
    *    using a connect endpoint, or expecting the workload to respond.
