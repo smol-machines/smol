@@ -150,6 +150,32 @@ pub(crate) trait Transport: Send + Sync + std::fmt::Debug {
 
     /// Withdraw a previously published link.
     fn unshare(&self) -> Result<()>;
+
+    /// The machine's full record. Cloud only.
+    fn info(&self) -> Result<serde_json::Value> {
+        Err(unsupported("info", "it is cloud-only"))
+    }
+
+    /// The last `tail` lines of the console log. Cloud only.
+    fn logs(&self, _tail: u32) -> Result<String> {
+        Err(unsupported("logs", "it is cloud-only"))
+    }
+
+    /// Export a stopped machine as a `.smolmachine`. Cloud only.
+    fn export_artifact(&self) -> Result<serde_json::Value> {
+        Err(unsupported("export_artifact", "it is cloud-only"))
+    }
+
+    /// Start without waiting for readiness. The local engine's start already
+    /// returns once the guest agent answers, so locally this is `start`.
+    fn start_without_waiting(&self) -> Result<()> {
+        self.start()
+    }
+
+    /// Resume without waiting for readiness; locally this is `resume`.
+    fn resume_without_waiting(&self) -> Result<()> {
+        self.resume()
+    }
 }
 
 /// Build the error for an operation this target does not have.

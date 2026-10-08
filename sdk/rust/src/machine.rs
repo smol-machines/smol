@@ -595,6 +595,17 @@ impl Machine {
         Ok(Self::from_transport(Box::new(transport)))
     }
 
+    /// Check that a cloud connection works: the key is accepted and the base
+    /// URL answers with a machine list. Errors otherwise, including when a
+    /// proxy or a wrong URL answers with something that is not a machine list.
+    pub fn probe(connect: &ConnectOptions) -> Result<()> {
+        if connect.target() != Target::Cloud {
+            return Err(Error::new(ErrorKind::NotSupported, "probe is cloud-only"));
+        }
+        connect.client()?.machines()?;
+        Ok(())
+    }
+
     /// Delete a capture the control plane is holding, by the id from
     /// [`Machine::checkpoint`] or [`Machine::checkpoints`]. A local capture is a
     /// file; remove it like any other.
@@ -695,6 +706,24 @@ impl Machine {
         self.transport.state()
     }
 
+    /// The machine's full cloud record, every field the control plane returns
+    /// (env, readiness, ports, …). Cloud only.
+    pub fn info(&self) -> Result<serde_json::Value> {
+        self.transport.info()
+    }
+
+    /// The last `tail` lines of the machine's console log. Cloud only.
+    pub fn logs(&self, tail: u32) -> Result<String> {
+        self.transport.logs(tail)
+    }
+
+    /// Export this stopped machine as a `.smolmachine` in your registry
+    /// namespace. Distinct from a portable checkpoint, which also keeps live
+    /// memory. Cloud only.
+    pub fn export_artifact(&self) -> Result<serde_json::Value> {
+        self.transport.export_artifact()
+    }
+
     /// Whether the machine is ready to do work.
     ///
     /// This is strictly later than running: a started machine is still booting,
@@ -746,6 +775,13 @@ impl Machine {
     /// Boot the machine and wait for the guest agent to answer.
     pub fn start(&self) -> Result<()> {
         self.transport.start()
+    }
+
+    /// Start a stopped machine and return once the start is accepted, without
+    /// waiting for readiness: for starting many machines and polling
+    /// [`Machine::ready`] yourself.
+    pub fn start_without_waiting(&self) -> Result<()> {
+        self.transport.start_without_waiting()
     }
 
     /// Start a local machine with a trusted host egress interceptor.
@@ -961,6 +997,11 @@ impl Machine {
         self.transport.resume()
     }
 
+    /// Resume saved execution and return without waiting for readiness.
+    pub fn resume_without_waiting(&self) -> Result<()> {
+        self.transport.resume_without_waiting()
+    }
+
     /// Stop the machine and remove its storage. Not reversible.
     pub fn delete(&self) -> Result<()> {
         self.transport.delete()
@@ -1048,14 +1089,14 @@ impl Machine {
         let all = if connect.target() == Target::Cloud {
             connect
                 .client()?
-                .machines()?
+                .machines_labeled(labels)?
                 .into_iter()
                 .map(|machine| MachineSummary {
                     name: machine.display_name().to_string(),
                     state: MachineState::parse(&machine.state),
                     image: machine.source.as_ref().and_then(|s| s.reference.clone()),
                     id: machine.id,
-                    labels: std::collections::BTreeMap::new(),
+                    labels: machine.labels,
                     pid: None,
                     persistent: !machine.ephemeral.unwrap_or(false),
                     detached: true,

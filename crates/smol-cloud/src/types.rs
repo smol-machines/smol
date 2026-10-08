@@ -107,6 +107,9 @@ pub struct Machine {
     #[serde(default)]
     /// Whether the machine is discarded when it stops.
     pub ephemeral: Option<bool>,
+    /// Caller labels the machine was created with.
+    #[serde(default)]
+    pub labels: std::collections::BTreeMap<String, String>,
     #[serde(default)]
     /// Hard lifetime, after which the machine is deleted.
     pub ttl_seconds: Option<u64>,
@@ -204,6 +207,9 @@ pub struct CreateMachine {
     /// duplicate — they are two spellings of one thing, not two fields.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub branchable: bool,
+    /// Caller labels, for finding the machine again with a labeled list.
+    #[serde(skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub labels: std::collections::BTreeMap<String, String>,
     /// Names of stored credentials the machine binds. Each gives the guest a
     /// placeholder in the credential's variable; the value is substituted
     /// only on HTTPS requests to the credential's hosts.
@@ -339,6 +345,9 @@ pub struct Command {
     /// that [`CommandOutput::user`] echoes it back before trusting it applied.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub user: Option<String>,
+    /// Start the command detached; the response's stdout carries `pid=<n>`.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub background: bool,
 }
 
 /// What a finished command produced.

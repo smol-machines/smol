@@ -571,6 +571,7 @@ impl MachineConfig {
             auto_stop_seconds: self.auto_stop_seconds,
             ttl_seconds: self.ttl_seconds,
             branchable: self.branchable,
+            labels: self.labels.into_iter().collect(),
             credentials: self.credentials.into_iter().map(|c| c.name).collect(),
             cache_disk: self.cache_disk,
         })

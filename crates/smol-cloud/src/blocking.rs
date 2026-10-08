@@ -221,6 +221,52 @@ impl Client {
         )
     }
 
+    /// Machines carrying every one of `labels`, filtered by the control plane.
+    pub fn machines_labeled(&self, labels: &[(&str, &str)]) -> Result<Vec<Machine>> {
+        let query: Vec<String> = labels
+            .iter()
+            .map(|(k, v)| format!("label={}", percent_encode(&format!("{k}={v}"))))
+            .collect();
+        let path = if query.is_empty() {
+            "/v1/machines".to_string()
+        } else {
+            format!("/v1/machines?{}", query.join("&"))
+        };
+        self.json(reqwest::Method::GET, &path, Body::None, REQUEST_TIMEOUT)
+    }
+
+    /// One machine's full record, every field the control plane returns.
+    pub fn machine_record(&self, id: &str) -> Result<serde_json::Value> {
+        self.json(
+            reqwest::Method::GET,
+            &format!("/v1/machines/{id}"),
+            Body::None,
+            REQUEST_TIMEOUT,
+        )
+    }
+
+    /// The last `tail` lines of a machine's console log.
+    pub fn logs(&self, id: &str, tail: u32) -> Result<String> {
+        let path = format!("/v1/machines/{id}/logs?tail={tail}");
+        let response = self.send(reqwest::Method::GET, &path, Body::None, REQUEST_TIMEOUT)?;
+        response.text().map_err(|e| {
+            Error::new(
+                ErrorKind::Other,
+                format!("GET {path} returned an unreadable body: {e}"),
+            )
+        })
+    }
+
+    /// Export a stopped machine as a `.smolmachine` in the registry.
+    pub fn export(&self, id: &str) -> Result<serde_json::Value> {
+        self.json(
+            reqwest::Method::POST,
+            &format!("/v1/machines/{id}/export"),
+            Body::Json(serde_json::json!({})),
+            START_TIMEOUT,
+        )
+    }
+
     /// Create a machine. It is not started.
     pub fn create_machine(&self, request: &CreateMachine) -> Result<Machine> {
         self.json(
@@ -1226,6 +1272,19 @@ impl<R: Read> Read for CountingReader<R> {
             .fetch_add(n as u64, std::sync::atomic::Ordering::SeqCst);
         Ok(n)
     }
+}
+
+/// Percent-encode a query value (RFC 3986 unreserved characters pass through).
+fn percent_encode(value: &str) -> String {
+    value
+        .bytes()
+        .map(|b| match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' => {
+                (b as char).to_string()
+            }
+            _ => format!("%{b:02X}"),
+        })
+        .collect()
 }
 
 #[cfg(test)]

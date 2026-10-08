@@ -617,6 +617,7 @@ impl Transport for LocalTransport {
             exit_code,
             stdout,
             stderr,
+            pid: None,
         })
     }
 
@@ -706,6 +707,7 @@ impl Transport for LocalTransport {
             exit_code,
             stdout,
             stderr,
+            pid: None,
         })
     }
 

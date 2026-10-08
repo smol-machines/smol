@@ -1283,3 +1283,129 @@ fn network_off_is_sent_as_blocked_and_a_machine_user_is_refused() {
         .iter()
         .any(|r| r.method == "POST" && r.path == "/v1/machines"));
 }
+
+// ---- platform surface a customer patched into the Node SDK -----------------
+
+fn text(body: &'static str) -> Reply {
+    Reply {
+        status: 200,
+        body: body.to_string(),
+        content_type: "text/plain; charset=utf-8",
+        held: None,
+    }
+}
+
+#[test]
+fn the_cloud_platform_surface_reaches_the_right_routes() {
+    let cloud = MockCloud::start(routes(vec![
+        (
+            "GET /v1/machines?*",
+            Box::new(|_| {
+                Reply::json(
+                    r#"[{"id":"m-9","name":"m-9","state":"running","labels":{"team":"x"},"source":{"type":"image","reference":"alpine"}}]"#,
+                )
+            }),
+        ),
+        ("GET /v1/machines", Box::new(|_| Reply::json("[]"))),
+        (
+            "GET /v1/machines/m-9",
+            Box::new(|_| Reply::json(ready_machine("m-9"))),
+        ),
+        (
+            "GET /v1/machines/m-9/logs*",
+            Box::new(|_| text("boot ok\nserving\n")),
+        ),
+        (
+            "POST /v1/machines/m-9/export",
+            Box::new(|_| Reply::json(r#"{"reference":"registry.smolmachines.com/t/m-9:latest"}"#)),
+        ),
+        (
+            "POST /v1/machines/m-9/exec",
+            Box::new(|_| Reply::json(r#"{"exitCode":0,"stdout":"pid=4242\n","stderr":""}"#)),
+        ),
+        (
+            "POST /v1/machines/m-9/start",
+            Box::new(|_| Reply::status(204, "")),
+        ),
+    ]));
+    let connect = cloud.connect();
+
+    Machine::probe(&connect).expect("probe accepts a machine list");
+
+    let listed = Machine::list(&connect, &[("team", "x")]).expect("labeled list");
+    assert_eq!(listed.len(), 1);
+    assert_eq!(listed[0].labels.get("team").map(String::as_str), Some("x"));
+
+    let machine = Machine::connect_with("m-9", &connect).expect("attach");
+    let result = machine
+        .exec_with(["sleep", "999"], ExecOptions::new().background(true))
+        .expect("background exec");
+    assert_eq!(result.pid, Some(4242));
+    assert_eq!(machine.logs(5).expect("logs"), "boot ok\nserving\n");
+    assert!(machine.export_artifact().expect("export")["reference"].is_string());
+    assert_eq!(machine.info().expect("info")["id"], "m-9");
+
+    let before = cloud.requests();
+    machine.start_without_waiting().expect("start");
+    let after = cloud.requests();
+    assert!(
+        !after
+            .iter()
+            .any(|r| r.method == "GET" && r.path == "/v1/machines/m-9"),
+        "start_without_waiting polled readiness"
+    );
+    let sent: Vec<Request> = before.into_iter().chain(after).collect();
+    let list = sent
+        .iter()
+        .find(|r| r.path.starts_with("/v1/machines?"))
+        .expect("a labeled list request");
+    assert!(list.path.contains("label=team%3Dx"), "{}", list.path);
+    let exec = sent
+        .iter()
+        .find(|r| r.path == "/v1/machines/m-9/exec")
+        .expect("an exec request");
+    let body: serde_json::Value = serde_json::from_str(&exec.body).expect("valid JSON body");
+    assert_eq!(body["background"], true);
+    assert!(sent
+        .iter()
+        .any(|r| r.path == "/v1/machines/m-9/logs?tail=5"));
+}
+
+#[test]
+fn probe_rejects_a_reply_that_is_not_a_machine_list() {
+    let cloud = MockCloud::start(routes(vec![(
+        "GET /v1/machines",
+        Box::new(|_| Reply::json("{}")),
+    )]));
+    assert!(Machine::probe(&cloud.connect()).is_err());
+}
+
+#[test]
+fn creating_on_the_cloud_sends_labels() {
+    let cloud = MockCloud::start(routes(vec![
+        (
+            "POST /v1/machines",
+            Box::new(|_| Reply::json(ready_machine("m-8"))),
+        ),
+        (
+            "POST /v1/machines/m-8/start",
+            Box::new(|_| Reply::status(204, "")),
+        ),
+        (
+            "GET /v1/machines/m-8",
+            Box::new(|_| Reply::json(ready_machine("m-8"))),
+        ),
+    ]));
+    Machine::builder("labelled")
+        .image("alpine:latest")
+        .label("team", "x")
+        .create_with(&cloud.connect())
+        .expect("create");
+    let create = cloud
+        .requests()
+        .into_iter()
+        .next()
+        .expect("a create request");
+    let body: serde_json::Value = serde_json::from_str(&create.body).expect("valid JSON body");
+    assert_eq!(body["labels"]["team"], "x");
+}
