@@ -204,6 +204,34 @@ pub struct CreateMachine {
     /// duplicate — they are two spellings of one thing, not two fields.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub branchable: bool,
+    /// Names of stored credentials the machine binds. Each gives the guest a
+    /// placeholder in the credential's variable; the value is substituted
+    /// only on HTTPS requests to the credential's hosts.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub credentials: Vec<String>,
+}
+
+/// A credential to store for the account, which machines then bind by name.
+/// The value is sealed at rest and never returned.
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SetCredential {
+    /// The variable a binding machine sees, holding a placeholder.
+    pub env_var: String,
+    /// The only hosts the value is ever sent to.
+    pub hosts: Vec<String>,
+    /// The value.
+    pub value: String,
+}
+
+impl std::fmt::Debug for SetCredential {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SetCredential")
+            .field("env_var", &self.env_var)
+            .field("hosts", &self.hosts)
+            .field("value", &"<redacted>")
+            .finish()
+    }
 }
 
 /// A command to run in a machine.

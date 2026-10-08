@@ -14,7 +14,7 @@ use crate::credentials::Credentials;
 use crate::error::{Error, ErrorKind, Result};
 use crate::types::{
     BranchBatch, Checkpoint, CheckpointUpload, Command, CommandOutput, CreateMachine, Machine,
-    Network, Port, Share, Usage,
+    Network, Port, SetCredential, Share, Usage,
 };
 
 /// Ordinary calls are short: a hung request must not block a caller forever.
@@ -525,6 +525,17 @@ impl Client {
             reqwest::Method::PUT,
             &format!("/v1/machines/{id}/files/{}", encode_path(path)),
             Body::Bytes(data),
+            REQUEST_TIMEOUT,
+        )
+    }
+
+    /// Store a credential under `name` for the account, replacing any value
+    /// stored there, so machines can bind it by name.
+    pub fn set_credential(&self, name: &str, credential: &SetCredential) -> Result<()> {
+        self.empty(
+            reqwest::Method::PUT,
+            &format!("/v1/credentials/{}", encode_path(name)),
+            Body::Json(serde_json::to_value(credential).map_err(serialize_error)?),
             REQUEST_TIMEOUT,
         )
     }

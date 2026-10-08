@@ -193,6 +193,49 @@ def test_cli_config_api_key_fallback():
             os.environ["XDG_CONFIG_HOME"] = old
 
 
+def test_native_config_forwards_credentials_with_their_value():
+    from smol import CredentialSpec
+
+    cfg = MachineConfig(
+        credentials=[
+            CredentialSpec(
+                name="notion",
+                env_var="NOTION_API_KEY",
+                hosts=["api.notion.com", "files.notion.com"],
+                value="secret_x",
+            ),
+            CredentialSpec(
+                name="github", env_var="GITHUB_TOKEN", hosts=["api.github.com"], methods=["GET", "HEAD"]
+            ),
+        ]
+    )
+    assert _native_config("m", cfg)["credentials"] == [
+        {
+            "name": "notion",
+            "env_var": "NOTION_API_KEY",
+            "hosts": ["api.notion.com", "files.notion.com"],
+            "methods": None,
+            "value": "secret_x",
+        },
+        {
+            "name": "github",
+            "env_var": "GITHUB_TOKEN",
+            "hosts": ["api.github.com"],
+            "methods": ["GET", "HEAD"],
+            "value": None,
+        },
+    ]
+    assert "credentials" not in _native_config("m", MachineConfig())
+
+
+def test_a_credential_value_never_shows_in_repr():
+    from smol import CredentialSpec
+
+    spec = CredentialSpec(name="n", env_var="K", hosts=["h"], value="secret_x")
+    assert "secret_x" not in repr(spec)
+    assert "secret_x" not in repr(MachineConfig(credentials=[spec]))
+
+
 def test_native_config_forwards_gpu():
     cfg = MachineConfig(resources=ResourceSpec(gpu=True, gpu_vram_mib=512))
     res = _native_config("m", cfg)["resources"]

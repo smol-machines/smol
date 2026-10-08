@@ -32,6 +32,7 @@ from urllib.parse import quote
 from .errors import InvalidConfigError, NotSupportedError, SmolError, wrap_native_error
 from .types import (
     ConnectOptions,
+    CredentialSpec,
     EgressInterceptor,
     ExecOptions,
     ExecResult,
@@ -365,6 +366,35 @@ def _native_exec_options(opts: Optional[ExecOptions]) -> Optional[dict]:
     return out
 
 
+def _store_cloud_credentials(
+    base_url: str, api_key: str, credentials: Optional[list[CredentialSpec]]
+) -> None:
+    """Store each credential that carries a value for the account, so a cloud
+    machine can bind it by name. One without a value refers to a credential
+    already stored. The cloud enforces hosts but not methods, so a method
+    restriction is refused rather than silently dropped."""
+    for credential in credentials or []:
+        if credential.methods:
+            raise NotSupportedError(
+                f'credential "{credential.name}": methods are enforced on the local '
+                "target only; omit methods for a cloud machine."
+            )
+    for credential in credentials or []:
+        if credential.value is None:
+            continue
+        _cloud_fetch(
+            base_url,
+            api_key,
+            "PUT",
+            f"/v1/credentials/{quote(credential.name, safe='')}",
+            json_body={
+                "envVar": credential.env_var,
+                "hosts": list(credential.hosts),
+                "value": credential.value,
+            },
+        )
+
+
 def _native_config(name: str, config: MachineConfig) -> dict:
     cfg: dict[str, Any] = {
         "name": name,
@@ -393,6 +423,17 @@ def _native_config(name: str, config: MachineConfig) -> dict:
         ]
     if config.ports:
         cfg["ports"] = [{"host": p.host, "guest": p.guest} for p in config.ports]
+    if config.credentials:
+        cfg["credentials"] = [
+            {
+                "name": c.name,
+                "env_var": c.env_var,
+                "hosts": list(c.hosts),
+                "methods": list(c.methods) if c.methods is not None else None,
+                "value": c.value,
+            }
+            for c in config.credentials
+        ]
     r = config.resources
     network = resolve_network(config)
     # A top-level `network` alone must still produce a resources block, so the
@@ -1873,6 +1914,7 @@ def make_transport(config: MachineConfig, conn: Optional[ConnectOptions] = None)
                 "user per command with ExecOptions(user=...) instead."
             )
         base_url = (conn.base_url or os.environ.get("SMOL_CLOUD_URL") or cli_url or DEFAULT_CLOUD_URL).rstrip("/")
+        _store_cloud_credentials(base_url, api_key, config.credentials)
 
         r = config.resources
         resources: dict[str, Any] = {"diskGb": r.storage_gb if r else None}
@@ -1920,6 +1962,8 @@ def make_transport(config: MachineConfig, conn: Optional[ConnectOptions] = None)
             body["workdir"] = config.workdir
         if config.command is not None:
             body["command"] = list(config.command)
+        if config.credentials:
+            body["credentials"] = [c.name for c in config.credentials]
 
         created = _cloud_fetch(base_url, api_key, "POST", "/v1/machines", json_body=body) or {}
         machine_id = created["id"]

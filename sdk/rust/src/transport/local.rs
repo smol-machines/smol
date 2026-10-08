@@ -255,10 +255,65 @@ pub(crate) fn list_rows() -> Result<Vec<serde_json::Value>> {
     machine_rows(&output.stdout)
 }
 
+/// Credential values for the engine processes this SDK runs, by variable:
+/// the CLI resolves a binding from its own environment. Shown by name only.
+#[derive(Clone, Default)]
+pub(crate) struct CredentialEnv(Vec<(String, String)>);
+
+impl CredentialEnv {
+    pub(crate) fn new(pairs: Vec<(String, String)>) -> Self {
+        Self(pairs)
+    }
+
+    fn apply(&self, command: &mut Command) {
+        command.envs(self.0.iter().map(|(var, value)| (var, value)));
+    }
+}
+
+impl std::fmt::Debug for CredentialEnv {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_list()
+            .entries(self.0.iter().map(|(var, _)| var))
+            .finish()
+    }
+}
+
+/// A Smolfile written for one `machine create` and removed after it.
+pub(crate) struct TempSmolfile(PathBuf);
+
+impl TempSmolfile {
+    pub(crate) fn write(contents: String) -> Result<Self> {
+        let path = std::env::temp_dir().join(format!(
+            "smol-sdk-{}-{}.smolfile",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or_default()
+        ));
+        std::fs::write(&path, contents)
+            .map_err(|e| Error::new(ErrorKind::Other, format!("write {}: {e}", path.display())))?;
+        Ok(Self(path))
+    }
+
+    pub(crate) fn path(&self) -> &Path {
+        &self.0
+    }
+}
+
+impl Drop for TempSmolfile {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.0);
+    }
+}
+
 #[derive(Debug)]
 pub(crate) struct LocalTransport {
     name: String,
     cli: PathBuf,
+    /// Credential values this SDK supplied, applied to every engine call so
+    /// any start resolves them.
+    credential_env: CredentialEnv,
     /// Ports this SDK published for the machine. The CLI reports only a count,
     /// so a machine the SDK did not create cannot be asked for its mapping.
     ports: Vec<Port>,
@@ -270,6 +325,7 @@ impl LocalTransport {
         Ok(Self {
             name: name.into(),
             cli: resolve_cli()?,
+            credential_env: CredentialEnv::default(),
             ports: Vec::new(),
             interceptor: std::sync::Mutex::new(None),
         })
@@ -308,6 +364,7 @@ impl LocalTransport {
             // See assets.rs: this variable makes the engine tie the VM's life
             // to its parent, and every CLI call here is short-lived.
             .env_remove("SMOLVM_BOOT_BINARY");
+        self.credential_env.apply(&mut command);
         if let Some(token) = token {
             command.env("SMOLVM_INTERCEPTOR_TOKEN", token);
         }
@@ -944,19 +1001,24 @@ pub(crate) fn create(
     args: Vec<String>,
     name: &str,
     ports: Vec<Port>,
+    credential_env: CredentialEnv,
 ) -> Result<LocalTransport> {
     let mut command = Command::new(cli);
     command
         .args(&args)
         .stdin(Stdio::null())
         .env_remove("SMOLVM_BOOT_BINARY");
+    credential_env.apply(&mut command);
     let output = retry_text_busy(|| command.output())
         .map_err(|e| Error::new(ErrorKind::Other, format!("run {}: {e}", cli.display())))?;
     if !output.status.success() {
         let borrowed: Vec<&str> = args.iter().map(String::as_str).collect();
         return Err(cli_error(&borrowed, &output.stderr, &output.stdout));
     }
-    LocalTransport::with_ports(name, ports)
+    Ok(LocalTransport {
+        credential_env,
+        ..LocalTransport::with_ports(name, ports)?
+    })
 }
 
 /// Unused on this transport, kept so the cloud checkpoint type stays shared.
@@ -1135,6 +1197,7 @@ mod io_tests {
         LocalTransport {
             name: "test".into(),
             cli: path,
+            credential_env: CredentialEnv::default(),
             ports: vec![],
             interceptor: std::sync::Mutex::new(None),
         }

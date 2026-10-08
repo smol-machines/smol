@@ -350,6 +350,35 @@ connections may need to reconnect. Both methods are awaitable on `AsyncMachine`.
 `ExecResult` has `.exit_code`, `.stdout`, `.stderr`, `.success`, `.output`, and
 `.assert_success()`.
 
+### API keys the workload uses without seeing
+
+Bind a credential to the hosts it is for. The guest variable holds a
+placeholder, and the real value is substituted only in the headers of HTTPS
+requests to those hosts:
+
+```python
+import os
+from smol import CredentialSpec, Machine, MachineConfig
+
+with Machine.create(MachineConfig(
+    image="alpine:3.20",
+    credentials=[CredentialSpec(
+        name="notion",
+        env_var="NOTION_API_KEY",
+        hosts=["api.notion.com", "files.notion.com"],
+        value=os.environ["NOTION_API_KEY"],
+    )],
+)) as m:
+    m.exec(["sh", "-c", 'curl -H "Authorization: Bearer $NOTION_API_KEY" https://api.notion.com/v1/users/me'])
+```
+
+- Hosts are exact names; list each subdomain.
+- Locally the value stays in this process's memory. Without `value`, this
+  process's own `env_var` is read at each start. `methods=["GET", "HEAD"]`
+  limits a read-only token.
+- On the cloud, a credential with a `value` is stored for your account under
+  `name`; one without refers to a credential already stored there.
+
 ## Install / build from source
 The cloud path is pure Python. The local path needs the native extension, which
 links `libkrun` from the sibling `smolvm` repo (three levels up).

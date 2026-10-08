@@ -29,6 +29,7 @@ from .transport import ExecStream, local_availability
 from .rollout import RolloutClient, RolloutError, adapter_sha256
 from .types import (
     ConnectOptions,
+    CredentialSpec,
     EgressInterceptor,
     ExecOptions,
     ExecResult,
@@ -52,6 +53,7 @@ __all__ = [
     "Episode",
     "AsyncEpisode",
     "MachineConfig",
+    "CredentialSpec",
     "ResourceSpec",
     "MountSpec",
     "PortSpec",
