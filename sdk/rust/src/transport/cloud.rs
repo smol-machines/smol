@@ -57,6 +57,7 @@ impl CloudTransport {
                 .timeout
                 .map(|t| t.as_nanos().div_ceil(1_000_000_000) as u64),
             user: options.user.clone(),
+            background: options.background,
         }
     }
 
@@ -211,6 +212,26 @@ impl Transport for CloudTransport {
         self.wait_until_ready(ReadyOptions::default())
     }
 
+    fn resume_without_waiting(&self) -> Result<()> {
+        Ok(self.client.resume(&self.id)?)
+    }
+
+    fn start_without_waiting(&self) -> Result<()> {
+        Ok(self.client.start(&self.id, false)?)
+    }
+
+    fn info(&self) -> Result<serde_json::Value> {
+        Ok(self.client.machine_record(&self.id)?)
+    }
+
+    fn logs(&self, tail: u32) -> Result<String> {
+        Ok(self.client.logs(&self.id, tail)?)
+    }
+
+    fn export_artifact(&self) -> Result<serde_json::Value> {
+        Ok(self.client.export(&self.id)?)
+    }
+
     fn delete(&self) -> Result<()> {
         Ok(self.client.delete(&self.id)?)
     }
@@ -226,10 +247,21 @@ impl Transport for CloudTransport {
         if let Some(user) = &options.user {
             check_user_echo(&output, user)?;
         }
+        let stdout = output.stdout_bytes();
+        // A detached command reports its pid as `pid=<n>` on stdout.
+        let pid = options
+            .background
+            .then(|| {
+                String::from_utf8_lossy(&stdout)
+                    .lines()
+                    .find_map(|l| l.strip_prefix("pid=")?.trim().parse().ok())
+            })
+            .flatten();
         Ok(ExecResult {
             exit_code: output.exit_code.unwrap_or(0),
-            stdout: output.stdout_bytes(),
+            stdout,
             stderr: output.stderr_bytes(),
+            pid,
         })
     }
 

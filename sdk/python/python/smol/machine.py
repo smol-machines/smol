@@ -26,12 +26,14 @@ from .transport import (
     get_cache_disk,
     list_cache_disks,
     delete_checkpoint_transport,
+    list_machines_transport,
     make_transport,
     restore_checkpoint_transport,
     upload_checkpoint,
 )
-from .errors import wrap_native_error
+from .errors import NotSupportedError, wrap_native_error
 from .types import (
+    MachineSummary,
     CacheDiskInfo,
     ConnectOptions,
     PublishedCacheDisk,
@@ -134,6 +136,20 @@ class Machine:
         delete_checkpoint_transport(checkpoint_id, conn)
 
     @staticmethod
+    def list(
+        conn: Optional[ConnectOptions] = None, labels: Optional[dict[str, str]] = None
+    ) -> "list[MachineSummary]":
+        """The cloud account's machines; with ``labels``, only those carrying
+        every one of them. Cloud only."""
+        return list_machines_transport(conn, labels)
+
+    @staticmethod
+    def probe(conn: Optional[ConnectOptions] = None) -> None:
+        """Check that a cloud connection works: the key is accepted and the base
+        URL answers with a machine list. Raises otherwise."""
+        list_machines_transport(conn)
+
+    @staticmethod
     def upload_checkpoint(
         path: str,
         conn: Optional[ConnectOptions] = None,
@@ -199,6 +215,27 @@ class Machine:
         VM process launched; use :meth:`ready` or :meth:`wait_until_ready`
         before doing work."""
         return self._t.state()
+
+    def info(self) -> dict:
+        """The machine's full cloud record, every field the control plane
+        returns (env, readiness, ports, …). Cloud only."""
+        if not hasattr(self._t, "info"):
+            raise NotSupportedError("info is cloud-only")
+        return self._t.info()
+
+    def logs(self, tail: int = 100) -> str:
+        """The last ``tail`` lines of the machine's console log. Cloud only."""
+        if not hasattr(self._t, "logs"):
+            raise NotSupportedError("logs is cloud-only")
+        return self._t.logs(tail)
+
+    def export_artifact(self) -> dict:
+        """Export this stopped machine as a ``.smolmachine`` in your registry
+        namespace. Distinct from a portable checkpoint, which also keeps live
+        memory. Cloud only."""
+        if not hasattr(self._t, "export_artifact"):
+            raise NotSupportedError("export_artifact is cloud-only")
+        return self._t.export_artifact()
 
     def ready(self) -> bool:
         """Whether the machine is READY to do work. :meth:`state` becoming
@@ -306,18 +343,21 @@ class Machine:
         """Stop the machine."""
         self._t.stop()
 
-    def start(self, egress_interceptor: Optional[EgressInterceptor] = None) -> None:
+    def start(
+        self, egress_interceptor: Optional[EgressInterceptor] = None, wait_until_ready: bool = True
+    ) -> None:
         """Boot a stopped machine with its disk state, not its previous RAM.
-        The local handle reuses its interceptor binding or accepts a fresh one."""
-        self._t.start(egress_interceptor)
+        The local handle reuses its interceptor binding or accepts a fresh one.
+        ``wait_until_ready=False`` returns once the start is accepted."""
+        self._t.start(egress_interceptor, wait_until_ready)
 
     def pause(self) -> None:
         """Save RAM and disk durably, then stop at that execution boundary."""
         self._t.pause()
 
-    def resume(self) -> None:
+    def resume(self, wait_until_ready: bool = True) -> None:
         """Resume saved execution in this machine."""
-        self._t.resume()
+        self._t.resume(wait_until_ready)
 
     def delete(self, include_usage: bool = False) -> Optional[MachineUsageReport]:
         """Stop the machine and delete its storage. On the cloud target, pass

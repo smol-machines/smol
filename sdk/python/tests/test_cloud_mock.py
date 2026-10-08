@@ -14,7 +14,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "python"))
 
-from smol import ConnectOptions, Machine, MachineConfig, MountSpec, NotSupportedError, PortSpec, ResourceSpec, SmolError  # noqa: E402
+from smol import ConnectOptions, ExecOptions, Machine, MachineConfig, MountSpec, NotSupportedError, PortSpec, ResourceSpec, SmolError  # noqa: E402
 from smol.transport import _cloud_fetch  # noqa: E402  (internal — asserts request-id surfacing)
 
 MACHINE_ID = "mach-test123"
@@ -221,8 +221,14 @@ class Handler(BaseHTTPRequestHandler):
             captured["complete_body"] = json.loads(self._read() or b"{}")
             return self._send(200, json.dumps(
                 {"leaseId": "task-99", "machineId": "mach-ep1", "state": "completed"}).encode())
+        if self.path == f"/v1/machines/{MACHINE_ID}/export":
+            self._read()
+            captured["exported"] = True
+            return self._send(200, json.dumps({"reference": "registry.smolmachines.com/t/cloud-test:latest"}).encode())
         if self.path == f"/v1/machines/{MACHINE_ID}/exec":
             captured["exec_body"] = json.loads(self._read() or b"{}")
+            if captured["exec_body"].get("background"):
+                return self._send(200, json.dumps({"stdout": "pid=4242\n", "stderr": "", "exitCode": 0}).encode())
             return self._send(200, json.dumps({
                 "stdout": "hello\n", "stderr": "", "exitCode": 0,
                 "durationMs": 12, "machineId": MACHINE_ID,
@@ -249,6 +255,15 @@ class Handler(BaseHTTPRequestHandler):
         captured["hits"].append(f"GET {self.path}")
         if not self._auth_ok():
             return self._send(401, b"bad token")
+        if self.path == "/v1/machines" or self.path.startswith("/v1/machines?"):
+            captured["list_path"] = self.path
+            return self._send(200, json.dumps({"machines": [{
+                "id": MACHINE_ID, "name": "cloud-test", "state": "started", "ephemeral": False,
+                "labels": {"team": "x"}, "source": {"type": "image", "reference": "alpine"},
+            }]}).encode())
+        if self.path.startswith(f"/v1/machines/{MACHINE_ID}/logs"):
+            captured["logs_path"] = self.path
+            return self._send(200, b"boot ok\nserving\n", ctype="text/plain; charset=utf-8")
         if self.path == "/v1/cache-disks":
             return self._send(200, json.dumps({"cacheDisks": [cache_disk_info(0)]}).encode())
         if self.path.startswith("/v1/cache-disks/"):
@@ -775,6 +790,31 @@ def main() -> int:
         except Exception as e:  # noqa: BLE001 - report what was raised instead
             print("   local raised", type(e).__name__, e)
         check("a local cache_disk is refused as NotSupported", local_refused)
+
+        # ---- platform surface a customer patched into the Node SDK ----
+        Machine.probe(cloud)
+        check("probe accepts a machine list", "list_path" in captured)
+        labelled = Machine.list(cloud, {"team": "x"})
+        check("cloud list asks the server to filter by label",
+              "label=team%3Dx" in str(captured.get("list_path")), str(captured.get("list_path")))
+        check("cloud list keeps the server's labels",
+              len(labelled) == 1 and labelled[0].labels.get("team") == "x", repr(labelled))
+        lm = Machine.create(MachineConfig(image="alpine:3.20", labels={"team": "x"}), cloud)
+        check("cloud create sends labels", (captured["create_body"] or {}).get("labels") == {"team": "x"},
+              str((captured["create_body"] or {}).get("labels")))
+        bg = lm.exec(["sleep", "999"], ExecOptions(background=True))
+        check("background exec sends background and returns the pid",
+              captured["exec_body"].get("background") is True and bg.pid == 4242, f"{captured['exec_body']} pid={bg.pid}")
+        check("logs returns the console text",
+              lm.logs(5) == "boot ok\nserving\n" and str(captured.get("logs_path")).endswith("tail=5"),
+              str(captured.get("logs_path")))
+        check("export_artifact posts to export", isinstance(lm.export_artifact().get("reference"), str)
+              and captured.get("exported") is True)
+        check("info returns the raw cloud record", lm.info().get("id") == MACHINE_ID)
+        polls = readiness_gets.get(MACHINE_ID, 0)
+        lm.start(wait_until_ready=False)
+        check("start(wait_until_ready=False) does not poll readiness", readiness_gets.get(MACHINE_ID, 0) == polls,
+              f"{polls} -> {readiness_gets.get(MACHINE_ID, 0)}")
     finally:
         server.shutdown()
 

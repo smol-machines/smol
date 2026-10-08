@@ -31,6 +31,7 @@ from typing import Any, AsyncIterator, Optional
 
 from .machine import Machine
 from .types import (
+    MachineSummary,
     PublishedCacheDisk,
     ConnectOptions,
     EgressInterceptor,
@@ -109,6 +110,18 @@ class AsyncMachine:
         await asyncio.to_thread(Machine.delete_checkpoint, checkpoint_id, conn)
 
     @staticmethod
+    async def list(
+        conn: Optional[ConnectOptions] = None, labels: Optional[dict[str, str]] = None
+    ) -> "list[MachineSummary]":
+        """The cloud account's machines, optionally filtered by labels."""
+        return await asyncio.to_thread(Machine.list, conn, labels)
+
+    @staticmethod
+    async def probe(conn: Optional[ConnectOptions] = None) -> None:
+        """Check that a cloud connection works."""
+        await asyncio.to_thread(Machine.probe, conn)
+
+    @staticmethod
     async def upload_checkpoint(
         path: str,
         conn: Optional[ConnectOptions] = None,
@@ -150,6 +163,18 @@ class AsyncMachine:
         """Current lifecycle state. Cloud ``"started"`` means the VM process
         launched, not that it is ready for work."""
         return await asyncio.to_thread(self._m.state)
+
+    async def info(self) -> dict:
+        """The machine's full cloud record. Cloud only."""
+        return await asyncio.to_thread(self._m.info)
+
+    async def logs(self, tail: int = 100) -> str:
+        """The last ``tail`` lines of the console log. Cloud only."""
+        return await asyncio.to_thread(self._m.logs, tail)
+
+    async def export_artifact(self) -> dict:
+        """Export this stopped machine as a ``.smolmachine``. Cloud only."""
+        return await asyncio.to_thread(self._m.export_artifact)
 
     async def ready(self) -> bool:
         """Whether the machine is READY to do work (see :meth:`Machine.ready`)."""
@@ -260,14 +285,16 @@ class AsyncMachine:
         """Save RAM and disk durably, then stop."""
         await asyncio.to_thread(self._m.pause)
 
-    async def resume(self) -> None:
+    async def resume(self, wait_until_ready: bool = True) -> None:
         """Resume saved execution in this machine."""
-        await asyncio.to_thread(self._m.resume)
+        await asyncio.to_thread(self._m.resume, wait_until_ready)
 
-    async def start(self, egress_interceptor: Optional[EgressInterceptor] = None) -> None:
+    async def start(
+        self, egress_interceptor: Optional[EgressInterceptor] = None, wait_until_ready: bool = True
+    ) -> None:
         """Start (resume) a stopped machine, waiting until its agent is ready. The
         counterpart to :meth:`stop`; disk state is preserved across the cycle."""
-        await asyncio.to_thread(self._m.start, egress_interceptor)
+        await asyncio.to_thread(self._m.start, egress_interceptor, wait_until_ready)
 
     async def delete(self, include_usage: bool = False) -> Optional[MachineUsageReport]:
         """Stop the machine and delete its storage. On the cloud target, pass

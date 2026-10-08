@@ -133,6 +133,9 @@ class MachineConfig:
     """Machine name (auto-generated if omitted)."""
     image: Optional[str] = None
     """Base image. Required for the cloud target; optional for local."""
+    labels: Optional[dict[str, str]] = None
+    """Caller metadata for finding the machine again with :meth:`Machine.list`.
+    Cloud only."""
     command: Optional[list[str]] = None
     """Workload argv overriding the image entrypoint/CMD."""
     mounts: Optional[list[MountSpec]] = None
@@ -220,6 +223,9 @@ class ExecOptions:
     family. With ``"text"``, :attr:`ExecResult.stdout_bytes` degrades to the
     lossy text re-encoded; with ``"b64"``, :attr:`ExecResult.stdout` is empty.
     Ignored (both families, as before) on older control planes and locally."""
+    background: bool = False
+    """Cloud only: start the command detached and return at once with its
+    :attr:`ExecResult.pid`, leaving it running (a dev server, an agent)."""
 
 
 @dataclass
@@ -244,6 +250,8 @@ class ExecResult:
     Prefer this over :attr:`stdout` for binary or >1 MiB output."""
     stderr_bytes: bytes = b""
     """Byte-exact, untruncated stderr; see :attr:`stdout_bytes`."""
+    pid: Optional[int] = None
+    """The detached process's pid, for an exec run with ``background=True``."""
 
     @property
     def success(self) -> bool:
@@ -346,6 +354,20 @@ class ConnectOptions:
     base_url: Optional[str] = None
     api_key: Optional[str] = None
     egress_interceptor: Optional[EgressInterceptor] = field(default=None, repr=False)
+
+
+@dataclass
+class MachineSummary:
+    """One machine as :meth:`Machine.list` reports it."""
+
+    id: str
+    name: str
+    state: str
+    labels: dict[str, str]
+    image: Optional[str] = None
+    persistent: bool = True
+    branchable: bool = False
+    created_at: Optional[str] = None
 
 
 @dataclass

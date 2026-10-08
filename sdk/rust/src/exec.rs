@@ -21,6 +21,9 @@ pub struct ExecOptions {
     /// SDK first checks that the control plane applies it, and refuses with
     /// [`crate::ErrorKind::NotSupported`] before running anything if it would not.
     pub user: Option<String>,
+    /// Cloud only: start the command detached and return at once with its
+    /// [`ExecResult::pid`], leaving it running (a dev server, an agent).
+    pub background: bool,
 }
 
 impl ExecOptions {
@@ -50,6 +53,12 @@ impl ExecOptions {
     /// Run as this user.
     pub fn user(mut self, user: impl Into<String>) -> Self {
         self.user = Some(user.into());
+        self
+    }
+
+    /// Start the command detached. Cloud only.
+    pub fn background(mut self, background: bool) -> Self {
+        self.background = background;
         self
     }
 
@@ -85,6 +94,8 @@ pub struct ExecResult {
     pub stdout: Vec<u8>,
     /// Everything the command wrote to stderr.
     pub stderr: Vec<u8>,
+    /// The detached process's pid, for a background exec.
+    pub pid: Option<u32>,
 }
 
 impl ExecResult {
@@ -216,6 +227,7 @@ impl ExecStream {
             exit_code: if failed { -1 } else { exit_code },
             stdout,
             stderr,
+            pid: None,
         }
     }
 }

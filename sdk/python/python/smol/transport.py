@@ -19,6 +19,7 @@ import json
 import math
 import os
 import platform
+import re
 import socket
 import sys
 import threading
@@ -32,6 +33,7 @@ from urllib.parse import quote
 from .errors import InvalidConfigError, NotSupportedError, SmolError, wrap_native_error
 from .types import (
     ConnectOptions,
+    MachineSummary,
     CacheDiskInfo,
     CacheDiskVersion,
     PublishedCacheDisk,
@@ -148,9 +150,9 @@ class Transport(Protocol):
     def list_images(self) -> list[ImageInfo]: ...
     def stop(self) -> None: ...
     def pause(self) -> None: ...
-    def resume(self) -> None: ...
+    def resume(self, wait_until_ready: bool = True) -> None: ...
     def sync(self) -> None: ...
-    def start(self, interceptor: Optional[EgressInterceptor] = None) -> None: ...
+    def start(self, interceptor: Optional[EgressInterceptor] = None, wait_until_ready: bool = True) -> None: ...
     def delete(self) -> None: ...
     def delete_with_usage(self) -> MachineUsageReport: ...
     def usage(self) -> MachineUsageReport: ...
@@ -786,16 +788,17 @@ class LocalTransport:
             raise wrap_native_error(e) from e
         _live_local.discard(self)
 
-    def resume(self) -> None:
+    def resume(self, wait_until_ready: bool = True) -> None:
         try:
             self._inner.resume()
         except Exception as e:  # noqa: BLE001
             raise wrap_native_error(e) from e
         if self._cleanup_on_exit:
             _live_local.add(self)
-        self.wait_until_ready()
+        if wait_until_ready:
+            self.wait_until_ready()
 
-    def start(self, interceptor: Optional[EgressInterceptor] = None) -> None:
+    def start(self, interceptor: Optional[EgressInterceptor] = None, wait_until_ready: bool = True) -> None:
         try:
             binding = interceptor or self._interceptor
             if binding is None:
@@ -808,7 +811,8 @@ class LocalTransport:
             raise wrap_native_error(e) from e
         if self._cleanup_on_exit:
             _live_local.add(self)
-        self.wait_until_ready()
+        if wait_until_ready:
+            self.wait_until_ready()
 
     def delete(self) -> None:
         _live_local.discard(self)
@@ -1013,6 +1017,8 @@ class CloudTransport:
         }
         if opts is not None and opts.user is not None:
             body["user"] = opts.user
+        if opts is not None and opts.background:
+            body["background"] = True
         return body
 
     def _ensure_user(self, user: str) -> None:
@@ -1128,7 +1134,10 @@ class CloudTransport:
         r = r or {}
         stdout = str(r.get("stdout", ""))
         stderr = str(r.get("stderr", ""))
+        # A detached command reports its pid as `pid=<n>` on stdout.
+        pid_match = re.search(r"^pid=(\d+)", stdout, re.M) if opts and opts.background else None
         return ExecResult(
+            pid=int(pid_match.group(1)) if pid_match else None,
             exit_code=int(r.get("exitCode", 0)),
             stdout=stdout,
             stderr=stderr,
@@ -1292,11 +1301,29 @@ class CloudTransport:
     def pause(self) -> None:
         _cloud_fetch(self._base, self._key, "POST", f"/v1/machines/{self._id}/pause", timeout=CLOUD_START_TIMEOUT_S)
 
-    def resume(self) -> None:
+    def resume(self, wait_until_ready: bool = True) -> None:
         _cloud_fetch(self._base, self._key, "POST", f"/v1/machines/{self._id}/resume", timeout=CLOUD_START_TIMEOUT_S)
-        _wait_for_ready(self._base, self._key, self._id)
+        if wait_until_ready:
+            _wait_for_ready(self._base, self._key, self._id)
 
-    def start(self, interceptor: Optional[EgressInterceptor] = None) -> None:
+    def info(self) -> dict:
+        """The machine's full record as the control plane returns it."""
+        return _cloud_fetch(self._base, self._key, "GET", f"/v1/machines/{self._id}") or {}
+
+    def logs(self, tail: int) -> str:
+        """The last ``tail`` lines of the machine's console log."""
+        return _cloud_fetch(
+            self._base, self._key, "GET", f"/v1/machines/{self._id}/logs?tail={int(tail)}", accept="text"
+        ) or ""
+
+    def export_artifact(self) -> dict:
+        """Export the stopped machine as a ``.smolmachine`` in the registry."""
+        return _cloud_fetch(
+            self._base, self._key, "POST", f"/v1/machines/{self._id}/export", json_body={},
+            timeout=CLOUD_START_TIMEOUT_S,
+        ) or {}
+
+    def start(self, interceptor: Optional[EgressInterceptor] = None, wait_until_ready: bool = True) -> None:
         if interceptor is not None:
             raise NotSupportedError("egress_interceptor is local-only")
         # Resume a stopped machine, then wait for its agent so the returned handle
@@ -1308,7 +1335,8 @@ class CloudTransport:
             f"/v1/machines/{self._id}/start",
             timeout=CLOUD_START_TIMEOUT_S,
         )
-        _wait_for_ready(self._base, self._key, self._id)
+        if wait_until_ready:
+            _wait_for_ready(self._base, self._key, self._id)
 
     def delete(self) -> None:
         _cloud_fetch(self._base, self._key, "DELETE", f"/v1/machines/{self._id}")
@@ -1676,6 +1704,8 @@ def _cloud_fetch(
             payload = resp.read()
             if accept == "bytes":
                 return payload
+            if accept == "text":
+                return payload.decode(errors="replace")
             ct = resp.headers.get("content-type", "")
             if resp.status == 204 or not payload:
                 return None
@@ -2010,6 +2040,8 @@ def make_transport(config: MachineConfig, conn: Optional[ConnectOptions] = None)
             body["command"] = list(config.command)
         if config.credentials:
             body["credentials"] = [c.name for c in config.credentials]
+        if config.labels:
+            body["labels"] = dict(config.labels)
         if config.cache_disk is not None:
             cache_disk: dict[str, Any] = {"cache": config.cache_disk.cache}
             if config.cache_disk.version is not None:
@@ -2365,6 +2397,41 @@ def upload_checkpoint(
     restored in the cloud. Returns the checkpoint as the cloud describes it."""
     base_url, api_key = _cloud_credentials(conn or ConnectOptions(target="cloud"), "upload_checkpoint")
     return _cloud_upload_checkpoint(base_url, api_key, os.path.abspath(os.fspath(path)), on_progress)
+
+
+def list_machines_transport(
+    conn: Optional[ConnectOptions] = None, labels: Optional[dict[str, str]] = None
+) -> list[MachineSummary]:
+    """Every machine of the cloud account, optionally only those carrying every
+    one of ``labels``. Anything but a machine list (a proxy's page, a wrong base
+    URL) raises rather than reading as an account with no machines."""
+    conn = conn or ConnectOptions(target="cloud")
+    if conn.target == "local":
+        raise NotSupportedError("list is cloud-only in the Python SDK")
+    base_url, api_key = _cloud_credentials(conn, "list")
+    query = "&".join(f"label={quote(f'{k}={v}', safe='')}" for k, v in (labels or {}).items())
+    listed = _cloud_fetch(base_url, api_key, "GET", f"/v1/machines{'?' + query if query else ''}")
+    rows = listed if isinstance(listed, list) else (listed or {}).get("machines") if isinstance(listed, dict) else None
+    if not isinstance(rows, list):
+        raise SmolError("SMOLVM_ERROR", f"cloud GET /v1/machines at {base_url} did not return a machine list")
+    out = []
+    for m in rows:
+        source = m.get("source") or {}
+        out.append(
+            MachineSummary(
+                id=m["id"],
+                name=m.get("name") or m["id"],
+                state=m.get("state", "unknown"),
+                labels=dict(m.get("labels") or {}),
+                image=source.get("reference") if source.get("type") == "image" else None,
+                persistent=not m.get("ephemeral", False),
+                branchable=bool(m.get("branchable", m.get("forkable", False))),
+                created_at=m.get("createdAt"),
+            )
+        )
+    # Backstop for a control plane that ignores the label filter.
+    want = (labels or {}).items()
+    return [m for m in out if all(m.labels.get(k) == v for k, v in want)]
 
 
 def delete_checkpoint_transport(checkpoint_id: str, conn: Optional[ConnectOptions] = None) -> None:
