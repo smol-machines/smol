@@ -19,6 +19,19 @@ use crate::types::{
 
 /// Ordinary calls are short: a hung request must not block a caller forever.
 pub const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// The slowest link a file transfer is given time for: a large file over a
+/// slow uplink must not fail at [`REQUEST_TIMEOUT`] while it is still moving.
+pub const TRANSFER_FLOOR_BYTES_PER_SEC: u64 = 256 * 1024;
+
+/// The largest file the cloud's file routes accept.
+pub const MAX_FILE_BYTES: u64 = 100 * 1024 * 1024;
+
+/// How long a transfer of `bytes` may take: [`REQUEST_TIMEOUT`] plus the time
+/// `bytes` needs at [`TRANSFER_FLOOR_BYTES_PER_SEC`].
+pub fn transfer_timeout(bytes: u64) -> Duration {
+    REQUEST_TIMEOUT + Duration::from_secs(bytes.div_ceil(TRANSFER_FLOOR_BYTES_PER_SEC))
+}
 /// Starting can include a cold image pull, so it gets its own long window.
 pub const START_TIMEOUT: Duration = Duration::from_secs(30 * 60);
 /// Capture can take minutes on a large machine.
@@ -505,13 +518,14 @@ impl Client {
         }))
     }
 
-    /// Read a file out of a machine.
+    /// Read a file out of a machine. Its size is not known up front, so the
+    /// read is given the time the largest file needs.
     pub fn read_file(&self, id: &str, path: &str) -> Result<Vec<u8>> {
         let response = self.send(
             reqwest::Method::GET,
             &format!("/v1/machines/{id}/files/{}", encode_path(path)),
             Body::None,
-            REQUEST_TIMEOUT,
+            transfer_timeout(MAX_FILE_BYTES),
         )?;
         response
             .bytes()
@@ -525,7 +539,7 @@ impl Client {
             reqwest::Method::PUT,
             &format!("/v1/machines/{id}/files/{}", encode_path(path)),
             Body::Bytes(data),
-            REQUEST_TIMEOUT,
+            transfer_timeout(data.len() as u64),
         )
     }
 
@@ -1161,6 +1175,21 @@ impl<R: Read> Read for CountingReader<R> {
 
 #[cfg(test)]
 mod tests {
+    /// A large file over a slow link is given time to arrive; a small one keeps
+    /// the ordinary request timeout.
+    #[test]
+    fn a_transfer_is_given_time_in_proportion_to_its_size() {
+        assert_eq!(transfer_timeout(0), REQUEST_TIMEOUT);
+        assert_eq!(
+            transfer_timeout(1),
+            REQUEST_TIMEOUT + Duration::from_secs(1)
+        );
+        // The cloud's largest file at the floor rate: 400 s on top.
+        assert_eq!(
+            transfer_timeout(MAX_FILE_BYTES),
+            REQUEST_TIMEOUT + Duration::from_secs(400)
+        );
+    }
     use super::*;
 
     /// One server standing in for both the control plane and the identity
