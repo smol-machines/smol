@@ -87,6 +87,33 @@ try {
 }
 ```
 
+For a local VM whose published service starts through `exec()`, set
+`waitForPorts: false` on creation. The SDK still waits for the guest agent,
+so `exec()` is safe; call `waitUntilReady()` once the service is listening.
+The default keeps waiting for all published ports. This option is local-only.
+
+```ts
+const m = await Machine.create(
+  { image: 'node:24-alpine', ports: [{ host: 18080, guest: 8080 }], waitForPorts: false },
+  { target: 'local' },
+);
+try {
+  await m.exec(['sh', '-c',
+    `nohup node -e 'require("http").createServer((_, res) => res.end("ok"))
+      .listen(8080, "0.0.0.0")' >/tmp/server.log 2>&1 &`,
+  ]);
+  await m.waitUntilReady();
+  console.log(await (await m.fetch(8080)).text());
+} finally {
+  await m.delete();
+}
+```
+
+When reconnecting to clean up a local machine whose published service has
+stopped, `Machine.connect(name, { target: 'local', waitForPorts: false })`
+attaches after the agent is ready, so `delete()` can run without a listener.
+The default continues waiting for all published ports.
+
 To reach a service **inside** the VM, use the authenticated connect bridge —
 **no Cloudflare/localhost.run tunnel, no public exposure, no egress allow-list.**
 Have the worker LISTEN on a published port and connect *inbound*:

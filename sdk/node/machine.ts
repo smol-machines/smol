@@ -85,10 +85,10 @@ export class Machine {
   private constructor(private readonly transport: Transport) {}
 
   /**
-   * Create and start a machine. On the cloud target, this does not return until
-   * the machine is ready for work: the guest agent is reachable and any
-   * published port is accepting connections. A cloud state of `"started"`
-   * alone means only that the VM process launched.
+   * Create and start a machine. By default this waits for the guest agent and
+   * all published ports. On local machines, `waitForPorts: false` returns when
+   * the agent is ready so `exec()` can start a service on a published port.
+   * A cloud state of `"started"` alone means only that the VM process launched.
    *
    * @param config  machine configuration (a name is generated if omitted; `image`
    *                is the base image — required for cloud, optional for local)
@@ -110,6 +110,8 @@ export class Machine {
    * machine made elsewhere (another process, the console, the REST API).
    *  - local (default): re-opens a persisted machine by NAME, starting it if
    *    stopped — pairs with `Machine.create({ name, … }, …)` + `persistent`.
+   *    Set `conn.waitForPorts: false` to attach after agent readiness when a
+   *    published service is not listening (for example, to delete it).
    *  - cloud: looks up the machine by id; throws if it doesn't exist.
    *    This does not wait for readiness; call `waitUntilReady()` before `exec`,
    *    using a connect endpoint, or expecting the workload to respond.
