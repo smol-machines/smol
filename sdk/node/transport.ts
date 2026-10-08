@@ -1843,6 +1843,7 @@ export async function makeTransport(
     // The cloud create API has no workload user; refuse rather than silently
     // run the workload as the image's default user.
     if (config.user !== undefined) throw new NotSupportedError("user is local-only.");
+    if (config.waitForPorts === false) throw new NotSupportedError("waitForPorts: false is local-only.");
     // Cloud is settled: NOW the CLI's stored login may supply the credential
     // and endpoint, which is the reuse `smol auth login` promises.
     const { apiKey: cliKey, endpoint: cliUrl } = cliSession(conn.target);
@@ -2009,7 +2010,10 @@ export async function makeTransport(
       if (interceptor) await inner.start(interceptor.address, interceptor.token);
       else await inner.start();
     }
-    await transport.waitUntilReady();
+    // start/startForkable waits for the agent. A caller that must start its
+    // own published service via exec cannot wait for the port before create
+    // returns; it calls waitUntilReady() after installing the listener.
+    if (config.waitForPorts !== false) await transport.waitUntilReady();
     return transport;
   } catch (e) {
     await transport?.delete().catch(() => {});

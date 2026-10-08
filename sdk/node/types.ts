@@ -221,6 +221,12 @@ export interface MachineConfig {
    *  allocates the host port; readiness includes that published port accepting
    *  connections. */
   ports?: PortSpec[];
+  /** Locally, return from `Machine.create()` after the guest agent is ready,
+   *  even if a published port is not accepting connections yet. Use this when
+   *  `exec()` starts the service: the default port wait would deadlock before
+   *  `exec()` can run. Call `machine.waitUntilReady()` after starting it.
+   *  Default true; false is local-only and rejected on cloud. */
+  waitForPorts?: boolean;
   /** Resource allocation. */
   resources?: ResourceSpec;
   /** Enable outbound network access. An alias for `resources.network`, which
