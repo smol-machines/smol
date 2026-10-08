@@ -1274,6 +1274,19 @@ impl<R: Read> Read for CountingReader<R> {
     }
 }
 
+/// Percent-encode a query value (RFC 3986 unreserved characters pass through).
+fn percent_encode(value: &str) -> String {
+    value
+        .bytes()
+        .map(|b| match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' => {
+                (b as char).to_string()
+            }
+            _ => format!("%{b:02X}"),
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     /// A large file over a slow link is given time to arrive; a small one keeps
@@ -1448,17 +1461,4 @@ mod tests {
         let events: Vec<_> = SseEvents::new(raw.as_bytes()).collect();
         assert_eq!(events, vec![StreamEvent::Stdout("partial".into())]);
     }
-}
-
-/// Percent-encode a query value (RFC 3986 unreserved characters pass through).
-fn percent_encode(value: &str) -> String {
-    value
-        .bytes()
-        .map(|b| match b {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' => {
-                (b as char).to_string()
-            }
-            _ => format!("%{b:02X}"),
-        })
-        .collect()
 }
