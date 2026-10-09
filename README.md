@@ -87,6 +87,7 @@ Pin a release with `SMOL_VERSION=v1.3.7`; override locations with `PREFIX` /
 | `sdk/rust` | Rust SDK — drives a version-matched `smolvm` locally, or smol cloud over REST. Same API. |
 | `src/` | The `smol` CLI (Rust): create / run / exec / files / logs, plus cloud deploy + a container registry. |
 | `docs/cli.md` | CLI command reference. |
+| [`examples/sandcastle`](examples/sandcastle/README.md) | Run Sandcastle agents in a local Smol microVM with Git worktree sync. |
 
 ## Branching
 
