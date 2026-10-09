@@ -28,6 +28,7 @@ type Impl = {
   prepare(ctx: unknown): Promise<any>;
   start(ctx: unknown, open: unknown, artifact: any): Promise<{ handle: any; state: any }>;
   resume(ctx: unknown, artifact: any, state: any): Promise<any>;
+  onSessionEnd(ctx: unknown, artifact: any, state: any, options: { reason: "completed" | "expired" | "failed" }): Promise<void>;
 };
 /** The implementation eve's runtime calls, as recorded on the environment. */
 const implementationOf = (environment: object): Impl =>
@@ -106,7 +107,8 @@ async function main() {
     check("sessions get their own machines", scoped.state.machine !== denied.state.machine);
 
     await sb.writeTextFile({ path: "notes.md", content: "kept across stop\n" });
-    await scoped.handle.onSessionStop();
+    check("older Eve stop and delete hooks remain available", typeof scoped.handle.onSessionStop === "function" && typeof scoped.handle.onSessionDelete === "function");
+    await scoped.handle.onSandboxStop();
     check("stopping a session stops its machine", (await rejects(sb.run({ command: "true" }))) !== "");
     const resumed = await impl.resume(sessionCtx("session-a"), artifact, scoped.state);
     handles.push(resumed);
@@ -114,8 +116,11 @@ async function main() {
     check("and keeps its network policy", (await reach(resumed.sandbox, "https://example.org")) === "blocked");
     const writeback = await resumed.sandbox.run({ command: "cat /proc/sys/vm/dirty_expire_centisecs /proc/sys/vm/dirty_writeback_centisecs" });
     check("a resumed machine flushes writes within a second", writeback.stdout === "100\n100\n", JSON.stringify(writeback.stdout));
+    await resumed.onSandboxStop();
+    await impl.onSessionEnd(sessionCtx("session-a"), artifact, scoped.state, { reason: "completed" });
+    check("ending a durable session reclaims its stopped machine", (await rejects(Machine.connect(scoped.state.machine, { target: "local", handleSignals: false }))) !== "");
 
-    await denied.handle.onSessionDelete();
+    await denied.handle.onSandboxDelete();
     check("deleting a session deletes its machine", (await rejects(Machine.connect(denied.state.machine, { target: "local", handleSignals: false }))) !== "");
     check("a deleted session cannot resume", /no longer available/.test(await rejects(impl.resume(sessionCtx("session-b"), artifact, denied.state))));
 
@@ -130,7 +135,7 @@ async function main() {
     const rules = await rejects(impl.start(sessionCtx("session-c"), { networkPolicy: { allow: { "api.github.com": [{ transform: [{ headers: { a: "b" } }] }] } } }, artifact));
     check("request rules are refused before a machine starts", /request rules/.test(rules), rules.slice(0, 80));
   } finally {
-    for (const h of handles) await h.onSessionDelete().catch(() => {});
+    for (const h of handles) await h.onSandboxDelete().catch(() => {});
     rmSync(storagePath, { recursive: true, force: true });
   }
 

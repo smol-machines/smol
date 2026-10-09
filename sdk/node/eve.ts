@@ -30,7 +30,6 @@ import { dirname, join, relative } from "node:path";
 import type { SandboxNetworkPolicy, SandboxSession } from "eve/sandbox" with { "resolution-mode": "import" };
 import type {
   SandboxProvider,
-  SandboxProviderHandle,
   SandboxProviderResources,
   SandboxProviderResourceTree,
 } from "eve/sandbox/provider" with { "resolution-mode": "import" };
@@ -191,24 +190,27 @@ function sessionFor(machine: Machine, home: string, env: Readonly<Record<string,
 }
 
 /** Handles already open in this process, so a resume reuses the live one. */
-const openHandles = new Map<string, SandboxProviderHandle<SmolSandboxSession>>();
+const openHandles = new Map<string, ReturnType<typeof handleFor>>();
 
 function handleFor(machine: Machine, home: string, env: Readonly<Record<string, string>> | undefined) {
   const forget = () => openHandles.delete(machine.name);
-  const handle: SandboxProviderHandle<SmolSandboxSession> = {
+  const stop = async () => {
+    forget();
+    await machine.stop();
+  };
+  const destroy = async () => {
+    forget();
+    await machine.delete();
+  };
+  const handle = {
     sandbox: sessionFor(machine, home, env),
-    async onSessionStop() {
-      forget();
-      await machine.stop();
-    },
-    async onRuntimeShutdown() {
-      forget();
-      await machine.stop();
-    },
-    async onSessionDelete() {
-      forget();
-      await machine.delete();
-    },
+    onRuntimeShutdown: stop,
+    // Eve 0.71 renamed these hooks; keep the earlier names so already-built
+    // agents on 0.67 continue to stop and delete their VMs as before.
+    onSandboxStop: stop,
+    onSandboxDelete: destroy,
+    onSessionStop: stop,
+    onSessionDelete: destroy,
   };
   openHandles.set(machine.name, handle);
   return handle;
@@ -240,6 +242,27 @@ const provider = loadEve()<
     const env = options?.env;
 
     return {
+      // Eve 0.76 calls this when a durable session completes or expires. Earlier
+      // versions have no such hook; the spread keeps their type surface intact.
+      ...{
+        async onSessionEnd(_ctx: unknown, _artifact: Readonly<PreparedArtifact>, state: Readonly<SessionState>) {
+          const live = openHandles.get(state.machine);
+          if (live) {
+            await live.onSandboxDelete();
+            return;
+          }
+          const exists = async () => (await Machine.list(LOCAL)).some(({ name }) => name === state.machine);
+          if (!(await exists())) return;
+          try {
+            const machine = await Machine.connect(state.machine, LOCAL);
+            await machine.delete();
+          } catch (error) {
+            // A concurrent cleanup may have removed it after the list.
+            if (!(await exists())) return;
+            throw error;
+          }
+        },
+      },
       async prepare(ctx) {
         const r = ctx.resources;
         const key = hash({
