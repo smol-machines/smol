@@ -14,7 +14,7 @@ use crate::credentials::Credentials;
 use crate::error::{Error, ErrorKind, Result};
 use crate::types::{
     BranchBatch, Checkpoint, CheckpointUpload, Command, CommandOutput, CreateMachine, Machine,
-    Network, Port, SetCredential, Share, Usage,
+    MachineCacheDisk, Network, Port, SetCredential, Share, Usage,
 };
 
 /// Ordinary calls are short: a hung request must not block a caller forever.
@@ -726,6 +726,24 @@ impl Client {
             reqwest::Method::POST,
             &format!("/v1/checkpoints/{}/restore", encode_path(checkpoint_id)),
             Body::Json(serde_json::json!({ "name": name, "network": network })),
+            CHECKPOINT_TIMEOUT,
+        )
+    }
+
+    /// Create a machine from a stored capture whose machine was created with a
+    /// cache slot, with `cache_disk` mounted in that slot in place of the one
+    /// it was captured with. The cache must be no larger than the slot and
+    /// mount at the slot's path; the control plane refuses anything else.
+    pub fn restore_checkpoint_with_cache_disk(
+        &self,
+        checkpoint_id: &str,
+        name: &str,
+        cache_disk: &MachineCacheDisk,
+    ) -> Result<Machine> {
+        self.json(
+            reqwest::Method::POST,
+            &format!("/v1/checkpoints/{}/restore", encode_path(checkpoint_id)),
+            Body::Json(serde_json::json!({ "name": name, "cacheDisk": cache_disk })),
             CHECKPOINT_TIMEOUT,
         )
     }

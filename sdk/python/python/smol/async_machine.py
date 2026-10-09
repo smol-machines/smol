@@ -32,6 +32,7 @@ from typing import Any, AsyncIterator, Optional
 from .machine import Machine
 from .types import (
     MachineSummary,
+    CacheDiskRef,
     PublishedCacheDisk,
     ConnectOptions,
     EgressInterceptor,
@@ -96,11 +97,13 @@ class AsyncMachine:
         name: str,
         conn: Optional[ConnectOptions] = None,
         network: Optional[bool] = None,
+        cache_disk: Optional[CacheDiskRef] = None,
     ) -> "AsyncMachine":
         """Restore a local artifact or durable cloud checkpoint and await readiness.
-        With a cloud target, a local checkpoint file is uploaded first."""
+        With a cloud target, a local checkpoint file is uploaded first.
+        ``cache_disk`` fills the checkpoint's cache slot (cloud only)."""
         machine = await asyncio.to_thread(
-            Machine.restore_checkpoint, checkpoint_id, name, conn, network
+            Machine.restore_checkpoint, checkpoint_id, name, conn, network, cache_disk
         )
         return cls(machine)
 

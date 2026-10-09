@@ -645,6 +645,21 @@ impl MachineBuilder {
             cache: cache.into(),
             version: None,
             mount_path: None,
+            slot: false,
+        });
+        self
+    }
+
+    /// Attach cache disk `cache` (id or name) unmounted, as a slot. Restoring
+    /// a checkpoint of this machine with
+    /// [`Machine::restore_cloud_checkpoint_with_cache_disk`] mounts any cache
+    /// no larger than `cache` there, at `cache`'s mount path, so one
+    /// checkpoint serves many caches. Cloud only.
+    pub fn cache_slot(mut self, cache: impl Into<String>) -> Self {
+        self.config.cache_disk = Some(smol_cloud::types::MachineCacheDisk {
+            cache: cache.into(),
+            slot: true,
+            ..Default::default()
         });
         self
     }
@@ -661,6 +676,7 @@ impl MachineBuilder {
             cache: cache.into(),
             version,
             mount_path,
+            slot: false,
         });
         self
     }

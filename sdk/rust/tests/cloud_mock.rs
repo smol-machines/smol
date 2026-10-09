@@ -1409,3 +1409,64 @@ fn creating_on_the_cloud_sends_labels() {
     let body: serde_json::Value = serde_json::from_str(&create.body).expect("valid JSON body");
     assert_eq!(body["labels"]["team"], "x");
 }
+
+#[test]
+fn a_cache_slot_is_created_and_a_restore_fills_it_with_another_cache() {
+    let cloud = MockCloud::start(routes(vec![
+        (
+            "POST /v1/machines",
+            Box::new(|_| Reply::json(ready_machine("m-base"))),
+        ),
+        (
+            "POST /v1/machines/m-base/start",
+            Box::new(|_| Reply::status(204, "")),
+        ),
+        (
+            "GET /v1/machines/m-base",
+            Box::new(|_| Reply::json(ready_machine("m-base"))),
+        ),
+        (
+            "POST /v1/checkpoints/ckpt-base/restore",
+            Box::new(|_| Reply::json(ready_machine("m-proj"))),
+        ),
+        (
+            "POST /v1/machines/m-proj/start",
+            Box::new(|_| Reply::status(204, "")),
+        ),
+        (
+            "GET /v1/machines/m-proj",
+            Box::new(|_| Reply::json(ready_machine("m-proj"))),
+        ),
+    ]));
+    Machine::builder("base")
+        .image("alpine:latest")
+        .cache_slot("slot-20g")
+        .create_with(&cloud.connect())
+        .expect("create with a slot");
+    let project = smolmachines::CacheDiskRef {
+        cache: "project-a".into(),
+        version: Some(3),
+        ..Default::default()
+    };
+    Machine::restore_cloud_checkpoint_with_cache_disk(
+        "proj",
+        "ckpt-base",
+        project,
+        &cloud.connect(),
+    )
+    .expect("restore into the slot");
+
+    let sent = cloud.requests();
+    let body = |path: &str| -> serde_json::Value {
+        let request = sent.iter().find(|r| r.path == path).expect(path);
+        serde_json::from_str(&request.body).expect("valid JSON body")
+    };
+    assert_eq!(
+        body("/v1/machines")["cacheDisk"],
+        serde_json::json!({"cache": "slot-20g", "slot": true})
+    );
+    assert_eq!(
+        body("/v1/checkpoints/ckpt-base/restore")["cacheDisk"],
+        serde_json::json!({"cache": "project-a", "version": 3})
+    );
+}

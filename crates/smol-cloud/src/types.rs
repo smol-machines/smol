@@ -232,6 +232,11 @@ pub struct MachineCacheDisk {
     /// Absolute guest path to mount it at; the cache disk's own when `None`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub mount_path: Option<String>,
+    /// Attach the cache unmounted, as a slot that a restore of this machine's
+    /// checkpoints fills with any cache no larger than it, mounted at the
+    /// same path. Only on create; a restore always mounts.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub slot: bool,
 }
 
 /// Create a cache disk.
@@ -582,6 +587,7 @@ mod tests {
                 cache: "deps".into(),
                 version: Some(2),
                 mount_path: None,
+                slot: false,
             }),
             ..Default::default()
         };
@@ -589,6 +595,19 @@ mod tests {
         assert_eq!(
             body["cacheDisk"],
             serde_json::json!({"cache": "deps", "version": 2})
+        );
+    }
+
+    #[test]
+    fn a_cache_slot_is_sent_only_when_asked_for() {
+        let slot = MachineCacheDisk {
+            cache: "deps".into(),
+            slot: true,
+            ..Default::default()
+        };
+        assert_eq!(
+            serde_json::to_value(&slot).expect("serialize"),
+            serde_json::json!({"cache": "deps", "slot": true})
         );
     }
 

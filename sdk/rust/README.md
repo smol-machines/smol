@@ -372,6 +372,23 @@ m.publish_cache_disk()?;                                          // v1
 # Ok(()) }
 ```
 
+One checkpoint can resume with many caches. Create the base machine with an
+empty cache as a slot, which attaches it unmounted, and checkpoint it warm.
+Each restore then mounts its own cache there, no larger than the slot and at
+the slot's mount path:
+
+```rust,no_run
+use smolmachines::{CacheDiskRef, ConnectOptions, Machine};
+# fn main() -> smolmachines::Result<()> {
+let cloud = ConnectOptions::cloud();
+let base = Machine::builder("base").image("node:22").cache_slot("slot-20g").create_with(&cloud)?;
+let ckpt = base.checkpoint(None)?;
+let id = &ckpt.cloud().expect("a cloud checkpoint").id;
+let project = CacheDiskRef { cache: "project-a".into(), ..Default::default() };
+let a = Machine::restore_cloud_checkpoint_with_cache_disk("project-a", id, project, &cloud)?;
+# Ok(()) }
+```
+
 ## Blocking
 
 Every call blocks. The engine is synchronous, so an async caller should run

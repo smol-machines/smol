@@ -144,6 +144,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/account/plan/checkout": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Subscribe to a plan through Stripe Checkout.
+         * @description Returns a Stripe-hosted page that shows the plan and its monthly price, takes a card and collects the first month. Once Stripe confirms the payment the account moves onto the plan and keeps the card for later charges. For an account with no card on file; with one, change plan directly. Requires the `billing:write` scope.
+         */
+        post: operations["account_plan_checkout"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/account/plans": {
         parameters: {
             query?: never;
@@ -434,6 +454,26 @@ export interface paths {
          * @description Updates opt-in auto-recharge; enabling with no saved card returns a setup URL. Requires the `billing:write` scope.
          */
         post: operations["auto_recharge_set"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/billing/card": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get the card on file.
+         * @description Returns the brand, last four digits and expiry of the card the account's plan fee and auto top-ups are charged to. Requires the `usage:read` or `machine:read` scope.
+         */
+        get: operations["billing_card_get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -2324,8 +2364,7 @@ export interface components {
             scopes: string[];
         };
         /**
-         * @description Opt-in saved-card auto-recharge settings (`GET`/`POST /v1/billing/auto-recharge`).
-         *     Threshold/amount are the RESOLVED effective values (per-tenant override, else
+         * @description Threshold/amount are the RESOLVED effective values (per-tenant override, else
          *     fleet default), so the UI can render exactly what will happen.
          */
         AutoRechargeSettings: {
@@ -2388,6 +2427,21 @@ export interface components {
              * @description 0 is the empty filesystem a cache disk starts as; each publish adds one.
              */
             version: number;
+        };
+        /**
+         * @description Opt-in saved-card auto-recharge settings (`GET`/`POST /v1/billing/auto-recharge`).
+         *     The card on file: what the account's plan fee and auto top-ups are charged
+         *     to, as Stripe describes it. Never the number itself.
+         */
+        CardOnFile: {
+            /** @description Card network, e.g. `visa`, `mastercard`, `amex`. */
+            brand: string;
+            /** Format: int32 */
+            expMonth: number;
+            /** Format: int32 */
+            expYear: number;
+            /** @description Last four digits. */
+            last4: string;
         };
         /**
          * @description Ask to move this tenant onto a different plan. Only plans whose
@@ -2983,7 +3037,11 @@ export interface components {
         /** @description The cache disk a machine runs with. */
         MachineCacheDisk: {
             cacheDiskId: string;
+            /** @description Put in a cache slot by a restore, which needs an engine that serves slots. */
+            intoSlot?: boolean;
             mountPath: string;
+            /** @description Attached unmounted, as a slot a restore can put another cache in. */
+            slot?: boolean;
             /** Format: int32 */
             version: number;
         };
@@ -2999,6 +3057,12 @@ export interface components {
              *     left out.
              */
             mountPath?: string | null;
+            /**
+             * @description Attach it as a slot: left unmounted, so a checkpoint of the machine can
+             *     be restored with a different cache mounted here (`cacheDisk` on restore).
+             *     The slot's size is this cache disk's size; its contents are never read.
+             */
+            slot?: boolean;
             /**
              * Format: int32
              * @description Version to start from; the latest when left out.
@@ -3730,6 +3794,7 @@ export interface components {
         };
         /** @description Create a stopped machine from a durable portable checkpoint. */
         RestorePortableCheckpointRequest: {
+            cacheDisk?: null | components["schemas"]["MachineCacheDiskSpec"];
             name: string;
         };
         ScaleRequest: {
@@ -4269,7 +4334,7 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description The plan's monthly fee has no saved card to bill, or the card was declined; the plan does not move. */
+            /** @description The plan's monthly fee has no saved card to bill (subscribe through /v1/account/plan/checkout instead), or the card was declined; the plan does not move. */
             402: {
                 headers: {
                     [name: string]: unknown;
@@ -4297,6 +4362,91 @@ export interface operations {
                 };
             };
             /** @description That plan is not self-serve */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limited; retry after the Retry-After header */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Paid plans are not enabled on this deployment */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    account_plan_checkout: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ChangePlanRequest"];
+            };
+        };
+        responses: {
+            /** @description Returns {"url": <stripe-hosted url>} for a Stripe Checkout in subscription mode; the browser comes back to the console's billing page. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Missing or invalid API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Key lacks the required scope */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The account is already on that plan, or already pays a plan fee */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description That plan is not self-serve, or has no monthly fee */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -5541,6 +5691,80 @@ export interface operations {
             };
             /** @description Internal error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    billing_card_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The card on file */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CardOnFile"];
+                };
+            };
+            /** @description Missing or invalid API key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Key lacks the required scope */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description No card on file, or card payments are not enabled */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Rate limited; retry after the Retry-After header */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The payment provider did not answer */
+            502: {
                 headers: {
                     [name: string]: unknown;
                 };

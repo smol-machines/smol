@@ -35,6 +35,7 @@ from .types import (
     ConnectOptions,
     MachineSummary,
     CacheDiskInfo,
+    CacheDiskRef,
     CacheDiskVersion,
     PublishedCacheDisk,
     CredentialSpec,
@@ -2043,12 +2044,7 @@ def make_transport(config: MachineConfig, conn: Optional[ConnectOptions] = None)
         if config.labels:
             body["labels"] = dict(config.labels)
         if config.cache_disk is not None:
-            cache_disk: dict[str, Any] = {"cache": config.cache_disk.cache}
-            if config.cache_disk.version is not None:
-                cache_disk["version"] = config.cache_disk.version
-            if config.cache_disk.mount_path is not None:
-                cache_disk["mountPath"] = config.cache_disk.mount_path
-            body["cacheDisk"] = cache_disk
+            body["cacheDisk"] = _cache_disk_body(config.cache_disk)
 
         created = _cloud_fetch(base_url, api_key, "POST", "/v1/machines", json_body=body) or {}
         machine_id = created["id"]
@@ -2329,6 +2325,17 @@ def _cloud_credentials(conn: ConnectOptions, operation: str) -> tuple:
     return base_url, api_key
 
 
+def _cache_disk_body(ref: CacheDiskRef) -> dict[str, Any]:
+    body: dict[str, Any] = {"cache": ref.cache}
+    if ref.version is not None:
+        body["version"] = ref.version
+    if ref.mount_path is not None:
+        body["mountPath"] = ref.mount_path
+    if ref.slot:
+        body["slot"] = True
+    return body
+
+
 def _cache_disk_version_from(r: dict[str, Any]) -> CacheDiskVersion:
     return CacheDiskVersion(
         version=int(r.get("version", 0)),
@@ -2464,11 +2471,14 @@ def restore_checkpoint_transport(
     name: str,
     conn: Optional[ConnectOptions] = None,
     network: Optional[bool] = None,
+    cache_disk: Optional[CacheDiskRef] = None,
 ) -> Transport:
     """Restore one local artifact or durable cloud checkpoint and return it ready.
 
     With a cloud target, a checkpoint file on this computer is uploaded first.
     ``network`` opens or blocks a cloud machine's network (blocked when unset).
+    ``cache_disk`` mounts that cache in the slot the checkpoint's machine was
+    created with, in place of the cache it was captured with.
     """
     if not checkpoint_id or not name:
         raise InvalidConfigError("checkpoint id and restored machine name are required.")
@@ -2484,6 +2494,8 @@ def restore_checkpoint_transport(
     explicit_key = conn.api_key or os.environ.get("SMOL_CLOUD_TOKEN")
     use_cloud = conn.target == "cloud" or (conn.target != "local" and bool(explicit_key))
     if not use_cloud:
+        if cache_disk is not None:
+            raise InvalidConfigError("cache_disk is cloud-only; a local restore has no cache slot.")
         native = _load_native()
         path = os.path.abspath(os.fspath(checkpoint_id))
         transport: Optional[LocalTransport] = None
@@ -2510,6 +2522,8 @@ def restore_checkpoint_transport(
     body: dict = {"name": name}
     if network is not None:
         body["network"] = {"mode": "open" if network else "blocked"}
+    if cache_disk is not None:
+        body["cacheDisk"] = _cache_disk_body(cache_disk)
     created = _cloud_fetch(
         base_url,
         api_key,
