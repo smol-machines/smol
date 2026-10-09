@@ -181,7 +181,7 @@ class SmolWorkspace(AbstractCapability[AgentDepsT]):
     """
 
     image: str | None = None
-    """Optional local OCI image archive or cached image. The default uses Smol's BusyBox rootfs."""
+    """Optional registry image; pulls require `allow_hosts`. The default uses Smol's BusyBox rootfs."""
 
     allow_hosts: Sequence[str] | None = None
     """Guest egress hostname allowlist, including image registry hosts when pulling an image."""

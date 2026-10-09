@@ -433,11 +433,14 @@ async def run_task():
 
 To resume, use `agent.run('Continue', workspace=saved_ref)` and keep the VM
 until you explicitly destroy it. The built-in rootfs has basic shell tools;
-for Python, Git, or other tools use a local OCI image archive with
-`SmolWorkspace(image='/path/to/image.tar')` and the same `image=` on a directly
-constructed backend. A registry image requires network access during pull:
-`allow_hosts=['registry.example.com']` sets guest egress to that allowlist.
-Include every hostname used by your registry and its image layer storage.
+for Python, Git, or other tools choose a registry image. Pulling it needs a
+scoped egress allowlist, for example `SmolWorkspace(image='alpine:3.20',
+allow_hosts=['registry-1.docker.io', 'auth.docker.io',
+'production.cloudflare.docker.com', 'index.docker.io'])`. Configure the same
+`image=` and `allow_hosts=` on an explicitly constructed backend. Registry and
+image-layer hostnames vary; include those used by your chosen image.
+The current Python SDK does not support offline local archive paths through
+`MachineConfig(image=...)`, so use the default offline rootfs for air-gapped runs.
 This adapter currently targets local Smol VMs on hosts with virtualization.
 It flushes guest disk writes after each completed command so a saved workspace
 reference survives a host-process exit; this adds a disk flush per command.

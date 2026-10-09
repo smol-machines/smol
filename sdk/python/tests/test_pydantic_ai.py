@@ -35,7 +35,7 @@ def test_concurrent_acquisition_survives_caller_cancellation(monkeypatch):
             return Machine()
 
         monkeypatch.setattr(AsyncMachine, 'create', create)
-        backend = adapter.SmolWorkspaceBackend(image='/tmp/offline-image.tar')
+        backend = adapter.SmolWorkspaceBackend(image='alpine:3.20', allow_hosts=['registry-1.docker.io'])
         first = asyncio.create_task(backend.working_dir())
         await setup_started.wait()
         first.cancel()
@@ -50,8 +50,8 @@ def test_concurrent_acquisition_survives_caller_cancellation(monkeypatch):
         assert backend.ref.id == 'test-vm'
         assert len(created) == 1
         assert created[0].persistent is True
-        assert created[0].image == '/tmp/offline-image.tar'
-        assert created[0].resources is None
+        assert created[0].image == 'alpine:3.20'
+        assert created[0].resources.allow_hosts == ['registry-1.docker.io']
 
     asyncio.run(scenario())
 
