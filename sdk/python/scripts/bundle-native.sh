@@ -86,11 +86,13 @@ _vendor_macho_deps() {
 
 case "$(uname -s)" in
   Darwin)
-    shopt -s nullglob
-    for src in "$LIB_DIR"/libkrun.dylib "$LIB_DIR"/libkrunfw*.dylib; do
+    # Only the names that are opened: the engine dlopens libkrun.dylib, and
+    # libkrun dlopens libkrunfw.5.dylib. A wheel is a zip and cannot hold a
+    # symlink, so copying the libkrunfw.dylib alias shipped a second full copy.
+    for base in libkrun.dylib libkrunfw.5.dylib; do
+      src="$LIB_DIR/$base"
       [ -e "$src" ] || continue
-      base="$(basename "$src")"
-      cp -f "$src" "$DEST/$base"
+      cp -fL "$src" "$DEST/$base"
       chmod u+w "$DEST/$base"
       # Make the install-name relocatable.
       install_name_tool -id "@rpath/$base" "$DEST/$base" 2>/dev/null || true
@@ -109,13 +111,22 @@ case "$(uname -s)" in
     done
     ;;
   *)
-    shopt -s nullglob
-    for src in "$LIB_DIR"/libkrun.so* "$LIB_DIR"/libkrunfw.so*; do
-      [ -e "$src" ] || continue
-      base="$(basename "$src")"
-      cp -f "$src" "$DEST/$base"
-      echo "bundled $base"
-      copied=$((copied + 1))
+    # Only the names that are opened: the engine dlopens libkrun.so, and libkrun
+    # dlopens libkrunfw.so.5. A wheel is a zip and cannot hold a symlink, so
+    # copying every libkrun.so* / libkrunfw.so* alias shipped each library three
+    # times (19 MB of duplicates per Linux wheel).
+    for pair in "libkrun.so libkrun.so libkrun.so.2 libkrun.so.2.0.0" \
+                "libkrunfw.so.5 libkrunfw.so.5 libkrunfw.so"; do
+      set -- $pair
+      base="$1"; shift
+      for cand in "$@"; do
+        if [ -e "$LIB_DIR/$cand" ]; then
+          cp -fL "$LIB_DIR/$cand" "$DEST/$base"
+          echo "bundled $base"
+          copied=$((copied + 1))
+          break
+        fi
+      done
     done
     # The GPU-enabled libkrun references libvirglrenderer by a hard NEEDED AND by
     # direct symbols. Simply removing the NEEDED (as the engine's build-dist.sh
