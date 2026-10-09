@@ -567,6 +567,29 @@ impl Machine {
         checkpoint: &str,
         connect: &ConnectOptions,
     ) -> Result<Self> {
+        Self::restore_cloud(name.into(), checkpoint, None, connect)
+    }
+
+    /// [`Machine::restore_cloud_checkpoint`] with `cache_disk` mounted in
+    /// place of the cache the checkpoint was captured with. The checkpoint's
+    /// machine must have been created with [`crate::MachineBuilder::cache_slot`],
+    /// and the cache must be no larger than that slot and mount at its path.
+    /// One base checkpoint then resumes with each project's own cache.
+    pub fn restore_cloud_checkpoint_with_cache_disk(
+        name: impl Into<String>,
+        checkpoint: &str,
+        cache_disk: smol_cloud::types::MachineCacheDisk,
+        connect: &ConnectOptions,
+    ) -> Result<Self> {
+        Self::restore_cloud(name.into(), checkpoint, Some(&cache_disk), connect)
+    }
+
+    fn restore_cloud(
+        name: String,
+        checkpoint: &str,
+        cache_disk: Option<&smol_cloud::types::MachineCacheDisk>,
+        connect: &ConnectOptions,
+    ) -> Result<Self> {
         if connect.target() != Target::Cloud {
             return Err(Error::new(
                 ErrorKind::NotSupported,
@@ -574,9 +597,13 @@ impl Machine {
                  a local capture is a file, so pass its path to restore_checkpoint",
             ));
         }
-        let name = name.into();
         let client = connect.client()?;
-        let restored = client.restore_checkpoint(checkpoint, &name)?;
+        let restored = match cache_disk {
+            Some(cache_disk) => {
+                client.restore_checkpoint_with_cache_disk(checkpoint, &name, cache_disk)?
+            }
+            None => client.restore_checkpoint(checkpoint, &name)?,
+        };
         let transport = crate::transport::cloud::CloudTransport::new(
             client.clone(),
             restored.display_name(),

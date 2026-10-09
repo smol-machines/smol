@@ -1039,6 +1039,18 @@ async function main(): Promise<void> {
     JSON.stringify(seen.createBody?.cacheDisk) === JSON.stringify({ cache: "deps", version: 0, mountPath: "/deps" }),
     JSON.stringify(seen.createBody?.cacheDisk),
   );
+  await Machine.create({ image: "alpine", cacheDisk: { cache: "slot-20g", slot: true } }, cloud);
+  check(
+    "cloud create sends a cache slot",
+    JSON.stringify(seen.createBody?.cacheDisk) === JSON.stringify({ cache: "slot-20g", slot: true }),
+    JSON.stringify(seen.createBody?.cacheDisk),
+  );
+  await Machine.restoreCheckpoint("ckpt-1", "proj", cloud, { cacheDisk: { cache: "project-a", version: 3 } });
+  check(
+    "restoreCheckpoint sends the cache to fill the slot with",
+    JSON.stringify(seen.restoreBody?.cacheDisk) === JSON.stringify({ cache: "project-a", version: 3 }),
+    JSON.stringify(seen.restoreBody),
+  );
   const published = await withCache.publishCacheDisk();
   check(
     "publishCacheDisk posts to the machine and returns the new version",

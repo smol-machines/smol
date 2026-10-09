@@ -775,6 +775,14 @@ def main() -> int:
         check("cloud create sends cacheDisk",
               captured["create_body"].get("cacheDisk") == {"cache": "deps", "version": 0, "mountPath": "/deps"},
               str(captured["create_body"].get("cacheDisk")))
+        Machine.create(MachineConfig(image="alpine:3.20", cache_disk=CacheDiskRef("slot-20g", slot=True)), cloud)
+        check("cloud create sends a cache slot",
+              captured["create_body"].get("cacheDisk") == {"cache": "slot-20g", "slot": True},
+              str(captured["create_body"].get("cacheDisk")))
+        Machine.restore_checkpoint("ckpt-1", "proj", cloud, cache_disk=CacheDiskRef("project-a", version=3))
+        check("restore_checkpoint sends the cache to fill the slot with",
+              captured.get("restore_body", {}).get("cacheDisk") == {"cache": "project-a", "version": 3},
+              str(captured.get("restore_body")))
         published = with_cache.publish_cache_disk()
         check("publish_cache_disk posts to the machine and returns the new version",
               str(captured.get("cache_disk_publish", "")).endswith("/cache-disk/publish")

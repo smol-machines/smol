@@ -342,6 +342,12 @@ export interface RestoreCheckpointOptions {
    *  an earlier save point; do not run two machines from one checkpoint with
    *  it. Local target only. */
   keepIdentity?: boolean;
+  /** Mount this cache in the slot the checkpoint's machine was created with
+   *  (`cacheDisk: { cache, slot: true }`), in place of the cache it was
+   *  captured with. It must be no larger than the slot and mount at the
+   *  slot's path, so one base checkpoint resumes with each project's own
+   *  cache. Cloud only. */
+  cacheDisk?: CacheDiskRef;
 }
 
 /** Per-call execution options. */
@@ -576,6 +582,10 @@ export interface CacheDiskRef {
   version?: number;
   /** Absolute guest path to mount it at; the cache disk's own when omitted. */
   mountPath?: string;
+  /** On create, attach the cache unmounted as a slot: restoring a checkpoint
+   *  of the machine with `restoreCheckpoint(..., { cacheDisk })` mounts any
+   *  cache no larger than this one there, at this one's mount path. */
+  slot?: boolean;
 }
 
 /** Options for creating a cache disk. */

@@ -321,6 +321,17 @@ await m.publishCacheDisk();                                       // v1
 // Every machine created with cacheDisk: { cache: "deps" } now starts from v1.
 ```
 
+One checkpoint can resume with many caches. Create the base machine with an
+empty cache as a slot, which attaches it unmounted, and checkpoint it warm.
+Each restore then mounts its own cache there, no larger than the slot and at
+the slot's mount path:
+
+```ts
+const base = await Machine.create({ image: "node:22", cacheDisk: { cache: "slot-20g", slot: true } });
+const { id } = await base.checkpoint();
+const a = await Machine.restoreCheckpoint(id, "project-a", undefined, { cacheDisk: { cache: "project-a" } });
+```
+
 ## Building from source
 
 This package's native core lives alongside it (Rust, `src/*.rs`) and links the

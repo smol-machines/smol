@@ -314,7 +314,7 @@
             }
           },
           "402": {
-            "description": "The plan's monthly fee has no saved card to bill, or the card was declined; the plan does not move.",
+            "description": "The plan's monthly fee has no saved card to bill (subscribe through /v1/account/plan/checkout instead), or the card was declined; the plan does not move.",
             "content": {
               "application/json": {
                 "schema": {
@@ -345,6 +345,106 @@
           },
           "422": {
             "description": "That plan is not self-serve",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limited; retry after the Retry-After header",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Paid plans are not enabled on this deployment",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ]
+      }
+    },
+    "/v1/account/plan/checkout": {
+      "post": {
+        "tags": [
+          "billing"
+        ],
+        "summary": "Subscribe to a plan through Stripe Checkout.",
+        "description": "Returns a Stripe-hosted page that shows the plan and its monthly price, takes a card and collects the first month. Once Stripe confirms the payment the account moves onto the plan and keeps the card for later charges. For an account with no card on file; with one, change plan directly. Requires the `billing:write` scope.",
+        "operationId": "account_plan_checkout",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChangePlanRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Returns {\"url\": <stripe-hosted url>} for a Stripe Checkout in subscription mode; the browser comes back to the console's billing page."
+          },
+          "401": {
+            "description": "Missing or invalid API key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Key lacks the required scope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The account is already on that plan, or already pays a plan fee",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "That plan is not self-serve, or has no monthly fee",
             "content": {
               "application/json": {
                 "schema": {
@@ -1952,6 +2052,93 @@
           },
           "500": {
             "description": "Internal error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ]
+      }
+    },
+    "/v1/billing/card": {
+      "get": {
+        "tags": [
+          "billing"
+        ],
+        "summary": "Get the card on file.",
+        "description": "Returns the brand, last four digits and expiry of the card the account's plan fee and auto top-ups are charged to. Requires the `usage:read` or `machine:read` scope.",
+        "operationId": "billing_card_get",
+        "responses": {
+          "200": {
+            "description": "The card on file",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CardOnFile"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid API key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Key lacks the required scope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No card on file, or card payments are not enabled",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limited; retry after the Retry-After header",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "The payment provider did not answer",
             "content": {
               "application/json": {
                 "schema": {
@@ -11668,7 +11855,7 @@
       },
       "AutoRechargeSettings": {
         "type": "object",
-        "description": "Opt-in saved-card auto-recharge settings (`GET`/`POST /v1/billing/auto-recharge`).\nThreshold/amount are the RESOLVED effective values (per-tenant override, else\nfleet default), so the UI can render exactly what will happen.",
+        "description": "Threshold/amount are the RESOLVED effective values (per-tenant override, else\nfleet default), so the UI can render exactly what will happen.",
         "required": [
           "enabled",
           "thresholdMicros",
@@ -11810,6 +11997,36 @@
             "format": "int32",
             "description": "0 is the empty filesystem a cache disk starts as; each publish adds one.",
             "minimum": 0
+          }
+        }
+      },
+      "CardOnFile": {
+        "type": "object",
+        "description": "Opt-in saved-card auto-recharge settings (`GET`/`POST /v1/billing/auto-recharge`).\nThe card on file: what the account's plan fee and auto top-ups are charged\nto, as Stripe describes it. Never the number itself.",
+        "required": [
+          "brand",
+          "last4",
+          "expMonth",
+          "expYear"
+        ],
+        "properties": {
+          "brand": {
+            "type": "string",
+            "description": "Card network, e.g. `visa`, `mastercard`, `amex`."
+          },
+          "expMonth": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "expYear": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "last4": {
+            "type": "string",
+            "description": "Last four digits."
           }
         }
       },
@@ -13132,8 +13349,16 @@
           "cacheDiskId": {
             "type": "string"
           },
+          "intoSlot": {
+            "type": "boolean",
+            "description": "Put in a cache slot by a restore, which needs an engine that serves slots."
+          },
           "mountPath": {
             "type": "string"
+          },
+          "slot": {
+            "type": "boolean",
+            "description": "Attached unmounted, as a slot a restore can put another cache in."
           },
           "version": {
             "type": "integer",
@@ -13160,6 +13385,10 @@
               "null"
             ],
             "description": "Absolute guest path to mount it at; the cache disk's own mount path when\nleft out."
+          },
+          "slot": {
+            "type": "boolean",
+            "description": "Attach it as a slot: left unmounted, so a checkpoint of the machine can\nbe restored with a different cache mounted here (`cacheDisk` on restore).\nThe slot's size is this cache disk's size; its contents are never read."
           },
           "version": {
             "type": [
@@ -14725,6 +14954,17 @@
           "name"
         ],
         "properties": {
+          "cacheDisk": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/MachineCacheDiskSpec",
+                "description": "For a checkpoint captured with a cache slot: the cache to mount in it.\nIt must be no larger than the slot's cache disk, and is mounted at the\nslot's path unless `mountPath` says otherwise (it must match)."
+              }
+            ]
+          },
           "name": {
             "type": "string"
           }

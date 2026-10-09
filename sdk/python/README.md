@@ -395,6 +395,17 @@ m.stop()
 m.publish_cache_disk()                                            # v1
 ```
 
+One checkpoint can resume with many caches. Create the base machine with an
+empty cache as a slot, which attaches it unmounted, and checkpoint it warm.
+Each restore then mounts its own cache there, no larger than the slot and at
+the slot's mount path:
+
+```python
+base = Machine.create(MachineConfig(image="node:22", cache_disk=CacheDiskRef("slot-20g", slot=True)))
+ckpt = base.checkpoint()
+a = Machine.restore_checkpoint(ckpt.id, "project-a", cache_disk=CacheDiskRef("project-a"))
+```
+
 ## Install / build from source
 The cloud path is pure Python. The local path needs the native extension, which
 links `libkrun` from the sibling `smolvm` repo (three levels up).

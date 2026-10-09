@@ -35,6 +35,7 @@ from .errors import NotSupportedError, wrap_native_error
 from .types import (
     MachineSummary,
     CacheDiskInfo,
+    CacheDiskRef,
     ConnectOptions,
     PublishedCacheDisk,
     ExecOptions,
@@ -110,12 +111,16 @@ class Machine:
         name: str,
         conn: Optional[ConnectOptions] = None,
         network: Optional[bool] = None,
+        cache_disk: Optional[CacheDiskRef] = None,
     ) -> "Machine":
         """Restore a local artifact or durable cloud checkpoint and await readiness.
 
         With a cloud target, a checkpoint file on this computer is uploaded
         first, so a machine checkpointed here resumes in the cloud.
         ``network`` gives a cloud machine outbound access (blocked when unset).
+        ``cache_disk`` mounts that cache in the slot the checkpoint's machine
+        was created with (``CacheDiskRef(..., slot=True)``); it must be no
+        larger than the slot and mount at the slot's path. Cloud only.
         """
         return cls(
             restore_checkpoint_transport(
@@ -123,6 +128,7 @@ class Machine:
                 name,
                 conn,
                 network,
+                cache_disk,
             )
         )
 

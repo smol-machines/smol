@@ -393,6 +393,10 @@ class CacheDiskRef:
     """Version to start from; the latest when ``None``."""
     mount_path: Optional[str] = None
     """Absolute guest path to mount it at; the cache disk's own when ``None``."""
+    slot: bool = False
+    """On create, attach the cache unmounted as a slot: restoring a checkpoint
+    of the machine with ``restore_checkpoint(..., cache_disk=…)`` mounts any
+    cache no larger than this one there, at this one's mount path."""
 
 
 @dataclass

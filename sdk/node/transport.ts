@@ -30,6 +30,7 @@ import {
 import type {
   CheckpointOptions,
   CacheDiskInfo,
+  CacheDiskRef,
   CreateCacheDiskOptions,
   CredentialSpec,
   PublishedCacheDisk,
@@ -1973,15 +1974,7 @@ export async function makeTransport(
       ...(config.credentials?.length
         ? { credentials: config.credentials.map((c) => c.name) }
         : {}),
-      ...(config.cacheDisk
-        ? {
-            cacheDisk: {
-              cache: config.cacheDisk.cache,
-              ...(config.cacheDisk.version !== undefined ? { version: config.cacheDisk.version } : {}),
-              ...(config.cacheDisk.mountPath !== undefined ? { mountPath: config.cacheDisk.mountPath } : {}),
-            },
-          }
-        : {}),
+      ...(config.cacheDisk ? { cacheDisk: cacheDiskBody(config.cacheDisk) } : {}),
       autoStopSeconds: config.autoStopSeconds ?? null,
       ttlSeconds: config.ttlSeconds ?? null,
       // Forkable is a CREATE-time property: the control plane persists it and the
@@ -2269,6 +2262,9 @@ export async function restoreCheckpointTransport(
   }
   conn ??= { target: looksLikeLocalCheckpoint(checkpointId) ? "local" : "cloud" };
   if (!selectsCloud(conn)) {
+    if (options?.cacheDisk) {
+      throw new InvalidConfigError("cacheDisk is cloud-only: a local restore has no cache slot.");
+    }
     const path = resolvePath(checkpointId);
     let restored: LocalTransport | undefined;
     try {
@@ -2309,6 +2305,7 @@ export async function restoreCheckpointTransport(
         ...(options?.networkPolicy !== undefined
           ? { network: cloudNetwork(options.networkPolicy) }
           : {}),
+        ...(options?.cacheDisk ? { cacheDisk: cacheDiskBody(options.cacheDisk) } : {}),
       },
     },
   );
@@ -2323,6 +2320,15 @@ export async function restoreCheckpointTransport(
     throw error;
   }
   return new CloudTransport(cloudConn, created.name ?? name, id);
+}
+
+function cacheDiskBody(ref: CacheDiskRef): Schemas["MachineCacheDiskSpec"] {
+  return {
+    cache: ref.cache,
+    ...(ref.version !== undefined ? { version: ref.version } : {}),
+    ...(ref.mountPath !== undefined ? { mountPath: ref.mountPath } : {}),
+    ...(ref.slot ? { slot: true } : {}),
+  };
 }
 
 /** The control plane and key a cloud operation uses: explicit options, then
