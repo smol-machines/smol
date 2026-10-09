@@ -406,6 +406,42 @@ ckpt = base.checkpoint()
 a = Machine.restore_checkpoint(ckpt.id, "project-a", cache_disk=CacheDiskRef("project-a"))
 ```
 
+## Pydantic AI: local microVM workspace
+
+Install `smolmachines[pydantic-ai]` and `pydantic-ai-harness`. Pair
+`SmolWorkspace` with the Harness `Shell` and `FileSystem` capabilities to run
+agent commands and file operations inside a local microVM:
+
+```python
+from pydantic_ai import Agent
+from pydantic_ai_harness import FileSystem, Shell
+from smol.pydantic_ai import SmolWorkspace, SmolWorkspaceBackend
+
+sandbox = SmolWorkspace()  # Built-in BusyBox rootfs; outbound network disabled.
+backend = SmolWorkspaceBackend()
+agent = Agent('openai:gpt-5', capabilities=[sandbox, Shell(), FileSystem()])
+
+async def run_task():
+    try:
+        result = await agent.run('Create /workspace/answer.txt with 42 in it', workspace=backend)
+        print(result.output)
+        print(result.workspace.ref)  # Save to resume in a later process.
+    finally:
+        if backend.ref is not None:
+            await sandbox.destroy(backend.ref)
+```
+
+To resume, use `agent.run('Continue', workspace=saved_ref)` and keep the VM
+until you explicitly destroy it. The built-in rootfs has basic shell tools;
+for Python, Git, or other tools use a local OCI image archive with
+`SmolWorkspace(image='/path/to/image.tar')` and the same `image=` on a directly
+constructed backend. A registry image requires network access during pull:
+`allow_hosts=['registry.example.com']` sets guest egress to that allowlist.
+Include every hostname used by your registry and its image layer storage.
+This adapter currently targets local Smol VMs on hosts with virtualization.
+It flushes guest disk writes after each completed command so a saved workspace
+reference survives a host-process exit; this adds a disk flush per command.
+
 ## Install / build from source
 The cloud path is pure Python. The local path needs the native extension, which
 links `libkrun` from the sibling `smolvm` repo (three levels up).
