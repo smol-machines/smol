@@ -18,7 +18,8 @@
   ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "test": "bun test test/unit.test.ts"
+    "test": "bun test test/unit.test.ts",
+    "prepublishOnly": "tsc -p tsconfig.json && bun test test/unit.test.ts"
   },
   "keywords": [
     "opencode",
