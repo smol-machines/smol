@@ -235,3 +235,21 @@ jobs:
         env:
           PYTHONPATH: python
         run: python -m pytest -q tests/test_harbor_adapter.py
+
+  smolagents-adapter:
+    name: Python · smolagents executor contract
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: sdk/python
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install integration dependencies
+        run: python -m pip install 'smolagents>=1.26,<2' pytest
+      - name: Run smolagents executor contract tests
+        env:
+          PYTHONPATH: python
+        run: python -m pytest -q tests/test_smolagents_executor.py
