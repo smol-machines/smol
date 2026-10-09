@@ -1,0 +1,31 @@
+name: OpenCode integration
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "integrations/opencode-smolmachines/**"
+      - ".github/workflows/opencode-integration-ci.yml"
+  pull_request:
+    paths:
+      - "integrations/opencode-smolmachines/**"
+      - ".github/workflows/opencode-integration-ci.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  plugin:
+    name: Build and test OpenCode plugin
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: integrations/opencode-smolmachines
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.0
+      - run: bun install --frozen-lockfile
+      - run: bun run build
+      - run: bun test test/unit.test.ts

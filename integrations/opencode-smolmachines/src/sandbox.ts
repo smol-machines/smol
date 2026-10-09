@@ -3,8 +3,8 @@ import path from "node:path"
 
 /** What a project's sandbox is made of. Every field is optional in opencode.json. */
 export interface SandboxOptions {
-  /** OCI image the commands run in. Default: `node:22-bookworm` (git, curl, python3, a C toolchain, Node). */
-  image?: string
+  /** OCI image the commands run in; null uses the built-in shell-only guest. Default: `node:22-bookworm`. */
+  image?: string | null
   /** Shell inside the machine. Default: `bash`, falling back to `sh` when the image has no bash. */
   shell?: string
   /** Give the machine network access. Default: true. Ignored when an allow list is set. */
@@ -46,6 +46,7 @@ export interface MachineHandle {
 export interface MachineApi {
   create(config: Record<string, unknown>): Promise<MachineHandle>
   connect(name: string): Promise<MachineHandle>
+  list(): Promise<{ name: string; labels: Record<string, string> }[]>
 }
 
 export interface CommandResult {
@@ -91,9 +92,8 @@ export function machineConfig(worktree: string, options: SandboxOptions): Record
   if (options.allowHosts?.length) resources.allowHosts = options.allowHosts
   if (options.allowCidrs?.length) resources.allowCidrs = options.allowCidrs
   const root = path.resolve(worktree)
-  return {
-    name: machineName(root),
-    image: options.image ?? DEFAULT_IMAGE,
+  const shape = {
+    image: options.image === null ? undefined : options.image ?? DEFAULT_IMAGE,
     // The project keeps its host path inside the machine, so absolute paths in commands and
     // tool output mean the same thing on both sides.
     mounts: [{ source: root, target: root }, ...(options.mounts ?? [])],
@@ -103,6 +103,9 @@ export function machineConfig(worktree: string, options: SandboxOptions): Record
     // the session so the next one reuses it (and everything installed in it).
     detach: true,
   }
+  // The name is stored on the host and cannot be forged by code inside the VM. Never boot a
+  // machine made under an older policy just to check its configuration inside the guest.
+  return { ...shape, name: `${machineName(root)}-${configFingerprint(shape)}` }
 }
 
 export function configFingerprint(config: Record<string, unknown>): string {
@@ -152,24 +155,20 @@ export class Sandbox {
   private async acquire(): Promise<MachineHandle> {
     const fingerprint = configFingerprint(this.config)
     const labels = { "opencode-smolmachines": "true", [CONFIG_LABEL]: fingerprint }
-    let existing: MachineHandle | undefined
-    try {
-      existing = await this.api.connect(this.name)
-    } catch (error) {
-      if ((error as { code?: string }).code !== "NOT_FOUND") throw error
-    }
-    if (existing) {
+    const record = (await this.api.list()).find((machine) => machine.name === this.name)
+    if (record) {
+      // Only host-side labels attest to this machine's policy. A guest file is writable by the
+      // commands we sandbox and cannot prove what network/mount permissions it booted with.
+      if (record.labels[CONFIG_LABEL] !== fingerprint || record.labels["opencode-smolmachines"] !== "true") {
+        throw new Error(`machine ${this.name} has unrecognized configuration; delete it before using this project`)
+      }
+      const existing = await this.api.connect(this.name)
       if ((await existing.state()) !== "running") await existing.start()
       await this.settle(existing)
-      const recorded = await this.recordedFingerprint(existing)
-      if (recorded === fingerprint) return existing
-      // Options changed (image, mounts, network policy): a stale machine would quietly run
-      // commands with the old policy, so replace it.
-      await existing.delete()
+      return existing
     }
     const machine = await this.api.create({ ...this.config, labels })
     await this.settle(machine)
-    await this.writeFingerprint(machine, fingerprint)
     return machine
   }
 
@@ -184,28 +183,6 @@ export class Sandbox {
     for (let attempt = 0; attempt < SETTLE_ATTEMPTS; attempt++) {
       const probe = await machine.exec(["sh", "-c", "sleep 0.5"], { timeout: 10 })
       if (probe.exitCode !== KILLED_EXIT) return
-    }
-  }
-
-  /** The fingerprint lives in the machine itself, so a reused machine can prove its shape. */
-  private async recordedFingerprint(machine: MachineHandle): Promise<string | undefined> {
-    try {
-      const result = await machine.exec(["cat", "/etc/opencode-smolmachines"], { timeout: 10 })
-      return result.exitCode === 0 ? result.stdout.trim() : undefined
-    } catch {
-      return undefined
-    }
-  }
-
-  private async writeFingerprint(machine: MachineHandle, fingerprint: string): Promise<void> {
-    const result = await machine.exec(
-      ["sh", "-c", `printf %s "$1" > /etc/opencode-smolmachines`, "sh", fingerprint],
-      { timeout: 10 },
-    )
-    // Unrecorded, the next session would take this machine for a stale one and rebuild it,
-    // throwing away everything installed in it.
-    if (result.exitCode !== 0) {
-      throw new Error(`could not record the sandbox configuration: ${result.stderr.trim() || `exit ${result.exitCode}`}`)
     }
   }
 

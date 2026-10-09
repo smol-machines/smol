@@ -18,6 +18,7 @@ The project directory is mounted at the same path, so files you change with othe
 const smolMachines: MachineApi = {
   create: (config) => Machine.create(config as Parameters<typeof Machine.create>[0]),
   connect: (name) => Machine.connect(name, { target: "local" } as Parameters<typeof Machine.connect>[1]),
+  list: async () => (await Machine.list({ target: "local" })).map(({ name, labels }) => ({ name, labels })),
 }
 
 /** The first word of each command, as OpenCode's own shell tool keys "always allow" rules. */

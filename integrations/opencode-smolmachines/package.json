@@ -19,6 +19,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "test": "bun test test/unit.test.ts",
+    "test:live": "SMOL_OPENCODE_LIVE=1 bun test test/live.test.ts",
     "prepublishOnly": "tsc -p tsconfig.json && bun test test/unit.test.ts"
   },
   "keywords": [
