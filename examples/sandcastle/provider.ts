@@ -142,12 +142,6 @@ export const smol = (options: SmolOptions): IsolatedSandboxProvider => {
             opts?.stdin === undefined
               ? undefined
               : `/tmp/sandcastle-stdin-${randomUUID()}`;
-          if (stdinPath)
-            await machine.writeFile(
-              stdinPath,
-              Buffer.from(opts!.stdin!),
-              0o644,
-            );
           const argv = stdinPath
             ? ["sh", "-c", 'exec sh -c "$1" < "$2"', "sh", command, stdinPath]
             : ["sh", "-c", command];
@@ -156,6 +150,9 @@ export const smol = (options: SmolOptions): IsolatedSandboxProvider => {
           let pendingLine = "";
           let exitCode: number | undefined;
           try {
+            if (stdinPath) {
+              await machine.writeFile(stdinPath, Buffer.from(opts!.stdin!), 0o644);
+            }
             for await (const event of machine.execStream(argv, {
               workdir: opts?.cwd ?? REPO_PATH,
               env: createOptions.env,
