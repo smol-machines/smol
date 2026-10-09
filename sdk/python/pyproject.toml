@@ -44,6 +44,8 @@ verifiers = ["verifiers>=0.2"]
 nemo-gym = ["nemo-gym>=0.5.0"]
 # Use SmolVM as a Harbor evaluation environment: `pip install smolmachines[harbor]`.
 harbor = ["harbor>=0.22,<0.23"]
+# Use Smol Machines as a Deep Agents sandbox backend.
+deepagents = ["deepagents>=0.7,<0.8"]
 
 [project.entry-points."nemo_gym.sandbox_providers"]
 smol = "smol.nemo_gym:SmolProvider"

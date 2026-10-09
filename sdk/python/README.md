@@ -269,6 +269,36 @@ merely reusing image layers. The initial implementation supports Linux
 single-container tasks with a published `docker_image`; Docker Compose and
 Dockerfile-only tasks fail clearly instead of silently changing semantics.
 
+### Deep Agents sandbox
+
+Install `smolmachines[deepagents]` to give a Deep Agents coding agent an
+isolated microVM. The adapter accepts an existing `Machine`, so the caller
+controls its lifetime and can choose a local VM or smol cloud:
+
+```python
+import os
+from deepagents import create_deep_agent
+from smol import ConnectOptions, Machine, MachineConfig, ResourceSpec
+from smol.deepagents import SmolSandbox
+
+config = MachineConfig(
+    image="python:3.12-alpine",  # Deep Agents uses python3 inside the guest
+    resources=ResourceSpec(cpus=2, memory_mb=1024),
+    network=True,  # local image pull needs guest egress; restrict it for production
+)
+# For managed cloud instead: Machine.create(config, ConnectOptions(target="cloud"))
+with Machine.create(config) as machine:
+    agent = create_deep_agent(model=os.environ["DEEPAGENTS_MODEL"], backend=SmolSandbox(machine))
+    answer = agent.invoke({"messages": [{"role": "user", "content": "Inspect /workspace"}]})
+    print(answer["messages"][-1].content)
+```
+
+Local mode needs KVM on Linux or Hypervisor.framework on Apple Silicon. The
+`BaseSandbox` implementation uses `python3` for file search and edits, so
+choose an image that contains it. `network=True` in this local demonstration
+allows arbitrary outbound connections; apply an egress policy suitable for
+untrusted agent code in a real workload.
+
 ## Architecture
 - **Pure-Python layer** (`python/smol`): `Machine`, transports, types, errors —
   zero third-party deps (the cloud transport uses only `urllib`).
