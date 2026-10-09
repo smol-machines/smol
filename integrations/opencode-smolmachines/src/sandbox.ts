@@ -61,6 +61,10 @@ export const MAX_OUTPUT_CHARS = 30_000
 const CONFIG_LABEL = "opencode-smolmachines-config"
 /** smolvm reports an exec that outlived its timeout as exit 124. */
 const TIMEOUT_EXIT = 124
+/** 128 + SIGKILL: a command killed with the container it ran in. */
+const KILLED_EXIT = 137
+/** Probes before giving up on waiting; a workload restarts at most once per boot. */
+const SETTLE_ATTEMPTS = 5
 
 function slug(text: string): string {
   return (
@@ -155,18 +159,32 @@ export class Sandbox {
       if ((error as { code?: string }).code !== "NOT_FOUND") throw error
     }
     if (existing) {
+      if ((await existing.state()) !== "running") await existing.start()
+      await this.settle(existing)
       const recorded = await this.recordedFingerprint(existing)
-      if (recorded === fingerprint) {
-        if ((await existing.state()) !== "running") await existing.start()
-        return existing
-      }
+      if (recorded === fingerprint) return existing
       // Options changed (image, mounts, network policy): a stale machine would quietly run
       // commands with the old policy, so replace it.
       await existing.delete()
     }
     const machine = await this.api.create({ ...this.config, labels })
+    await this.settle(machine)
     await this.writeFingerprint(machine, fingerprint)
     return machine
+  }
+
+  /**
+   * Wait out the image's own workload. smolvm runs commands inside the container the image's
+   * default command started, so when that command exits on its own (a bare `node` or `python`
+   * with no input, as many images do) it takes any command still running with it, as exit 137.
+   * After that the machine's commands run in a container that stays up. Boot (and every restart)
+   * re-runs the workload, so a short probe has to survive before real commands go in.
+   */
+  private async settle(machine: MachineHandle): Promise<void> {
+    for (let attempt = 0; attempt < SETTLE_ATTEMPTS; attempt++) {
+      const probe = await machine.exec(["sh", "-c", "sleep 0.5"], { timeout: 10 })
+      if (probe.exitCode !== KILLED_EXIT) return
+    }
   }
 
   /** The fingerprint lives in the machine itself, so a reused machine can prove its shape. */
@@ -180,9 +198,15 @@ export class Sandbox {
   }
 
   private async writeFingerprint(machine: MachineHandle, fingerprint: string): Promise<void> {
-    await machine.exec(["sh", "-c", `printf %s "$1" > /etc/opencode-smolmachines`, "sh", fingerprint], {
-      timeout: 10,
-    })
+    const result = await machine.exec(
+      ["sh", "-c", `printf %s "$1" > /etc/opencode-smolmachines`, "sh", fingerprint],
+      { timeout: 10 },
+    )
+    // Unrecorded, the next session would take this machine for a stale one and rebuild it,
+    // throwing away everything installed in it.
+    if (result.exitCode !== 0) {
+      throw new Error(`could not record the sandbox configuration: ${result.stderr.trim() || `exit ${result.exitCode}`}`)
+    }
   }
 
   private shellPath(machine: MachineHandle): Promise<string> {

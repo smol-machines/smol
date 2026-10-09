@@ -11,7 +11,11 @@ import {
 type Call = { command: string[]; opts?: Record<string, unknown> }
 
 /** A machine that records what it was asked and answers like smolvm does. */
-function fakeMachine(name: string, opts: { fingerprint?: string; state?: string; shell?: string } = {}) {
+function fakeMachine(
+  name: string,
+  opts: { fingerprint?: string; state?: string; shell?: string; killedProbes?: number; failWrite?: boolean } = {},
+) {
+  let killedProbes = opts.killedProbes ?? 0
   const calls: Call[] = []
   let state = opts.state ?? "running"
   let fingerprint = opts.fingerprint
@@ -25,7 +29,15 @@ function fakeMachine(name: string, opts: { fingerprint?: string; state?: string;
       const script = command.join(" ")
       if (script.startsWith("cat /etc/opencode-smolmachines"))
         return fingerprint ? { exitCode: 0, stdout: fingerprint, stderr: "" } : { exitCode: 1, stdout: "", stderr: "no file" }
+      if (script === "sh -c sleep 0.5") {
+        if (killedProbes > 0) {
+          killedProbes--
+          return { exitCode: 137, stdout: "", stderr: "" }
+        }
+        return { exitCode: 0, stdout: "", stderr: "" }
+      }
       if (script.includes("> /etc/opencode-smolmachines")) {
+        if (opts.failWrite) return { exitCode: 1, stdout: "", stderr: "read-only file system" }
         fingerprint = command[command.length - 1]
         return { exitCode: 0, stdout: "", stderr: "" }
       }
@@ -159,6 +171,36 @@ describe("running commands", () => {
     }
     await new Sandbox(ROOT, {}, api).run({ command: "ls", directory: ROOT })
     expect(api.created[0].machine.calls.some((c) => c.command[0] === "/bin/sh" && c.command[2] === "ls")).toBe(true)
+  })
+})
+
+describe("the image's own workload", () => {
+  test("a workload that exits and kills the first commands is waited out before anything is recorded", async () => {
+    const api = fakeApi()
+    api.create = async (config) => {
+      const machine = fakeMachine(config.name as string, { killedProbes: 2 })
+      api.created.push({ config, machine })
+      return machine
+    }
+    const result = await new Sandbox(ROOT, {}, api).run({ command: "ls", directory: ROOT })
+    expect(result.output).toBe("ran: ls")
+    const probes = api.created[0].machine.calls.filter((c) => c.command.join(" ") === "sh -c sleep 0.5")
+    expect(probes.length).toBe(3)
+    const reused = fakeApi(api.created[0].machine)
+    await new Sandbox(ROOT, {}, reused).run({ command: "ls", directory: ROOT })
+    expect(reused.created.length).toBe(0)
+  })
+
+  test("a configuration that cannot be recorded fails loudly instead of being rebuilt next time", async () => {
+    const api = fakeApi()
+    api.create = async (config) => {
+      const machine = fakeMachine(config.name as string, { failWrite: true })
+      api.created.push({ config, machine })
+      return machine
+    }
+    await expect(new Sandbox(ROOT, {}, api).run({ command: "ls", directory: ROOT })).rejects.toThrow(
+      /could not record the sandbox configuration/,
+    )
   })
 })
 
