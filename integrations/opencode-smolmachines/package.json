@@ -1,0 +1,52 @@
+{
+  "name": "opencode-smolmachines",
+  "version": "0.1.0",
+  "description": "Run OpenCode's shell commands inside a smol machine: a hardware-isolated microVM with egress control, on macOS and Linux.",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "bun test test/unit.test.ts"
+  },
+  "keywords": [
+    "opencode",
+    "opencode-plugin",
+    "sandbox",
+    "microvm",
+    "smolmachines",
+    "smolvm"
+  ],
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/smol-machines/smol.git",
+    "directory": "integrations/opencode-smolmachines"
+  },
+  "peerDependencies": {
+    "@opencode-ai/plugin": ">=1.0.0"
+  },
+  "dependencies": {
+    "smolmachines": "^1.25.1"
+  },
+  "devDependencies": {
+    "@opencode-ai/plugin": "latest",
+    "@types/bun": "latest",
+    "typescript": "^5.6.0"
+  },
+  "homepage": "https://github.com/smol-machines/smol/tree/main/integrations/opencode-smolmachines#readme",
+  "bugs": {
+    "url": "https://github.com/smol-machines/smol/issues"
+  }
+}
