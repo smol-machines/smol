@@ -170,6 +170,8 @@ jobs:
           bun test/e2e.ts
           bun test/ai-sdk-e2e.ts
           node --import tsx test/eve-e2e.ts
+          node --import tsx test/eve-process-resume-e2e.ts init "$RUNNER_TEMP/eve-process-resume.json"
+          node --import tsx test/eve-process-resume-e2e.ts resume "$RUNNER_TEMP/eve-process-resume.json"
           bun test/bun-package-e2e.ts
           bun test/fork-service-e2e.ts
           bun test/checkpoint-branch-e2e.ts
