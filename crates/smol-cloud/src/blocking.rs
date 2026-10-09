@@ -581,6 +581,17 @@ impl Client {
 
     /// Write a file into a machine. The route carries no mode.
     pub fn write_file(&self, id: &str, path: &str, data: &[u8]) -> Result<()> {
+        if data.len() as u64 > MAX_FILE_BYTES {
+            // Refuse what the cloud would refuse, before sending any of it.
+            return Err(Error::new(
+                ErrorKind::Other,
+                format!(
+                    "{path} is {:.1} MiB; cloud machines accept files up to {} MiB",
+                    data.len() as f64 / (1 << 20) as f64,
+                    MAX_FILE_BYTES >> 20
+                ),
+            ));
+        }
         self.empty(
             reqwest::Method::PUT,
             &format!("/v1/machines/{id}/files/{}", encode_path(path)),
@@ -1391,6 +1402,24 @@ mod tests {
         let error = client.machines().unwrap_err();
         assert_eq!(error.kind(), ErrorKind::Unauthorized);
         assert_eq!(rejected.load(std::sync::atomic::Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn a_file_over_the_cloud_limit_is_refused_before_it_is_sent() {
+        // Nothing listens here: reaching the network would be a Connection error.
+        let client = Client::new(Credentials::new("http://127.0.0.1:9", "smk_test")).unwrap();
+        let error = client
+            .write_file(
+                "mach-x",
+                "/tmp/big.bin",
+                &vec![0; MAX_FILE_BYTES as usize + 1],
+            )
+            .unwrap_err();
+        assert_eq!(error.kind(), ErrorKind::Other);
+        assert!(
+            error.to_string().contains("accept files up to 100 MiB"),
+            "{error}"
+        );
     }
 
     #[test]

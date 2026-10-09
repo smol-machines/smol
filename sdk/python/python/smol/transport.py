@@ -1272,6 +1272,13 @@ class CloudTransport:
         )
 
     def write_file(self, path: str, data: bytes, mode: Optional[int] = None) -> None:
+        if len(data) > CLOUD_MAX_FILE_BYTES:
+            # Refuse what the cloud would refuse, before sending any of it.
+            raise SmolError(
+                "SMOLVM_ERROR",
+                f"{path} is {len(data) / (1 << 20):.1f} MiB; cloud machines accept files up to "
+                f"{CLOUD_MAX_FILE_BYTES >> 20} MiB",
+            )
         _cloud_fetch(
             self._base,
             self._key,

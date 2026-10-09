@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { wrapNativeError, SmolError } from '../errors';
 import { adapterSha256, RolloutClient } from '../rollout';
-import { cliConfigApiKey, egressPolicy, encodePath, errorSentence, resolveNetwork, selectsCloud, toNativeConfig } from '../transport';
+import { checkCloudFileSize, cliConfigApiKey, CLOUD_MAX_FILE_BYTES, egressPolicy, encodePath, errorSentence, resolveNetwork, selectsCloud, toNativeConfig, transferTimeoutMs } from '../transport';
 import { wireDefaultHardening } from '../assets';
 import { Machine } from '../machine';
 
@@ -600,6 +600,22 @@ check('a problem+json body reads as its detail', () => {
     code: 'payment_required',
   });
   assert.strictEqual(errorSentence(body), 'this organization has no credit yet');
+});
+
+// --- cloud file transfers: time in proportion to size, size checked first ---
+check('a large transfer gets time for its size, not the 30 s request timeout', () => {
+  assert.strictEqual(transferTimeoutMs(1), 31_000);
+  // 64 MiB at the 256 KiB/s floor is 256 s on top of the request timeout.
+  assert.strictEqual(transferTimeoutMs(64 * 1024 * 1024), 30_000 + 256_000);
+  assert.strictEqual(transferTimeoutMs(CLOUD_MAX_FILE_BYTES), 30_000 + 400_000);
+});
+
+check('a file over the cloud limit is refused before any of it is sent', () => {
+  checkCloudFileSize('/tmp/ok', CLOUD_MAX_FILE_BYTES);
+  assert.throws(
+    () => checkCloudFileSize('/tmp/big.bin', CLOUD_MAX_FILE_BYTES + 1),
+    (e: unknown) => e instanceof SmolError && /\/tmp\/big\.bin is 100\.0 MiB; cloud machines accept files up to 100 MiB/.test(e.message),
+  );
 });
 
 check('the older error shape, plain text and empty bodies still read', () => {
