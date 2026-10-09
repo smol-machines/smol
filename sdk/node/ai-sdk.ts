@@ -159,15 +159,23 @@ export function createSandboxSession(machine: Machine, options: SandboxSessionOp
   // The root has to exist before it can be a working directory; create it
   // once, and try again on a later call if it failed.
   const ensureRoot = (): Promise<void> => {
-    rootReady ??= machine
-      .exec(["mkdir", "-p", root], asUser)
-      .then((r) => {
-        if (r.exitCode !== 0) throw new Error(`create ${root}: ${r.stderr.trim()}`);
-      })
-      .catch((e: unknown) => {
-        rootReady = undefined;
-        throw e;
-      });
+    rootReady ??= (async () => {
+      const made = await machine.exec(["mkdir", "-p", root], asUser);
+      if (made.exitCode === 0) return;
+      if (user === undefined) throw new Error(`create ${root}: ${made.stderr.trim()}`);
+      // A fresh /workspace is often under / and cannot be made by an unprivileged
+      // user. Only bootstrap an absent directory; never chown a pre-existing
+      // mount or workspace that belongs to someone else.
+      const existing = await machine.exec(["test", "-e", root], { user: "root" });
+      if (existing.exitCode === 0) throw new Error(`create ${root}: ${made.stderr.trim()}`);
+      const created = await machine.exec(["mkdir", "-p", root], { user: "root" });
+      if (created.exitCode !== 0) throw new Error(`create ${root}: ${created.stderr.trim()}`);
+      const owned = await machine.exec(["chown", user, root], { user: "root" });
+      if (owned.exitCode !== 0) throw new Error(`chown ${root}: ${owned.stderr.trim()}`);
+    })().catch((e: unknown) => {
+      rootReady = undefined;
+      throw e;
+    });
     return rootReady;
   };
 

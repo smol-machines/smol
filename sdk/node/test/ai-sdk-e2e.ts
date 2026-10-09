@@ -31,6 +31,14 @@ async function readAll(stream: ReadableStream<Uint8Array>): Promise<string> {
 async function main() {
   const machine = await Machine.create({ name: `aisdk-${process.pid}`, image: "alpine", network: true }, opts);
   try {
+    const unprivilegedRoot = `/smol-ai-sdk-user-${process.pid}`;
+    const unprivileged = createSandboxSession(machine, { user: "nobody", root: unprivilegedRoot });
+    const userRoot = await unprivileged.run({ command: "touch created && id -u && stat -c %u . created" });
+    check(
+      "an unprivileged session can bootstrap its own workspace without changing other mounts",
+      userRoot.exitCode === 0 && userRoot.stdout.trim().split("\n").every((uid) => uid === "65534"),
+      JSON.stringify(userRoot),
+    );
     const sandbox = createSandboxSession(machine);
     check("has a description for the model", sandbox.description.includes("/workspace"));
 

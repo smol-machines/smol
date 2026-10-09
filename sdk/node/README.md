@@ -334,8 +334,9 @@ const a = await Machine.restoreCheckpoint(id, "project-a", undefined, { cacheDis
 
 ### Use as a Vercel AI SDK sandbox
 
-`smolmachines/ai-sdk` turns a machine into an AI SDK `experimental_sandbox`, so the
-tools of any AI SDK agent run their commands and file I/O inside a microVM:
+`smolmachines/ai-sdk` turns a machine into an AI SDK `experimental_sandbox`.
+Tools that call this session run their commands and file I/O inside a microVM;
+other tools continue to run wherever the agent application runs:
 
 ```ts
 import { generateText, tool } from 'ai';
