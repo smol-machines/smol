@@ -8,7 +8,7 @@ export type { SandboxOptions } from "./sandbox.js"
 
 const DESCRIPTION = `Executes a shell command inside this project's smol machine: an isolated Linux microVM with its own kernel.
 
-The project directory is mounted at the same path, so files you change with other tools are visible here and vice versa. Nothing else from the host is visible: no home directory, no host credentials, and network access is limited by the sandbox's policy.
+The project directory is mounted at the same path, so files you change with other tools are visible here and vice versa. Host paths outside configured mounts and host environment variables are not forwarded by default. Files in the mounted project, including any credentials there, are visible; network access follows the sandbox's policy.
 
 - Use \`workdir\` instead of \`cd\`; it must be inside the project.
 - Chain dependent commands with \`&&\` in one call.

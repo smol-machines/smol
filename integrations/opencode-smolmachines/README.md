@@ -4,7 +4,7 @@ Run [OpenCode](https://opencode.ai)'s shell commands inside a [smol machine](htt
 
 The agent keeps working exactly as before. What changes is where its commands run:
 
-- **Isolated from your machine.** Commands see only the project directory. Your home directory, SSH keys, cloud credentials and shell environment are not visible.
+- **Isolated from your machine.** Only configured host directories are mounted. Host paths outside those mounts and your shell environment are not forwarded by default; any credentials stored inside the project are visible to commands.
 - **Egress you control.** Allow only the hosts a project needs, such as your package registries, and nothing else is reachable.
 - **Fast after the first run.** Each project configuration gets a machine that is stopped when OpenCode exits and started again next time, with everything installed in it still there.
 
@@ -67,13 +67,13 @@ Pass options as the second element of the plugin entry. If you installed from so
 | `shell` | `bash` | Shell inside the machine; falls back to `sh` if the image has no bash. |
 | `onExit` | `stop` | `stop` keeps the machine for next time, `delete` removes it, `keep` leaves it running. |
 
-Changing the image, mounts, size or network policy creates a separate machine before the next command, so it cannot boot under the old policy. The previous machine and its installed packages remain available if you switch back; remove unused machines with `smolvm machine delete`.
+Changing the image, mounts, size or network policy creates a separate machine before the next command, so it cannot boot under the old policy. The previous machine and its installed packages remain available if you switch back; remove unused machines with `smol machine rm <name>`.
 
 ## How it works
 
 The plugin registers a tool named `bash`, which replaces OpenCode's built-in shell tool, so prompts, agents and saved permissions keep working. Each command runs through the [smolmachines](https://www.npmjs.com/package/smolmachines) SDK in a machine named `opencode-<project>-<path-hash>-<config-hash>`, with the project mounted at the same absolute path it has on the host. Permission prompts are kept: the tool asks OpenCode for `bash` permission exactly as the built-in tool does.
 
-To remove a project's machine, list its name with `smolvm machine ls` and run `smolvm machine delete --name <name>`, or set `"onExit": "delete"`.
+To remove a project's machine, list its name with `smol machine ls` and run `smol machine rm <name>`, or set `"onExit": "delete"`.
 
 ## License
 
