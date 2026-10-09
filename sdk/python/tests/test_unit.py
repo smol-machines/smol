@@ -74,6 +74,22 @@ def test_local_interceptor_forwarded_on_create_reconnect_and_restart():
     assert binding.token not in repr(MachineConfig(egress_interceptor=binding))
 
 
+def test_connect_to_paused_local_machine_does_not_wait_for_agent():
+    class FakeMachine:
+        @staticmethod
+        def connect(name):
+            return FakeMachine()
+
+        def state(self):
+            return "paused"
+
+    with mock.patch.object(transport_module, "_load_native", return_value=SimpleNamespace(Machine=FakeMachine)), \
+         mock.patch.object(transport_module.LocalTransport, "wait_until_ready", side_effect=AssertionError("paused VM is not ready")):
+        attached = transport_module.connect_transport("saved", ConnectOptions(target="local"))
+
+    assert attached.state() == "paused"
+
+
 def test_cloud_rejects_local_interceptor_before_network_call():
     binding = EgressInterceptor("127.0.0.1:9000", "a5" * 32)
     try:

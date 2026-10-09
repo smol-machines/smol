@@ -2204,9 +2204,10 @@ export async function connectTransport(
         conn.egressInterceptor,
         conn.handleSignals ?? true,
       );
-      // A frozen checkpoint is intentionally not agent-ready; it remains
-      // connectable so callers can fork its retained snapshot.
-      if ((await transport.state()) !== "frozen" && conn.waitForPorts !== false) {
+      // Frozen and durably paused machines are intentionally not agent-ready.
+      // A paused machine must be resumed explicitly before it can serve work.
+      const state = await transport.state();
+      if (state !== "frozen" && state !== "paused" && state !== "pausing" && conn.waitForPorts !== false) {
         await transport.waitUntilReady();
       }
       return transport;

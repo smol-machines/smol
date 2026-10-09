@@ -275,8 +275,25 @@ impl NapiMachine {
         interceptor_token: Option<String>,
     ) -> napi::Result<Self> {
         let interceptor = parse_interceptor(interceptor_address, interceptor_token)?;
-        runtime()
-            .into_napi()?
+        let runtime = runtime().into_napi()?;
+        // A saved execution must only be restored via resume. Expose its
+        // existing record so callers can inspect or resume it explicitly;
+        // connect_or_start would correctly refuse to boot over its checkpoint.
+        let has_saved_execution = matches!(runtime.state(&name).as_str(), "paused" | "pausing")
+            && runtime
+                .list_machines()
+                .into_napi()?
+                .iter()
+                .any(|record| record.name == name && record.paused_checkpoint.is_some());
+        if has_saved_execution {
+            if interceptor.is_some() {
+                return Err(napi::Error::from_reason(
+                    "cannot bind an egress interceptor to a paused machine; resume does not install a new binding",
+                ));
+            }
+            return Ok(Self { name });
+        }
+        runtime
             .connect_or_start_machine_with_interceptor(&name, interceptor)
             .into_napi()?;
         Ok(Self { name })

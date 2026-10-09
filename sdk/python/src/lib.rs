@@ -655,6 +655,22 @@ impl Machine {
     ) -> PyResult<Self> {
         let interceptor = parse_interceptor(interceptor_address, interceptor_token)?;
         let runtime = runtime().map_err(err)?;
+        // Attach to saved execution without starting a fresh VM over its checkpoint.
+        // Restoring the paused VM remains an explicit resume operation.
+        let has_saved_execution = matches!(runtime.state(&name).as_str(), "paused" | "pausing")
+            && runtime
+                .list_machines()
+                .map_err(err)?
+                .iter()
+                .any(|record| record.name == name && record.paused_checkpoint.is_some());
+        if has_saved_execution {
+            if interceptor.is_some() {
+                return Err(pyo3::exceptions::PyValueError::new_err(
+                    "cannot bind an egress interceptor to a paused machine; resume does not install a new binding",
+                ));
+            }
+            return Ok(Self { name });
+        }
         py.allow_threads(|| runtime.connect_or_start_machine_with_interceptor(&name, interceptor))
             .map_err(err)?;
         Ok(Self { name })
