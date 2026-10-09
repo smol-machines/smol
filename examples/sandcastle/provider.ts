@@ -17,11 +17,17 @@ import type { Machine as SmolMachine } from "smolmachines";
 const MAX_TAIL_CHARS = 64 * 1024;
 
 const REPO_PATH = "/workspace/sandcastle";
+// Sandcastle builds Git bundles under mktemp -t; keep them off Smol's RAM-backed /tmp.
+const TRANSFER_DIR = "/workspace/.sandcastle-transfer";
 const UPLOAD_CHUNK_BYTES = 4 * 1024 * 1024;
 
 export interface SmolOptions {
   /** Registry image with git, tar, a shell, and the desired agent CLI installed. */
   readonly image: string;
+  /** Run on this computer by default, or in Smol Cloud when set to "cloud". */
+  readonly target?: "local" | "cloud";
+  /** Optional cloud credentials and endpoint; the SDK also accepts its normal login. */
+  readonly cloud?: { readonly apiKey?: string; readonly baseUrl?: string };
   /** Allowed guest egress hosts, including the image registry and agent API. */
   readonly allowHosts: string[];
   /** CPU count (default: 2). */
@@ -63,10 +69,13 @@ const hostTar = (directory: string, archive: string): Promise<void> =>
     });
   });
 
-/** Create a separate local microVM for each Sandcastle isolated sandbox. */
+/** Create a separate microVM for each Sandcastle isolated sandbox. */
 export const smol = (options: SmolOptions): IsolatedSandboxProvider => {
   if (!options.image)
     throw new Error("Smol requires an image with git and the agent CLI");
+  if (options.cloud && options.target !== "cloud") {
+    throw new Error('Smol cloud settings require target: "cloud"');
+  }
   if (!options.allowHosts.length) {
     throw new Error(
       "Smol requires allowHosts for the image registry and agent API",
@@ -82,16 +91,19 @@ export const smol = (options: SmolOptions): IsolatedSandboxProvider => {
     env: options.env,
     create: async (createOptions): Promise<IsolatedSandboxHandle> => {
       const { Machine } = await import("smolmachines");
-      const machine = await Machine.create({
-        image: options.image,
-        resources: {
-          cpus: options.cpus ?? 2,
-          memoryMb: options.memoryMb ?? 2048,
-          allowHosts: options.allowHosts,
+      const machine = await Machine.create(
+        {
+          image: options.image,
+          resources: {
+            cpus: options.cpus ?? 2,
+            memoryMb: options.memoryMb ?? 2048,
+            allowHosts: options.allowHosts,
+          },
         },
-      });
+        { target: options.target ?? "local", ...options.cloud },
+      );
       try {
-        await guestExecOk(machine, ["mkdir", "-p", REPO_PATH]);
+        await guestExecOk(machine, ["mkdir", "-p", REPO_PATH, TRANSFER_DIR]);
       } catch (error) {
         await machine.delete().catch(() => {});
         throw error;
@@ -99,13 +111,13 @@ export const smol = (options: SmolOptions): IsolatedSandboxProvider => {
       let closed = false;
 
       const uploadFile = async (hostPath: string, sandboxPath: string) => {
-        const staged = `/tmp/sandcastle-upload-${randomUUID()}`;
+        const staged = `${TRANSFER_DIR}/upload-${randomUUID()}`;
         try {
           // Git bundles can be many GiB: keep both host and SDK buffers bounded.
           for await (const chunk of createReadStream(hostPath, {
             highWaterMark: UPLOAD_CHUNK_BYTES,
           })) {
-            const part = `/tmp/sandcastle-upload-${randomUUID()}.part`;
+            const part = `${TRANSFER_DIR}/upload-${randomUUID()}.part`;
             try {
               await machine.writeFile(part, chunk);
               await guestExecOk(machine, [
@@ -151,11 +163,15 @@ export const smol = (options: SmolOptions): IsolatedSandboxProvider => {
           let exitCode: number | undefined;
           try {
             if (stdinPath) {
-              await machine.writeFile(stdinPath, Buffer.from(opts!.stdin!), 0o644);
+              await machine.writeFile(
+                stdinPath,
+                Buffer.from(opts!.stdin!),
+                0o644,
+              );
             }
             for await (const event of machine.execStream(argv, {
               workdir: opts?.cwd ?? REPO_PATH,
-              env: createOptions.env,
+              env: { TMPDIR: TRANSFER_DIR, ...createOptions.env },
               ...(opts?.sudo ? { user: "root" } : {}),
             })) {
               if (event.kind === "stdout") {
@@ -201,7 +217,7 @@ export const smol = (options: SmolOptions): IsolatedSandboxProvider => {
 
           const tempDir = await mkdtemp(join(tmpdir(), "sandcastle-smol-"));
           const archive = join(tempDir, "files.tar");
-          const guestArchive = `/tmp/sandcastle-upload-${randomUUID()}.tar`;
+          const guestArchive = `${TRANSFER_DIR}/upload-${randomUUID()}.tar`;
           try {
             await hostTar(hostPath, archive);
             await uploadFile(archive, guestArchive);

@@ -8,10 +8,14 @@ import { createSandbox, type AgentProvider } from "@ai-hero/sandcastle";
 import { smol } from "./provider.js";
 
 const gitHosts = [
-  "registry-1.docker.io", "auth.docker.io", "production.cloudflare.docker.com", "index.docker.io",
+  "registry-1.docker.io",
+  "auth.docker.io",
+  "production.cloudflare.docker.com",
+  "index.docker.io",
 ];
 const host = await mkdtemp(join(tmpdir(), "sandcastle-smol-live-"));
-const git = (...args: string[]) => execFileSync("git", args, { cwd: host, stdio: "pipe" });
+const git = (...args: string[]) =>
+  execFileSync("git", args, { cwd: host, stdio: "pipe" });
 
 // Scripted agent exercises the real Sandcastle lifecycle without an API key.
 const agent: AgentProvider = {
@@ -19,7 +23,8 @@ const agent: AgentProvider = {
   env: {},
   captureSessions: false,
   buildPrintCommand: () => ({
-    command: "printf 'after\\n' > tracked.txt; printf 'untracked\\n' > created.txt; echo '<promise>COMPLETE</promise>'",
+    command:
+      "printf 'after\\n' > tracked.txt; printf 'untracked\\n' > created.txt; echo '<promise>COMPLETE</promise>'",
   }),
   parseStreamLine: (line) => [{ type: "text", text: line }],
 };
@@ -36,10 +41,21 @@ try {
   const sandbox = await createSandbox({
     branch: "smol-sandcastle-live",
     cwd: host,
-    sandbox: smol({ image: "alpine/git:2.47.2", allowHosts: gitHosts, cpus: 1, memoryMb: 1024 }),
+    sandbox: smol({
+      image: "alpine/git:2.47.2",
+      allowHosts: gitHosts,
+      cpus: 1,
+      memoryMb: 1024,
+    }),
   });
   try {
     assert.equal((await sandbox.exec("cat tracked.txt")).stdout, "before\n");
+    const temporary = await sandbox.exec("mktemp -d -t sandcastle-XXXXXX");
+    assert.equal(temporary.exitCode, 0);
+    assert.ok(
+      temporary.stdout.trim().startsWith("/workspace/.sandcastle-transfer/"),
+    );
+    await sandbox.exec(`rmdir ${temporary.stdout.trim()}`);
     const lines: string[] = [];
     const stdin = await sandbox.exec("wc -c", {
       stdin: "x".repeat(180_000),
@@ -47,11 +63,23 @@ try {
     });
     assert.equal(stdin.stdout.trim(), "180000");
     assert.deepEqual(lines, ["180000"]);
-    const result = await sandbox.run({ agent, prompt: "Edit the repo", maxIterations: 1 });
+    const result = await sandbox.run({
+      agent,
+      prompt: "Edit the repo",
+      maxIterations: 1,
+    });
     assert.equal(result.completionSignal, "<promise>COMPLETE</promise>");
-    assert.equal(await readFile(join(sandbox.worktreePath, "tracked.txt"), "utf8"), "after\n");
-    assert.equal(await readFile(join(sandbox.worktreePath, "created.txt"), "utf8"), "untracked\n");
-    console.log("PASS: real Sandcastle run synced tracked and untracked changes from a local VM");
+    assert.equal(
+      await readFile(join(sandbox.worktreePath, "tracked.txt"), "utf8"),
+      "after\n",
+    );
+    assert.equal(
+      await readFile(join(sandbox.worktreePath, "created.txt"), "utf8"),
+      "untracked\n",
+    );
+    console.log(
+      "PASS: real Sandcastle run synced tracked and untracked changes from a local VM",
+    );
   } finally {
     await sandbox.close();
   }

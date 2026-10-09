@@ -13,5 +13,9 @@ test("Smol is an isolated Sandcastle provider with explicit guest egress", () =>
   assert.deepEqual(provider.env, { TEST: "value" });
   assert.throws(() => smol({ ...options, image: "" }), /image/);
   assert.throws(() => smol({ ...options, allowHosts: [] }), /allowHosts/);
-  assert.throws(() => smol({ ...options, maxOutputTailChars: 0 }), /positive integer/);
+  assert.throws(
+    () => smol({ ...options, maxOutputTailChars: 0 }),
+    /positive integer/,
+  );
+  assert.throws(() => smol({ ...options, cloud: { apiKey: "x" } }), /target/);
 });
