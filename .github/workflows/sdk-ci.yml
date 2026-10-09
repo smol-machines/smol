@@ -165,6 +165,7 @@ jobs:
         run: |
           unset SMOLVM_BOOT_BINARY SMOLVM_LIB_DIR SMOLVM_AGENT_ROOTFS SMOLVM_AGENT_ROOTFS_TAR LD_LIBRARY_PATH
           bun test/e2e.ts
+          bun test/ai-sdk-e2e.ts
           bun test/bun-package-e2e.ts
           bun test/fork-service-e2e.ts
           bun test/checkpoint-branch-e2e.ts

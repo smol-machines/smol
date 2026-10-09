@@ -332,6 +332,46 @@ const { id } = await base.checkpoint();
 const a = await Machine.restoreCheckpoint(id, "project-a", undefined, { cacheDisk: { cache: "project-a" } });
 ```
 
+### Use as a Vercel AI SDK sandbox
+
+`smolmachines/ai-sdk` turns a machine into an AI SDK `experimental_sandbox`.
+Tools that call this session run their commands and file I/O inside a microVM;
+other tools continue to run wherever the agent application runs:
+
+```ts
+import { generateText, tool } from 'ai';
+import { z } from 'zod';
+import { Machine } from 'smolmachines';
+import { createSandboxSession } from 'smolmachines/ai-sdk';
+
+const machine = await Machine.create({ image: 'node:22', network: true });
+const { text } = await generateText({
+  model,
+  experimental_sandbox: createSandboxSession(machine),
+  tools: {
+    bash: tool({
+      inputSchema: z.object({ command: z.string() }),
+      execute: ({ command }, { experimental_sandbox }) => experimental_sandbox!.run({ command }),
+    }),
+  },
+  prompt: 'Run the test suite and summarize failures.',
+});
+```
+
+- Relative paths resolve under `/workspace`, which is also the default working
+  directory.
+- `run` and `spawn` take `workingDirectory`, `env` and `abortSignal`.
+- `spawn` streams stdout and stderr as they are produced, and `kill()` ends the
+  command in the machine.
+- Missing files read as `null`.
+- `createSandboxSession(machine, { user: 'agent' })` runs every command as another
+  user on an image machine, and files written through the session belong to that
+  user.
+- `env` sets variables for every command; a command's own `env` wins.
+
+The module has no dependency on `ai`; the returned object matches the AI SDK's
+`Experimental_SandboxSession` type.
+
 ## Building from source
 
 This package's native core lives alongside it (Rust, `src/*.rs`) and links the
