@@ -921,6 +921,28 @@ const DEFAULT_CLOUD_URL = "https://api.smolmachines.com";
 
 /** Default per-request timeout for cloud calls (ms). Override via opts.timeoutMs. */
 const CLOUD_TIMEOUT_MS = 30_000;
+// A file transfer is given time for the slowest link it should survive: a
+// large file over a slow uplink must not fail at CLOUD_TIMEOUT_MS while it is
+// still moving. Same floor as the Rust and Python SDKs.
+const CLOUD_TRANSFER_FLOOR_BYTES_PER_S = 256 * 1024;
+/** The largest file the cloud's file routes accept. */
+export const CLOUD_MAX_FILE_BYTES = 100 * 1024 * 1024;
+
+/** How long moving `bytes` may take (ms): the request timeout plus the time
+ *  `bytes` needs at the floor rate. */
+export function transferTimeoutMs(bytes: number): number {
+  return CLOUD_TIMEOUT_MS + Math.ceil(bytes / CLOUD_TRANSFER_FLOOR_BYTES_PER_S) * 1_000;
+}
+
+/** Refuse a file the cloud would refuse, before sending any of it. */
+export function checkCloudFileSize(path: string, bytes: number): void {
+  if (bytes > CLOUD_MAX_FILE_BYTES) {
+    throw new SmolError(
+      "SMOLVM_ERROR",
+      `${path} is ${(bytes / (1024 * 1024)).toFixed(1)} MiB; cloud machines accept files up to ${CLOUD_MAX_FILE_BYTES / (1024 * 1024)} MiB`,
+    );
+  }
+}
 // Starting can include a cold image pull. Keep ordinary API calls short, but
 // give this explicitly long-running operation the same bounded window already
 // used by checkpoint restore.
@@ -1445,17 +1467,20 @@ class CloudTransport implements Transport {
       `/v1/machines/${this.id}/files/${encodePath(path)}`,
       {
         accept: "bytes",
+        timeoutMs: transferTimeoutMs(CLOUD_MAX_FILE_BYTES),
       },
     );
   }
 
   async writeFile(path: string, data: Buffer, mode?: number): Promise<void> {
+    checkCloudFileSize(path, data.length);
     await cloudFetch(
       this.conn,
       "PUT",
       `/v1/machines/${this.id}/files/${encodePath(path)}`,
       {
         body: data,
+        timeoutMs: transferTimeoutMs(data.length),
       },
     );
     // The cloud /files PUT carries no file mode, so apply it with chmod when
