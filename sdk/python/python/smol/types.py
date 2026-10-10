@@ -354,6 +354,8 @@ class ConnectOptions:
     base_url: Optional[str] = None
     api_key: Optional[str] = None
     egress_interceptor: Optional[EgressInterceptor] = field(default=None, repr=False)
+    wait_for_ports: bool = True
+    """When connecting locally, wait for published applications as well as the agent."""
 
 
 @dataclass

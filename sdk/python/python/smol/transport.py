@@ -2183,12 +2183,19 @@ def connect_transport(machine_id: str, conn: Optional[ConnectOptions] = None) ->
             # A frozen checkpoint is intentionally not agent-ready; it remains
             # connectable so callers can fork its retained snapshot.
             if transport.state() != "frozen":
-                transport.wait_until_ready()
+                if conn.wait_for_ports:
+                    transport.wait_until_ready()
+                else:
+                    # Management and cleanup can precede the workload's listener
+                    # startup (or follow its shutdown). Wait only for guest exec.
+                    _wait_for_execution(transport, 120.0)
             return transport
         except Exception as e:  # noqa: BLE001
             raise wrap_native_error(e) from e
     if conn.egress_interceptor is not None:
         raise NotSupportedError("egress_interceptor is local-only")
+    if not conn.wait_for_ports:
+        raise NotSupportedError("wait_for_ports=False is local-only")
     # As in make_transport: the CLI-login fallback applies only once the cloud
     # target is already selected.
     cli_key, cli_url = _cli_session()
