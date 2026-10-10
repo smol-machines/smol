@@ -356,8 +356,28 @@ def test_local_connect_waits_for_agent_without_waiting_for_application_ports():
         mock.patch.object(transport_module.LocalTransport, "wait_until_ready", side_effect=AssertionError("listener not ready")),
         mock.patch.object(transport_module, "_wait_for_execution") as wait_for_agent,
     ):
-        transport_module.connect_transport("service-not-started", ConnectOptions(target="local"))
+        transport_module.connect_transport("service-not-started", ConnectOptions(target="local", wait_for_ports=False))
     wait_for_agent.assert_called_once()
+
+
+def test_local_connect_keeps_port_readiness_by_default():
+    class Inner:
+        name = "service-not-started"
+
+        @staticmethod
+        def state():
+            return "running"
+
+    class Native:
+        Machine = SimpleNamespace(connect=lambda name: Inner())
+
+    with (
+        mock.patch.object(transport_module, "_load_native", return_value=Native),
+        mock.patch.object(transport_module.LocalTransport, "wait_until_ready") as wait_for_ports,
+        mock.patch.object(transport_module, "_wait_for_execution", side_effect=AssertionError("opt-in only")),
+    ):
+        transport_module.connect_transport("service-not-started", ConnectOptions(target="local"))
+    wait_for_ports.assert_called_once()
 
 
 def test_local_checkpoint_forwards_store_and_reports_reuse():

@@ -104,6 +104,11 @@ Every `Machine` method has an `await`able counterpart on `AsyncMachine`
 `async with` for auto-delete. `endpoint(port)` stays synchronous — it only builds
 a URL and does no I/O.
 
+A local `Machine.connect(name)` waits for published application ports by default.
+For cleanup or management while a service is stopped, use
+`Machine.connect(name, ConnectOptions(target="local", wait_for_ports=False))`;
+this waits for guest execution without requiring the service to listen.
+
 ### Fused multi-policy rollouts
 
 `RolloutClient` is the thin generation boundary for TRL, Unsloth, and custom RL
