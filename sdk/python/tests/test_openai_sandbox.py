@@ -212,3 +212,25 @@ def test_sandbox_agent_shell_runs_in_machine_and_runner_deletes_it():
         assert machine.deleted
 
     asyncio.run(scenario())
+
+
+def test_local_missing_file_preserves_agents_not_found_error():
+    from agents.sandbox.errors import WorkspaceReadNotFoundError
+
+    async def scenario():
+        client = adapter.SmolSandboxClient()
+        session = await client.create()
+        machine = FakeMachine.instances[session.state.machine_id]
+
+        async def missing(_path):
+            raise SmolError(
+                "SMOLVM_ERROR",
+                "failed to open file: No such file or directory (os error 2)",
+            )
+
+        machine.read_file = missing
+        with pytest.raises(WorkspaceReadNotFoundError):
+            await session.read(Path("/workspace/missing.txt"))
+        await client.delete(session)
+
+    asyncio.run(scenario())

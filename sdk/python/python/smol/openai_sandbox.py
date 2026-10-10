@@ -127,9 +127,12 @@ class SmolSandboxSession(BaseSandboxSession):
         try:
             return io.BytesIO(await self.machine.read_file(str(path)))
         except (FileNotFoundError, SmolError) as exc:
-            if not isinstance(exc, FileNotFoundError) and exc.code not in (
-                "NOT_FOUND",
-                "FILE_NOT_FOUND",
+            # Local native errors currently wrap the guest's missing-file errno
+            # without preserving its structured code.
+            if (
+                isinstance(exc, SmolError)
+                and exc.code not in ("NOT_FOUND", "FILE_NOT_FOUND")
+                and not (exc.code == "SMOLVM_ERROR" and "(os error 2)" in str(exc))
             ):
                 raise
             raise WorkspaceReadNotFoundError(path=path) from exc
