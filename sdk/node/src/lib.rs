@@ -117,13 +117,22 @@ pub fn configure_runtime_assets(assets: RuntimeAssets) -> napi::Result<()> {
         return Ok(());
     }
 
-    set_asset("SMOLVM_BOOT_BINARY", resolved.boot_binary.as_deref());
-    set_asset("SMOLVM_LIB_DIR", resolved.lib_dir.as_deref());
+    // The boot helper, library directory and rootfs tarball go to the engine
+    // in-process. Exporting them into the environment made every `smolvm` CLI
+    // this program spawned boot its machines with our helper, which exits as
+    // soon as its parent does.
+    smolvm::embedded::bundle::set_bundle(smolvm::embedded::bundle::Bundle {
+        boot_binary: resolved.boot_binary.clone(),
+        lib_dir: resolved.lib_dir.clone(),
+        agent_rootfs_tar: resolved.agent_rootfs_tar.clone(),
+    })
+    .map_err(|rejected| {
+        napi_error(format!(
+            "the engine's bundle paths were already set differently: {rejected:?}"
+        ))
+    })?;
+    // A rootfs *directory* has no in-process channel yet; it stays an environment variable.
     set_asset("SMOLVM_AGENT_ROOTFS", resolved.agent_rootfs.as_deref());
-    set_asset(
-        "SMOLVM_AGENT_ROOTFS_TAR",
-        resolved.agent_rootfs_tar.as_deref(),
-    );
     *configured = Some(resolved);
     Ok(())
 }

@@ -1114,8 +1114,33 @@ impl Machine {
     }
 }
 
+/// Register the boot helper, library directory and agent rootfs tarball bundled in the wheel
+/// with the engine, in-process. Replaces exporting SMOLVM_BOOT_BINARY / SMOLVM_LIB_DIR /
+/// SMOLVM_AGENT_ROOTFS_TAR into the environment, which every subprocess the embedding program
+/// started inherited: a `smolvm` CLI spawned from Python then booted machines with this
+/// wheel's helper, which exits when its parent does.
+#[pyfunction]
+#[pyo3(signature = (boot_binary=None, lib_dir=None, agent_rootfs_tar=None))]
+fn configure_bundle(
+    boot_binary: Option<String>,
+    lib_dir: Option<String>,
+    agent_rootfs_tar: Option<String>,
+) -> PyResult<()> {
+    let bundle = smolvm::embedded::bundle::Bundle {
+        boot_binary: boot_binary.map(Into::into),
+        lib_dir: lib_dir.map(Into::into),
+        agent_rootfs_tar: agent_rootfs_tar.map(Into::into),
+    };
+    smolvm::embedded::bundle::set_bundle(bundle).map_err(|rejected| {
+        PyRuntimeError::new_err(format!(
+            "the engine's bundle paths were already set differently: {rejected:?}"
+        ))
+    })
+}
+
 #[pymodule]
 fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
+    m.add_function(wrap_pyfunction!(configure_bundle, m)?)?;
     m.add_class::<Machine>()?;
     m.add_class::<LocalMachineSummary>()?;
     m.add_class::<ExecResult>()?;
