@@ -143,8 +143,12 @@ class SmolSandboxSession(BaseSandboxSession):
         if max_bytes > 4 * 1024 * 1024:
             raise ValueError("bounded reads above 4 MiB are unsupported")
         quoted = shlex.quote(str(path))
+        temp = f"/tmp/smol-agents-read-{uuid.uuid4().hex}"
         command = (
-            f"test -f {quoted} || exit 42; head -c {max_bytes} -- {quoted} | base64"
+            f"trap 'rm -f {temp}' EXIT; "
+            f"test -f {quoted} || exit 42; "
+            f"head -c {max_bytes} -- {quoted} > {temp} || exit 43; "
+            f"base64 {temp}"
         )
         result = await self.machine.exec(["sh", "-c", command], ExecOptions(timeout=30))
         if result.exit_code != 0:
@@ -334,10 +338,14 @@ class SmolSandboxClient(BaseSandboxClient[SmolSandboxClientOptions]):
         inner = session._inner
         if not isinstance(inner, SmolSandboxSession):
             raise TypeError("expected a Smol sandbox session")
-        machine = inner._machine or await AsyncMachine.connect(
-            inner.state.machine_id, self.conn
-        )
-        await machine.delete()
+        try:
+            machine = inner._machine or await AsyncMachine.connect(
+                inner.state.machine_id, self.conn
+            )
+            await machine.delete()
+        except SmolError as exc:
+            if exc.code != "NOT_FOUND":
+                raise
         inner._machine = None
         return session
 

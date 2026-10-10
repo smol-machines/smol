@@ -234,3 +234,33 @@ def test_local_missing_file_preserves_agents_not_found_error():
         await client.delete(session)
 
     asyncio.run(scenario())
+
+
+def test_bounded_read_does_not_silence_guest_read_failures():
+    from agents.sandbox.errors import (
+        WorkspaceArchiveReadError,
+        WorkspaceReadNotFoundError,
+    )
+
+    async def scenario():
+        client = adapter.SmolSandboxClient()
+        session = await client.create()
+        machine = FakeMachine.instances[session.state.machine_id]
+
+        async def unreadable(_command, _opts=None):
+            return ExecResult(exit_code=43, stdout="", stderr="Permission denied")
+
+        machine.exec = unreadable
+        with pytest.raises(WorkspaceArchiveReadError):
+            await session.read_bounded(Path("/workspace/unreadable"), max_bytes=128)
+
+        async def missing(_command, _opts=None):
+            return ExecResult(exit_code=42, stdout="", stderr="")
+
+        machine.exec = missing
+        with pytest.raises(WorkspaceReadNotFoundError):
+            await session.read_bounded(Path("/workspace/missing"), max_bytes=128)
+        await client.delete(session)
+        await client.delete(session)
+
+    asyncio.run(scenario())
