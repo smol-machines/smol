@@ -73,6 +73,25 @@ finally:
     m.delete()
 ```
 
+### Find local machines across processes
+
+Create a labeled persistent machine and find it later through the shared host database,
+including after the creating process exits:
+
+```python
+from smol import ConnectOptions, Machine, MachineConfig
+
+local = ConnectOptions(target="local")
+m = Machine.create(MachineConfig(image="alpine", network=True, labels={"project": "agent"}, persistent=True), local)
+try:
+    matching = Machine.list(local, labels={"project": "agent"})
+    assert any(item.id == m.id for item in matching)
+finally:
+    m.delete()
+```
+
+Calling `Machine.list()` without a target still lists Cloud machines, as before.
+
 ### Async: `AsyncMachine` (non-blocking)
 
 `Machine` is synchronous — each call blocks the calling thread. When you're

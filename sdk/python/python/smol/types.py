@@ -134,8 +134,7 @@ class MachineConfig:
     image: Optional[str] = None
     """Base image. Required for the cloud target; optional for local."""
     labels: Optional[dict[str, str]] = None
-    """Caller metadata for finding the machine again with :meth:`Machine.list`.
-    Cloud only."""
+    """Caller metadata for finding the machine again with :meth:`Machine.list`."""
     command: Optional[list[str]] = None
     """Workload argv overriding the image entrypoint/CMD."""
     mounts: Optional[list[MountSpec]] = None
