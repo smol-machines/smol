@@ -45,6 +45,9 @@ nemo-gym = ["nemo-gym>=0.5.0"]
 # Use SmolVM as a Harbor evaluation environment: `pip install smolmachines[harbor]`.
 harbor = ["harbor>=0.22,<0.23"]
 
+# Run Google ADK model-generated code inside local or Cloud Smol VMs.
+google-adk = ["google-adk>=2.11,<3"]
+
 [project.entry-points."nemo_gym.sandbox_providers"]
 smol = "smol.nemo_gym:SmolProvider"
 

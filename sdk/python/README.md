@@ -104,6 +104,35 @@ Every `Machine` method has an `await`able counterpart on `AsyncMachine`
 `async with` for auto-delete. `endpoint(port)` stays synchronous — it only builds
 a URL and does no I/O.
 
+### Google ADK code executor
+
+Install `smolmachines[google-adk]` to run code produced by a Google ADK
+`LlmAgent` in local or Smol Cloud VMs:
+
+```python
+from google.adk.agents import LlmAgent
+from smol.google_adk import SmolCodeExecutor
+
+with SmolCodeExecutor(target="local") as executor:  # or target="cloud"
+    agent = LlmAgent(
+        name="coder",
+        model="gemini-2.5-flash",
+        code_executor=executor,
+    )
+    # Run `agent` through your normal ADK Runner inside this context.
+```
+
+The executor creates one VM per `(app_name, user_id, session_id)` and keeps that
+session's files across code blocks. Python globals reset each call. The context
+deletes its VMs on exit, and Cloud VMs have a configurable deletion TTL (one
+hour by default) if the process exits without cleanup. For a long-running ADK
+server, call `executor.close_session(app_name, user_id, session_id)` when a
+session ends. Guest networking is off by default; pass `resources=ResourceSpec(allow_hosts=[...])` to allow selected
+hosts. Input files and ADK's stateful Python mode are unsupported. Source code
+is limited to 64 KiB per call; output is limited to 50 KiB, with a 30-second
+default timeout. Crossing the output limit closes the stream and stops the
+command locally; a Cloud command may continue until its timeout.
+
 ### Fused multi-policy rollouts
 
 `RolloutClient` is the thin generation boundary for TRL, Unsloth, and custom RL
