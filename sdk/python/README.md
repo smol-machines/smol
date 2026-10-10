@@ -461,7 +461,11 @@ installing extra tool packages needs network access or a prebuilt image with
 those packages. Set `target="cloud"` and configure Smol Cloud credentials to
 move the same agent workload to the cloud. `cleanup()` deletes only VMs created
 by the executor. A VM supplied via `machine=` remains the caller's responsibility.
-Guest code has no host file access unless you explicitly provide one. By default,
+Guest code has no host file access unless you explicitly provide one. To
+pause and resume an executor-owned VM with its Python state intact, construct
+`SmolExecutor(branchable=True)` and use `executor.machine` for its lifecycle;
+the default VM remains nonbranchable. For caller-owned VMs, set
+`MachineConfig(branchable=True)` when creating the machine. By default,
 final answers use safe serialization; only enable `allow_pickle=True` if you
 trust the guest code and its output.
 

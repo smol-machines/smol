@@ -16,6 +16,7 @@ import pytest
 pytest.importorskip("smolagents")
 
 from smol._smolagents_worker import _receive
+from smol.machine import Machine
 from smol.smolagents import SmolExecutor
 
 
@@ -80,6 +81,31 @@ def test_worker_rejects_oversize_request() -> None:
         second.close()
 
 
+def test_branchable_option_reaches_created_machine(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class CreationIntercept(Exception):
+        pass
+
+    captured = []
+
+    def capture_create(config, conn):
+        captured.append((config, conn))
+        raise CreationIntercept()
+
+    monkeypatch.setattr(Machine, "create", capture_create)
+    with pytest.raises(CreationIntercept):
+        SmolExecutor(target="cloud", branchable=True)
+    config, conn = captured[0]
+    assert config.branchable is True
+    assert config.forkable is True  # compatibility field sent to the Cloud API
+    assert conn.target == "cloud"
+    with pytest.raises(TypeError, match="branchable must be a boolean"):
+        SmolExecutor(branchable=1)  # type: ignore[arg-type]
+    with pytest.raises(ValueError, match="caller-owned machine"):
+        SmolExecutor(machine=object(), branchable=True)  # type: ignore[arg-type]
+
+
 @pytest.mark.skipif(
     os.environ.get("SMOL_SMOLAGENTS_INTEGRATION") != "1",
     reason="opt-in local microVM test",
@@ -134,3 +160,20 @@ def test_caller_owned_vm_survives_executor_cleanup() -> None:
         )
     finally:
         machine.delete()
+
+
+@pytest.mark.skipif(
+    os.environ.get("SMOL_SMOLAGENTS_INTEGRATION") != "1",
+    reason="opt-in local microVM test",
+)
+def test_branchable_executor_preserves_state_through_pause_resume() -> None:
+    executor = SmolExecutor(branchable=True)
+    try:
+        executor("value = 21")
+        executor.machine.pause()
+        executor.machine.resume()
+        assert executor("value * 2").output == "42"
+    finally:
+        executor.cleanup()
+    with pytest.raises(RuntimeError, match="closed"):
+        _ = executor.machine

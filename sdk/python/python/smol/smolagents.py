@@ -60,11 +60,18 @@ class SmolExecutor(RemotePythonExecutor):
         connection: ConnectOptions | None = None,
         resources: ResourceSpec | None = None,
         machine: Machine | None = None,
+        branchable: bool = False,
         timeout_seconds: int = 60,
         allow_pickle: bool = False,
     ) -> None:
         if timeout_seconds < 1 or timeout_seconds > 3600:
             raise ValueError("timeout_seconds must be between 1 and 3600")
+        if type(branchable) is not bool:
+            raise TypeError("branchable must be a boolean")
+        if machine is not None and branchable:
+            raise ValueError(
+                "Set MachineConfig(branchable=True) when supplying a caller-owned machine"
+            )
         if logger is None:
             from smolagents.monitoring import AgentLogger
 
@@ -83,6 +90,7 @@ class SmolExecutor(RemotePythonExecutor):
                 MachineConfig(
                     image=image,
                     resources=resources or ResourceSpec(network=False),
+                    branchable=branchable,
                     wait_for_ports=False,
                 ),
                 connection or ConnectOptions(target=target),
@@ -119,6 +127,13 @@ class SmolExecutor(RemotePythonExecutor):
             with contextlib.suppress(Exception):
                 self.cleanup()
             raise
+
+    @property
+    def machine(self) -> Machine:
+        """Return the VM handle for pause/resume while the executor is open."""
+        if self._machine is None:
+            raise RuntimeError("Smol executor has been closed")
+        return self._machine
 
     def send_tools(self, tools: dict) -> None:
         # The patched final_answer tool is self-contained. Its source analysis
