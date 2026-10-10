@@ -435,6 +435,43 @@ For Smol Cloud, pass `MachineConfig(image="alpine:3.20")` and
 `SMOL_CLOUD_TOKEN`. This is a command tool for regular `Agent` workflows;
 `SandboxAgent` sessions also require workspace manifests and portable snapshots.
 
+## OpenAI SandboxAgent: local and Cloud workspaces
+
+Install `smolmachines[openai-agents]` to use Smol as the native sandbox provider
+for `SandboxAgent`. The agent's shell and files run inside the microVM while the
+model, API credentials, and orchestration stay in your application:
+
+```python
+from agents import RunConfig, Runner
+from agents.sandbox import SandboxAgent, SandboxRunConfig
+from agents.sandbox.capabilities import Filesystem, Shell
+from smol.openai_sandbox import SmolSandboxClient, SmolSandboxClientOptions
+
+agent = SandboxAgent(
+    name="Builder",
+    instructions="Inspect the workspace and write the requested artifact.",
+    capabilities=[Shell(), Filesystem()],
+)
+client = SmolSandboxClient()  # local microVM; network disabled by default
+result = await Runner.run(
+    agent,
+    "Write /workspace/answer.txt with the answer to 6 × 7",
+    run_config=RunConfig(sandbox=SandboxRunConfig(client=client)),
+)
+```
+
+For Cloud, use `SmolSandboxClient(target="cloud")` and pass
+`SmolSandboxClientOptions(image="alpine:3.20")` as `SandboxRunConfig(options=...)`;
+authenticate with `smol auth login` or `SMOL_CLOUD_TOKEN`. To enable guest
+networking, set `allow_network=True` on the client and `network=True` in its
+options. Runner-owned sessions are deleted after the run. For an application
+owned session, save `client.serialize_session_state(session.state)` before
+closing it, use `client.resume(client.deserialize_session_state(saved))` to
+reattach, and call `client.delete(session)` when finished. If the original VM
+has gone away, recovery requires a restorable Agents SDK workspace snapshot;
+the Cloud VM's default TTL is one hour. The provider currently accepts the
+default `/workspace` manifest root and rejects host mounts and manifest users.
+
 ## Install / build from source
 The cloud path is pure Python. The local path needs the native extension, which
 links `libkrun` from the sibling `smolvm` repo (three levels up).
