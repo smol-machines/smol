@@ -406,6 +406,35 @@ ckpt = base.checkpoint()
 a = Machine.restore_checkpoint(ckpt.id, "project-a", cache_disk=CacheDiskRef("project-a"))
 ```
 
+## OpenAI Agents SDK: isolated shell tool
+
+Install `smolmachines[openai-agents]`, then give an OpenAI agent a shell tool
+bound to a dedicated Smol microVM. The machine's network policy and lifecycle
+stay in your application; the agent only receives the tool. Local VMs use no
+cloud account and start with outbound network disabled.
+
+```python
+from agents import Agent, Runner
+from smol import AsyncMachine, MachineConfig
+from smol.openai_agents import create_smol_shell_tool
+
+async def run_task():
+    async with await AsyncMachine.create(MachineConfig()) as machine:
+        agent = Agent(
+            name="Builder",
+            instructions="Use smol_shell for commands and inspect their exit codes.",
+            tools=[create_smol_shell_tool(machine, timeout=30)],
+        )
+        result = await Runner.run(agent, "Create /workspace/answer.txt with 42 in it")
+        print(result.final_output)
+        print((await machine.read_file("/workspace/answer.txt")).decode())
+```
+
+For Smol Cloud, pass `MachineConfig(image="alpine:3.20")` and
+`ConnectOptions(target="cloud")` to `AsyncMachine.create`; authenticate with
+`SMOL_CLOUD_TOKEN`. This is a command tool for regular `Agent` workflows;
+`SandboxAgent` sessions also require workspace manifests and portable snapshots.
+
 ## Install / build from source
 The cloud path is pure Python. The local path needs the native extension, which
 links `libkrun` from the sibling `smolvm` repo (three levels up).
