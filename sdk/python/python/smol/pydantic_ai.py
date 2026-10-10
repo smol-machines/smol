@@ -181,10 +181,13 @@ class SmolWorkspace(AbstractCapability[AgentDepsT]):
     """
 
     image: str | None = None
-    """Optional registry image; pulls require `allow_hosts`. The default uses Smol's BusyBox rootfs."""
+    """Optional registry image, fetched by the host without guest egress.
+
+    The default uses Smol's BusyBox rootfs.
+    """
 
     allow_hosts: Sequence[str] | None = None
-    """Guest egress hostname allowlist, including image registry hosts when pulling an image."""
+    """Guest egress hostname allowlist for workloads that need outbound access."""
 
     def __post_init__(self) -> None:
         if self.defer_loading:
