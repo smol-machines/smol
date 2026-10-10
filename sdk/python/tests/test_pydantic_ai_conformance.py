@@ -14,14 +14,14 @@ from smol.pydantic_ai_harness import SmolSandbox, SmolSandboxBackend
 pytestmark = pytest.mark.anyio
 
 
+@pytest.mark.skipif(
+    os.getenv("SMOL_SANDBOX_LIVE") != "1",
+    reason="set SMOL_SANDBOX_LIVE=1 with local virtualization to run the VM conformance suite",
+)
 class TestLiveSmolSandboxBackend(WorkspaceBackendSuite):
     @pytest.fixture(scope="class")
     @classmethod
     def backend(cls) -> Iterator[SmolSandboxBackend]:
-        if os.getenv("SMOL_SANDBOX_LIVE") != "1":
-            pytest.skip(
-                "set SMOL_SANDBOX_LIVE=1 with local virtualization to run the VM conformance suite"
-            )
         backend = SmolSandboxBackend()
         try:
             yield backend

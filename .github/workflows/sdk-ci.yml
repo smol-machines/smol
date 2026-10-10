@@ -234,7 +234,7 @@ jobs:
       - name: Run workspace and agent boundary tests
         env:
           PYTHONPATH: python
-        run: python -m pytest -q tests/test_pydantic_ai_backend.py tests/test_pydantic_ai_cloud.py tests/test_pydantic_ai_agent_e2e.py
+        run: python -m pytest -q tests/test_pydantic_ai_backend.py tests/test_pydantic_ai_cloud.py tests/test_pydantic_ai_conformance.py tests/test_pydantic_ai_agent_e2e.py
 
   harbor-adapter:
     name: Python · Harbor provider contract
