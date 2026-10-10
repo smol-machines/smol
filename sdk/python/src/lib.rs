@@ -403,6 +403,7 @@ fn credential_policy(
                 .map(|host| host.trim().to_ascii_lowercase())
                 .collect(),
             injection_location: Default::default(),
+            set_header: None,
             methods: methods.unwrap_or_else(|| {
                 smolvm_protocol::credentials::DEFAULT_METHODS
                     .iter()
