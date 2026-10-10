@@ -88,8 +88,8 @@ export class Machine {
 
   /**
    * Create and start a machine. By default this waits for the guest agent and
-   * all published ports. On local machines, `waitForPorts: false` returns when
-   * the agent is ready so `exec()` can start a service on a published port.
+   * all published ports. `waitForPorts: false` returns when the agent is
+   * ready so `exec()` can start a service on a published port.
    * A cloud state of `"started"` alone means only that the VM process launched.
    *
    * @param config  machine configuration (a name is generated if omitted; `image`
@@ -115,8 +115,9 @@ export class Machine {
    *    Set `conn.waitForPorts: false` to attach after agent readiness when a
    *    published service is not listening (for example, to delete it).
    *  - cloud: looks up the machine by id; throws if it doesn't exist.
-   *    This does not wait for readiness; call `waitUntilReady()` before `exec`,
-   *    using a connect endpoint, or expecting the workload to respond.
+   *    This does not wait for readiness by default. With `waitForPorts: false`,
+   *    it waits for the guest agent so `exec()` can start a published service.
+   *    Call `waitUntilReady()` before expecting the published service to respond.
    *
    * @param id    local machine name, or cloud machine id (`mach-…`)
    * @param conn  backend selection (local by default; cloud via `{ target: 'cloud', apiKey }` or `SMOL_CLOUD_TOKEN`)

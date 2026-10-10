@@ -1081,11 +1081,11 @@ async function cloudFetch<T = unknown>(
  *  caller keeps polling until this passes or the deadline hits. */
 async function agentReachable(conn: CloudConn, id: string): Promise<boolean> {
   try {
-    await cloudFetch(conn, "POST", `/v1/machines/${id}/exec`, {
+    const result = await cloudFetch<RawExec>(conn, "POST", `/v1/machines/${id}/exec`, {
       json: { command: ["sh", "-c", "true"] },
       timeoutMs: 15_000,
     });
-    return true;
+    return result?.exitCode === 0;
   } catch {
     return false;
   }
@@ -1100,12 +1100,15 @@ async function agentReachable(conn: CloudConn, id: string): Promise<boolean> {
  *  `started` is NOT yet usable: the guest is still booting, and acting then is
  *  the classic teardown race (works on a slow cold start, times out on a warm
  *  one). Older control planes omit `ready`; there we fall back to the coarse
- *  `started`/`running` state so this never hangs against them. */
+ *  `started`/`running` state so this never hangs against them.
+ *  With `waitForPorts: false`, probe the agent even if ports are published:
+ *  the caller must be able to exec the service before any port can open. */
 async function waitForReady(
   conn: CloudConn,
   id: string,
   timeoutMs = 120_000,
   intervalMs = 1_000,
+  waitForPorts = true,
 ): Promise<void> {
   const start = Date.now();
   const deadline = start + timeoutMs;
@@ -1138,8 +1141,14 @@ async function waitForReady(
         `machine ${id} entered ${state} before becoming ready`,
       );
     }
+    // With deferred ports, even `started` and legacy servers' absent `ready`
+    // are insufficient: only a successful in-guest exec proves agent readiness.
+    if (!waitForPorts && (state === "started" || state === "running")) {
+      if (await agentReachable(conn, id)) return;
+    }
     // Back-compat: `ready` absent entirely → old server, gate on state.
     if (
+      waitForPorts &&
       m &&
       m.ready === undefined &&
       (state === "started" || state === "running")
@@ -1152,6 +1161,7 @@ async function waitForReady(
     // machine legitimately about to become ready), confirm the guest agent is
     // reachable directly (a trivial exec) and treat that as ready.
     if (
+      waitForPorts &&
       (state === "started" || state === "running") &&
       !m?.ports?.length &&
       Date.now() - start >= NO_PORT_READY_PROBE_GRACE_MS &&
@@ -1920,7 +1930,6 @@ export async function makeTransport(
     // The cloud create API has no workload user; refuse rather than silently
     // run the workload as the image's default user.
     if (config.user !== undefined) throw new NotSupportedError("user is local-only.");
-    if (config.waitForPorts === false || conn.waitForPorts === false) throw new NotSupportedError("waitForPorts: false is local-only.");
     // Cloud is settled: NOW the CLI's stored login may supply the credential
     // and endpoint, which is the reuse `smol auth login` promises.
     const { apiKey: cliKey, endpoint: cliUrl } = cliSession(conn.target);
@@ -2037,7 +2046,7 @@ export async function makeTransport(
         startError = e instanceof Error ? e.message : String(e);
       }
       try {
-        await waitForReady(cloudConn, id);
+        await waitForReady(cloudConn, id, 120_000, 1_000, (config.waitForPorts ?? conn.waitForPorts) !== false);
       } catch (e) {
         if (startError !== undefined && e instanceof SmolError)
           throw new SmolError(
@@ -2215,7 +2224,6 @@ export async function connectTransport(
     }
   }
   if (conn.egressInterceptor) throw new NotSupportedError("egressInterceptor is local-only.");
-  if (conn.waitForPorts === false) throw new NotSupportedError("waitForPorts: false is local-only.");
   // As in makeTransport: the CLI-login fallback applies only once the cloud
   // target is already selected.
   const { apiKey: cliKey, endpoint: cliUrl } = cliSession(conn.target);
@@ -2249,7 +2257,11 @@ export async function connectTransport(
     if (!hit) throw e;
     m = hit;
   }
-  return new CloudTransport(cloudConn, m.name ?? id, m.id ?? id);
+  const resolvedId = m.id ?? id;
+  if (conn.waitForPorts === false && m.state !== "frozen") {
+    await waitForReady(cloudConn, resolvedId, 120_000, 1_000, false);
+  }
+  return new CloudTransport(cloudConn, m.name ?? id, resolvedId);
 }
 
 /** Restore a durable cloud checkpoint into a new machine, then return only once

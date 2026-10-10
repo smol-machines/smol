@@ -134,6 +134,7 @@ jobs:
           bun install --frozen-lockfile
           bun test/unit.ts
           bun test/cloud-mock.ts
+          bun test/cloud-deferred-ports.ts
       - name: Build guest agent and rootfs
         working-directory: ${{ github.workspace }}/monorepo
         run: |
