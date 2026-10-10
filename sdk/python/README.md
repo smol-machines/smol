@@ -150,6 +150,29 @@ from smol.integrations import (
 The vLLM backend must bind to loopback, enable runtime LoRA updates, and reserve
 one spare CPU LoRA slot so a new version can load before the old version drains.
 
+### LlamaIndex tools
+
+Install `smolmachines[llama-index]` to let a LlamaIndex agent run shell commands
+and Python inside a local microVM. No networking is enabled by default; pass
+`resources=ResourceSpec(allow_hosts=[...])` to grant selected guest destinations.
+
+```python
+from llama_index.core.agent.workflow import FunctionAgent
+from smol.llama_index import SmolLlamaIndexTools
+
+async def run_agent(llm):  # supply a LlamaIndex function-calling LLM
+    with SmolLlamaIndexTools(target="local") as sandbox:  # or target="cloud"
+        agent = FunctionAgent(tools=sandbox.tools(), llm=llm)
+        return await agent.run(user_msg="Write a Python file and run it")
+```
+
+The tools use one VM throughout the context and delete it on exit. Pass
+`machine=your_machine` to use a caller-owned VM without deleting it. Each
+command has a 30-second timeout and a 50 KiB combined output cap; crossing the
+cap closes the stream and stops the command locally; on Cloud, the command may
+continue until its configured timeout. The default image includes Python. Cloud VMs created by
+this adapter also have a one-hour deletion TTL if the process loses control.
+
 ### NeMo Gym sandbox provider
 
 Install the optional integration and select the same `smol` provider for local
