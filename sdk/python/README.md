@@ -179,6 +179,32 @@ Networking is off by default and can be configured with `MachineConfig` and
 require approval by default, matching Agent Framework's shell tools; direct
 `run()` calls do not ask for approval. Use one tool per agent session.
 
+### Microsoft Agent Framework CodeAct
+
+The same optional extra also provides a CodeAct context provider for agents that
+need Python with an actual Linux filesystem and subprocesses:
+
+```python
+from agent_framework import Agent
+from smol.code_act import SmolCodeActProvider
+
+# `client` is your configured Agent Framework chat client.
+async with SmolCodeActProvider() as codeact:
+    agent = Agent(client=client, context_providers=[codeact])
+    response = await agent.run("Use Python to calculate a result in /workspace")
+```
+
+The provider creates one local VM per instance and deletes it when the context
+closes. Create a separate provider for each agent session so users do not share
+its filesystem. Use `conn=ConnectOptions(target="cloud")` for Smol Cloud, or pass an
+existing `AsyncMachine` that you manage. Files and installed packages persist
+across `execute_code` calls; Python variables and imports start fresh on each
+call. Guest networking is off by default; pass a `MachineConfig` with networking
+when the agent needs to install packages. CodeAct runs in the VM without host
+tool callbacks or host directory mounts, and its `execute_code` tool runs without
+per-call approval by default, matching Agent Framework's other sandboxed CodeAct
+providers; set `approval_mode="always_require"` to require it.
+
 ### NeMo Gym sandbox provider
 
 Install the optional integration and select the same `smol` provider for local
