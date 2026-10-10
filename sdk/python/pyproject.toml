@@ -38,14 +38,14 @@ Issues = "https://github.com/smol-machines/smol/issues"
 [project.optional-dependencies]
 tunnel = ["websockets>=15,<16"]
 dev = ["maturin>=1.5,<2.0", "pytest>=7"]
+# Use Smol Machines as a Deep Agents sandbox backend.
+deepagents = ["deepagents>=0.7,<0.8"]
 # Use smol as a verifiers RL runtime: `pip install smolmachines[verifiers]`.
 verifiers = ["verifiers>=0.2"]
 # Use smol as a NeMo Gym sandbox provider: `pip install smolmachines[nemo-gym]`.
 nemo-gym = ["nemo-gym>=0.5.0"]
 # Use SmolVM as a Harbor evaluation environment: `pip install smolmachines[harbor]`.
 harbor = ["harbor>=0.22,<0.23"]
-# Use Smol Machines as a Deep Agents sandbox backend.
-deepagents = ["deepagents>=0.7,<0.8"]
 
 [project.entry-points."nemo_gym.sandbox_providers"]
 smol = "smol.nemo_gym:SmolProvider"
