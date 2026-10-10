@@ -128,7 +128,11 @@ async def try_another_approach():
 ```
 
 Set `branchable=True` before the source VM is created; setting it on a capability
-that attaches to an existing VM cannot change the source's branchability.
+that attaches to an existing VM cannot change the source's branchability. To
+pause and resume a workspace while preserving its guest RAM and files, use
+`machine = await sandbox.backend(ref).get_machine()`, then
+`await machine.pause()` and `await machine.resume()`. The same `ref` reattaches
+after resume on local or Cloud VMs.
 
 Use `SmolSandbox(target='cloud')` and set `SMOL_CLOUD_TOKEN` to run the same
 agent on Smol Cloud. Cloud machines default to a one-hour expiration; local
