@@ -8,7 +8,7 @@ import pytest
 from pydantic_ai import Agent, RunContext
 from pydantic_ai.models.test import TestModel
 from pydantic_ai.workspaces import WorkspaceRef
-from pydantic_ai_harness.filesystem import FileSystem
+from pydantic_ai_harness.filesystem import FileSystem, FileSystemToolset
 from pydantic_ai_harness.shell import Shell
 from smol.pydantic_ai_harness import SmolSandbox
 
@@ -22,17 +22,24 @@ async def test_agent_uses_smol_vm_and_reattaches() -> None:
         )
 
     sandbox = SmolSandbox()
+    shell = Shell()
+    files = FileSystem()
     agent = Agent(
-        TestModel(call_tools=["write_and_read"]),
-        capabilities=[sandbox, Shell(), FileSystem()],
+        TestModel(call_tools=["write_and_read"]), capabilities=[sandbox, shell, files]
     )
 
     @agent.tool
     async def write_and_read(ctx: RunContext[object]) -> str:
-        await ctx.workspace.write_bytes("/workspace/harness-test.txt", b"from guest")
-        result = await ctx.workspace.run(["cat", "/workspace/harness-test.txt"])
-        assert result.exit_code == 0
-        return result.stdout
+        toolset = files.get_toolset()
+        assert isinstance(toolset, FileSystemToolset)
+        await toolset.write_file(
+            "harness-test.txt", "from guest", workspace=ctx.workspace
+        )
+        command = await shell.get_toolset().run_command(ctx, "cat harness-test.txt")
+        content = await toolset.read_file("harness-test.txt", workspace=ctx.workspace)
+        assert "from guest" in command
+        assert "from guest" in content
+        return content
 
     ref: WorkspaceRef | None = None
     try:
