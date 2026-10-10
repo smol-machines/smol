@@ -150,6 +150,35 @@ from smol.integrations import (
 The vLLM backend must bind to loopback, enable runtime LoRA updates, and reserve
 one spare CPU LoRA slot so a new version can load before the old version drains.
 
+### Microsoft Agent Framework shell tool
+
+Install `smolmachines[agent-framework]` on Python 3.10+ to run Agent Framework
+shell calls in isolated local microVMs without Docker, or in Smol Cloud with
+the same tool:
+
+```python
+from smol import ConnectOptions
+from smol.agent_framework import SmolShellTool
+
+# Local by default. For Cloud, pass conn=ConnectOptions(target="cloud")
+# and set SMOL_CLOUD_TOKEN. A Cloud VM has a one-hour TTL by default.
+async with SmolShellTool() as shell:
+    result = await shell.run("printf hello > /workspace/greeting; cat /workspace/greeting")
+    print(result.stdout)
+
+    # With an Agent Framework chat client already configured:
+    # agent = Agent(client=client, tools=[client.get_shell_tool(func=shell.as_function())])
+```
+
+A `SmolShellTool` owns and deletes its VM when its context ends. Pass
+`machine=existing_async_machine` to use a VM you manage yourself; closing the
+tool then leaves that machine running. Files under `/workspace` persist between
+commands; each call starts a new shell, so `cd` and shell variables do not.
+Networking is off by default and can be configured with `MachineConfig` and
+`ResourceSpec` (including allowed hosts). Agent calls through `as_function()`
+require approval by default, matching Agent Framework's shell tools; direct
+`run()` calls do not ask for approval. Use one tool per agent session.
+
 ### NeMo Gym sandbox provider
 
 Install the optional integration and select the same `smol` provider for local
