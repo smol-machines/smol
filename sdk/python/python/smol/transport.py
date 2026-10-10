@@ -226,26 +226,47 @@ def _encode_path(p: str) -> str:
 # ---------------------------------------------------------------------------
 # Local (embedded engine via the native extension)
 # ---------------------------------------------------------------------------
-def _wire_bundled_native() -> None:
+def _bundled_paths() -> "tuple[Optional[str], str, Optional[str]]":
+    """(boot helper, lib dir, agent rootfs tarball) bundled in this wheel; a helper or
+    tarball that is not shipped reads as None."""
+    pkg = os.path.dirname(os.path.realpath(__file__))
+    helper = os.path.join(pkg, "smol-vmm.exe" if os.name == "nt" else "smol-vmm")
+    rootfs_tar = os.path.join(pkg, "agent-rootfs.tar")
+    return (
+        helper if os.path.exists(helper) else None,
+        pkg,
+        rootfs_tar if os.path.exists(rootfs_tar) and "SMOLVM_AGENT_ROOTFS" not in os.environ else None,
+    )
+
+
+def _wire_bundled_native(native: Any) -> None:
     """Point the embedded engine at the boot helper + libs bundled in this wheel.
 
-    Mirrors the Node SDK's ``assets.js``. On macOS the hypervisor entitlement
+    Mirrors the Node SDK's ``assets.ts``. On macOS the hypervisor entitlement
     lives on ``smol-vmm`` (spawned as a subprocess), so the engine must launch the
     bundled, signed helper rather than call the hypervisor from the unentitled
     python process. No-op (cloud still works) if the helper isn't present.
+
+    The paths are handed to the engine in-process, never exported into
+    ``os.environ``: every subprocess this program starts would inherit them, and a
+    ``smolvm`` CLI run from Python then booted its machines with this wheel's
+    helper, which exits as soon as its parent does — the machine died within
+    seconds. An engine too old to take them in-process gets the environment
+    variables as before. An explicitly set variable always wins, so
+    ``SMOLVM_BOOT_BINARY=…`` stays an override.
     """
-    pkg = os.path.dirname(os.path.realpath(__file__))
-    helper = os.path.join(pkg, "smol-vmm.exe" if os.name == "nt" else "smol-vmm")
-    if os.path.exists(helper):
-        os.environ.setdefault("SMOLVM_BOOT_BINARY", helper)
-    # libkrun/libkrunfw are bundled flat next to _native in the package dir.
-    os.environ.setdefault("SMOLVM_LIB_DIR", pkg)
-    # Bundled guest rootfs tarball — the engine extracts it on first use, so the
-    # wheel is fully self-contained (no separate engine install needed). A wheel
-    # can't ship a rootfs dir tree (symlinks/modes), so we ship a tarball.
-    rootfs_tar = os.path.join(pkg, "agent-rootfs.tar")
-    if os.path.exists(rootfs_tar) and "SMOLVM_AGENT_ROOTFS" not in os.environ:
-        os.environ.setdefault("SMOLVM_AGENT_ROOTFS_TAR", rootfs_tar)
+    helper, pkg, rootfs_tar = _bundled_paths()
+    boot = os.environ.get("SMOLVM_BOOT_BINARY") or helper
+    lib_dir = os.environ.get("SMOLVM_LIB_DIR") or pkg
+    tar = os.environ.get("SMOLVM_AGENT_ROOTFS_TAR") or rootfs_tar
+    if hasattr(native, "configure_bundle"):
+        native.configure_bundle(boot_binary=boot, lib_dir=lib_dir, agent_rootfs_tar=tar)
+        return
+    if boot:
+        os.environ.setdefault("SMOLVM_BOOT_BINARY", boot)
+    os.environ.setdefault("SMOLVM_LIB_DIR", lib_dir)
+    if tar:
+        os.environ.setdefault("SMOLVM_AGENT_ROOTFS_TAR", tar)
 
 
 def _wire_default_hardening() -> None:
@@ -271,29 +292,25 @@ _native_wire_lock = threading.Lock()
 
 
 def _load_native() -> Any:
-    """The native engine, with its environment wired on first use.
+    """Load the native engine and register bundled assets on first local use.
 
-    The engine is configured through process environment variables, which
-    every subprocess the embedding program starts would inherit. So they are
-    set here, when a local machine is first used, rather than on ``import
-    smol`` — a program that only uses the cloud never has its environment
-    touched."""
+    Bundle paths stay in-process so child processes do not inherit them.
+    Explicit hardening overrides still use the environment."""
     global _native_wired
-    with _native_wire_lock:
-        if not _native_wired:
-            _wire_bundled_native()
-            _wire_default_hardening()
-            _native_wired = True
     try:
         from . import _native  # type: ignore[attr-defined]
-
-        return _native
     except ImportError as e:  # native ext not built/installed for this platform
         raise NotSupportedError(
             "the local engine native extension is not available — build it with "
             "`maturin develop` (or install a prebuilt wheel), or use the cloud "
             "target via Machine.create(..., ConnectOptions(target='cloud'))."
         ) from e
+    with _native_wire_lock:
+        if not _native_wired:
+            _wire_bundled_native(_native)
+            _wire_default_hardening()
+            _native_wired = True
+    return _native
 
 
 # Hosts with a prebuilt local engine: (sys.platform, machine) pairs.

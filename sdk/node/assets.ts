@@ -1,17 +1,21 @@
 /** Auto-wiring for bundled native assets.
  *
- *  Points the engine at the package's bundled, signed boot helper and hypervisor
- *  libraries so the SDK works on a plain `node` with no manual env setup:
- *    - SMOLVM_BOOT_BINARY → bundled `smol-vmm` helper (handles `_boot-vm`; on
- *      macOS codesigned with `com.apple.security.hypervisor`, so the user's
- *      `node` needs no entitlement).
- *    - SMOLVM_LIB_DIR     → the dir holding libkrun/libkrunfw.
- *    - SMOLVM_AGENT_ROOTFS_TAR → bundled guest rootfs tarball (the engine
- *      extracts it on first use), so a plain `npm i` is fully self-contained.
+ *  Resolves the package's bundled, signed boot helper, hypervisor libraries and
+ *  guest rootfs so the SDK works on a plain `node` with no manual env setup:
+ *    - bootBinary     → bundled `smol-vmm` helper (handles `_boot-vm`; on macOS
+ *      codesigned with `com.apple.security.hypervisor`, so the user's `node`
+ *      needs no entitlement).
+ *    - libDir         → the dir holding libkrun/libkrunfw.
+ *    - agentRootfsTar → bundled guest rootfs tarball (the engine extracts it
+ *      on first use), so a plain `npm i` is fully self-contained.
  *
- *  A user-provided value always wins. Called by `native.ts` right before the
- *  addon loads — i.e. on first LOCAL use, never at import — so importing the
- *  SDK (e.g. for cloud-only use) leaves `process.env` untouched.
+ *  The resolved paths are handed to the engine in-process by
+ *  `configureRuntimeAssets` and are never written to `process.env`: a `smolvm`
+ *  CLI this program spawns must not inherit this package's helper (it exits
+ *  when its parent does) or its libraries. A user-provided SMOLVM_BOOT_BINARY,
+ *  SMOLVM_LIB_DIR or SMOLVM_AGENT_ROOTFS(_TAR) always wins. Called by
+ *  `native.ts` right before the addon loads — i.e. on first LOCAL use, never at
+ *  import.
  */
 
 import { existsSync } from 'node:fs';
@@ -81,18 +85,18 @@ export function wireBundledAssets(): RuntimeAssets {
   for (const nativeDir of candidates) {
     if (!existsSync(nativeDir)) continue;
     const helper = join(nativeDir, helperName);
+    // Resolved paths are handed to the engine by `configureRuntimeAssets`, never
+    // written to `process.env`: a `smolvm` CLI this program spawns must not
+    // inherit this package's helper, libraries or rootfs.
     if (!assets.bootBinary && existsSync(helper)) {
       assets.bootBinary = helper;
-      process.env.SMOLVM_BOOT_BINARY = helper;
     }
     if (!assets.libDir) {
       assets.libDir = nativeDir;
-      process.env.SMOLVM_LIB_DIR = nativeDir;
     }
     const rootfsTar = join(nativeDir, 'agent-rootfs.tar');
     if (!assets.agentRootfs && !assets.agentRootfsTar && existsSync(rootfsTar)) {
       assets.agentRootfsTar = rootfsTar;
-      process.env.SMOLVM_AGENT_ROOTFS_TAR = rootfsTar;
     }
     break;
   }
