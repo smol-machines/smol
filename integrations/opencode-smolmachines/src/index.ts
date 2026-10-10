@@ -28,7 +28,7 @@ function alwaysPattern(command: string): string {
 }
 
 const server: Plugin = async ({ worktree, directory }, options) => {
-  const sandbox = new Sandbox(worktree || directory, (options ?? {}) as SandboxOptions, smolMachines)
+  const sandbox = new Sandbox(worktree && worktree !== "/" ? worktree : directory, (options ?? {}) as SandboxOptions, smolMachines)
 
   return {
     tool: {

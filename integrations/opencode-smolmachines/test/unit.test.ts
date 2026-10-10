@@ -1,4 +1,6 @@
-import { describe, expect, test } from "bun:test"
+import { describe, expect, spyOn, test } from "bun:test"
+import { Machine } from "smolmachines"
+import plugin from "../src/index"
 import {
   Sandbox,
   machineConfig,
@@ -236,4 +238,34 @@ test("long output keeps its head and tail", () => {
   expect(cut.endsWith("b".repeat(500))).toBe(true)
   expect(cut).toContain("characters truncated")
   expect(cut).not.toContain("MIDDLE")
+})
+
+test("OpenCode no-worktree sentinel mounts only the project directory", async () => {
+  const api = fakeApi()
+  const list = spyOn(Machine, "list").mockImplementation(async () => [] as Awaited<ReturnType<typeof Machine.list>>)
+  const create = spyOn(Machine, "create").mockImplementation(
+    async (config) => api.create(config as Parameters<MachineApi["create"]>[0]) as ReturnType<typeof Machine.create>,
+  )
+  try {
+    const hooks = await plugin.server(
+      { worktree: "/", directory: ROOT } as Parameters<typeof plugin.server>[0],
+      { image: null, network: false },
+    )
+    const permissions: string[] = []
+    const result = await hooks.tool!.bash.execute(
+      { command: "pwd" },
+      {
+        worktree: "/", directory: ROOT, abort: new AbortController().signal,
+        sessionID: "unit", messageID: "unit", agent: "build", metadata: () => {},
+        ask: async (input) => { permissions.push(input.permission) },
+      },
+    )
+    expect(permissions).toEqual(["bash"])
+    expect(typeof result === "string" ? result : result.output).toBe("ran: pwd")
+    expect(api.created[0].config.mounts).toEqual([{ source: ROOT, target: ROOT }])
+    await hooks.dispose?.()
+  } finally {
+    create.mockRestore()
+    list.mockRestore()
+  }
 })
