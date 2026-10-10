@@ -291,3 +291,23 @@ def test_archive_cannot_write_through_symlink_outside_workspace():
         await client.delete(session)
 
     asyncio.run(scenario())
+
+
+def test_scoped_egress_preserves_allowlist_without_enabling_open_network():
+    async def scenario():
+        client = adapter.SmolSandboxClient(allow_network=True)
+        session = await client.create(
+            options=adapter.SmolSandboxClientOptions(allow_hosts=("github.com",))
+        )
+        try:
+            config, _conn = FakeMachine.created[0]
+            assert config.resources.allow_hosts == ["github.com"]
+            assert config.resources.network is None
+        finally:
+            await client.delete(session)
+
+    asyncio.run(scenario())
+    with pytest.raises(
+        ValueError, match="choose unrestricted network or scoped egress"
+    ):
+        adapter.SmolSandboxClientOptions(network=True, allow_hosts=("github.com",))

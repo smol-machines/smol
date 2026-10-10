@@ -26,7 +26,7 @@ from agents.sandbox.snapshot import SnapshotBase, SnapshotSpec, resolve_snapshot
 from agents.sandbox.types import ExecResult, User
 from agents.sandbox.util.parse_utils import parse_ls_la
 from agents.sandbox.util.tar_utils import validate_tar_bytes
-from pydantic import Field
+from pydantic import Field, model_validator
 
 from .async_machine import AsyncMachine
 from .errors import SmolError
@@ -39,8 +39,16 @@ class SmolSandboxClientOptions(BaseSandboxClientOptions):
     cpus: int = Field(default=2, ge=1)
     memory_mb: int = Field(default=768, ge=256)
     network: bool = False
+    allow_hosts: tuple[str, ...] = ()
+    allow_cidrs: tuple[str, ...] = ()
     branchable: bool = False
     ttl_seconds: int = Field(default=3600, ge=60)
+
+    @model_validator(mode="after")
+    def check_network_policy(self) -> SmolSandboxClientOptions:
+        if self.network and (self.allow_hosts or self.allow_cidrs):
+            raise ValueError("choose unrestricted network or scoped egress, not both")
+        return self
 
 
 class SmolSandboxSessionState(SandboxSessionState):
@@ -88,7 +96,11 @@ class SmolSandboxSession(BaseSandboxSession):
                     raise RuntimeError(
                         "sandbox machine is gone and its workspace snapshot is unavailable"
                     ) from exc
-                if self.state.options.network and not self._allow_network:
+                if (
+                    self.state.options.network
+                    or self.state.options.allow_hosts
+                    or self.state.options.allow_cidrs
+                ) and not self._allow_network:
                     raise RuntimeError(
                         "network access requires trusted client authorization"
                     )
@@ -287,10 +299,15 @@ class SmolSandboxClient(BaseSandboxClient[SmolSandboxClientOptions]):
 
     @staticmethod
     def _machine_config(opts: SmolSandboxClientOptions, target: str) -> MachineConfig:
+        scoped_egress = bool(opts.allow_hosts or opts.allow_cidrs)
         return MachineConfig(
             image=opts.image,
             resources=ResourceSpec(
-                cpus=opts.cpus, memory_mb=opts.memory_mb, network=opts.network
+                cpus=opts.cpus,
+                memory_mb=opts.memory_mb,
+                network=None if scoped_egress else opts.network,
+                allow_hosts=list(opts.allow_hosts) if opts.allow_hosts else None,
+                allow_cidrs=list(opts.allow_cidrs) if opts.allow_cidrs else None,
             ),
             persistent=True,
             branchable=opts.branchable,
@@ -307,7 +324,9 @@ class SmolSandboxClient(BaseSandboxClient[SmolSandboxClientOptions]):
         manifest = self._validate_manifest_for_create(manifest or Manifest())
         self._validate_manifest(manifest)
         opts = options or SmolSandboxClientOptions()
-        if opts.network and not self.allow_network:
+        if (
+            opts.network or opts.allow_hosts or opts.allow_cidrs
+        ) and not self.allow_network:
             raise ValueError("network access requires allow_network=True on the client")
         if self.target == "cloud" and not opts.image:
             raise ValueError("Cloud sandboxes require an image, such as alpine:3.20")

@@ -464,9 +464,10 @@ For Cloud, use `SmolSandboxClient(target="cloud")` and pass
 `SmolSandboxClientOptions(image="alpine:3.20")` as `SandboxRunConfig(options=...)`;
 authenticate with `smol auth login` or `SMOL_CLOUD_TOKEN`. To enable guest
 networking, set `allow_network=True` on the client and `network=True` in its
-options. Set `branchable=True` in those options to use `machine.pause()` and
-`machine.resume()` with preserved RAM. Runner-owned sessions are deleted after the run. For an application
-owned session, save `client.serialize_session_state(session.state)` before
+options, or set `allow_hosts=("github.com",)` for scoped egress instead. Set
+`branchable=True` in those options to use `machine.pause()` and
+`machine.resume()` with preserved RAM. Runner-owned sessions are deleted
+after the run. For an application owned session, save `client.serialize_session_state(session.state)` before
 closing it, use `client.resume(client.deserialize_session_state(saved))` to
 reattach, and call `client.delete(session)` when finished. If the original VM
 has gone away, recovery requires a restorable Agents SDK workspace snapshot;
