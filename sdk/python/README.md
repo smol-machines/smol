@@ -284,7 +284,7 @@ from smol.deepagents import SmolSandbox
 config = MachineConfig(
     image="python:3.12-alpine",  # Deep Agents uses python3 inside the guest
     resources=ResourceSpec(cpus=2, memory_mb=1024),
-    network=True,  # local image pull needs guest egress; restrict it for production
+    network=False,  # image pull happens on the host; keep guest egress closed
 )
 # For managed cloud instead: Machine.create(config, ConnectOptions(target="cloud"))
 with Machine.create(config) as machine:
@@ -295,9 +295,10 @@ with Machine.create(config) as machine:
 
 Local mode needs KVM on Linux or Hypervisor.framework on Apple Silicon. The
 `BaseSandbox` implementation uses `python3` for file search and edits, so
-choose an image that contains it. `network=True` in this local demonstration
-allows arbitrary outbound connections; apply an egress policy suitable for
-untrusted agent code in a real workload.
+choose an image that contains it. The host can fetch the registry image without
+enabling guest networking. If the agent needs outbound access, set an egress
+policy with `allow_hosts` or `allow_cidrs`, or explicitly enable unrestricted
+guest networking.
 
 ## Architecture
 - **Pure-Python layer** (`python/smol`): `Machine`, transports, types, errors —
