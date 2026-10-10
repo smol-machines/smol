@@ -12,7 +12,7 @@ async function main(): Promise<void> {
   writeFileSync(join(host, "state.txt"), "initial\n");
   const machine = await Machine.create({
     name,
-    image: "alpine:3.20",
+    image: "public.ecr.aws/docker/library/alpine:3.20",
     persistent: true,
     mounts: [{ source: host, target: "/work", staged: true }],
     resources: { cpus: 1, memoryMb: 512, network: true },

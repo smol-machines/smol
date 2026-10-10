@@ -438,5 +438,36 @@ python tests/test_async_mock.py  # AsyncMachine vs a mock /v1 (concurrency, no V
 SMOLVM_BOOT_BINARY=… SMOLVM_LIB_DIR=… .venv/bin/python tests/test_local_e2e.py
 ```
 
+### smolagents CodeAgent executor
+
+Install `smolmachines[smolagents]` and pass an executor instance to `CodeAgent`:
+
+```python
+from smol import ResourceSpec
+from smol.smolagents import SmolExecutor
+from smolagents import CodeAgent, InferenceClientModel
+
+with CodeAgent(
+    model=InferenceClientModel(),
+    tools=[],
+    executor=SmolExecutor(resources=ResourceSpec(memory_mb=1024, network=False)),
+) as agent:
+    print(agent.run("Compute 2 ** 10 using Python"))
+```
+
+Each executor owns one VM and keeps Python state between actions and agent runs. The default
+`python:3.12-slim` image needs no guest network for standard-library code;
+installing extra tool packages needs network access or a prebuilt image with
+those packages. Set `target="cloud"` and configure Smol Cloud credentials to
+move the same agent workload to the cloud. `cleanup()` deletes only VMs created
+by the executor. A VM supplied via `machine=` remains the caller's responsibility.
+Guest code has no host file access unless you explicitly provide one. To
+pause and resume an executor-owned VM with its Python state intact, construct
+`SmolExecutor(branchable=True)` and use `executor.machine` for its lifecycle;
+the default VM remains nonbranchable. For caller-owned VMs, set
+`MachineConfig(branchable=True)` when creating the machine. By default,
+final answers use safe serialization; only enable `allow_pickle=True` if you
+trust the guest code and its output.
+
 ## License
 Apache-2.0
