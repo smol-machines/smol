@@ -52,7 +52,7 @@
     "test:staged": "tsx test/staged-mount-e2e.ts",
     "test:agent-ready": "tsx test/local-agent-ready.ts",
     "gen:openapi": "bash scripts/gen-openapi.sh",
-    "test:cloud": "tsx test/cloud-mock.ts",
+    "test:cloud": "tsx test/cloud-mock.ts && tsx test/cloud-deferred-ports.ts",
     "test:unit": "tsx test/unit.ts"
   },
   "devDependencies": {
