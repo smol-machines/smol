@@ -73,12 +73,15 @@ def fake_machine(monkeypatch):
 def test_machine_lifecycle_state_round_trip_and_network_policy():
     async def scenario():
         client = adapter.SmolSandboxClient(target="cloud")
-        options = adapter.SmolSandboxClientOptions(image="alpine:3.20", ttl_seconds=300)
+        options = adapter.SmolSandboxClientOptions(
+            image="alpine:3.20", ttl_seconds=300, branchable=True
+        )
         session = await client.create(options=options)
         try:
             await session.start()
             config, conn = FakeMachine.created[0]
             assert config.image == "alpine:3.20"
+            assert config.branchable is True
             assert config.resources.network is False
             assert conn.target == "cloud"
             await session.write(Path("/workspace/answer"), io.BytesIO(b"42"))

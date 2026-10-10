@@ -39,6 +39,7 @@ class SmolSandboxClientOptions(BaseSandboxClientOptions):
     cpus: int = Field(default=2, ge=1)
     memory_mb: int = Field(default=768, ge=256)
     network: bool = False
+    branchable: bool = False
     ttl_seconds: int = Field(default=3600, ge=60)
 
 
@@ -87,6 +88,10 @@ class SmolSandboxSession(BaseSandboxSession):
                     raise RuntimeError(
                         "sandbox machine is gone and its workspace snapshot is unavailable"
                     ) from exc
+                if self.state.options.network and not self._allow_network:
+                    raise RuntimeError(
+                        "network access requires trusted client authorization"
+                    )
                 machine = await AsyncMachine.create(
                     SmolSandboxClient._machine_config(
                         self.state.options, self.state.target
@@ -96,14 +101,15 @@ class SmolSandboxSession(BaseSandboxSession):
                 self.state.machine_id = machine.id
                 self.state.workspace_root_ready = False
                 self._set_start_state_preserved(False)
-                current = "started"
             self._machine = machine
-            if current == "paused":
-                await self.machine.resume()
-            elif current in ("stopped", "created"):
-                await self.machine.start()
-            else:
-                await self.machine.wait_until_ready()
+        # The same session may have been paused after a previous agent turn.
+        current = await self.machine.state()
+        if current == "paused":
+            await self.machine.resume()
+        elif current in ("stopped", "created"):
+            await self.machine.start()
+        else:
+            await self.machine.wait_until_ready()
         result = await self.machine.exec(["mkdir", "-p", self.state.manifest.root])
         if not result.success:
             raise RuntimeError(f"Smol workspace setup failed: {result.stderr}")
@@ -287,6 +293,7 @@ class SmolSandboxClient(BaseSandboxClient[SmolSandboxClientOptions]):
                 cpus=opts.cpus, memory_mb=opts.memory_mb, network=opts.network
             ),
             persistent=True,
+            branchable=opts.branchable,
             ttl_seconds=opts.ttl_seconds if target == "cloud" else None,
         )
 
