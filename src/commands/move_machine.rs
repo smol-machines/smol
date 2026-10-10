@@ -57,6 +57,9 @@ impl MoveCmd {
         // failed move can resume it right where it was. A copy captures it
         // while it keeps running.
         let staged = tempfile::Builder::new().prefix("smol-move-").tempdir()?;
+        // Holds a pause's self-contained copy, when it needs one, until the
+        // upload is done.
+        let mut exported = None;
         let artifact = if self.keep_local {
             let path = staged.path().join(format!("{name}.checkpoint"));
             eprintln!("Checkpointing '{name}'...");
@@ -69,12 +72,17 @@ impl MoveCmd {
         } else {
             eprintln!("Pausing '{name}' and saving its execution...");
             runtime.pause_machine(name)?;
-            runtime
-                .list_machines()?
-                .into_iter()
-                .find(|record| record.name == name)
-                .and_then(|record| record.paused_checkpoint)
-                .ok_or_else(|| anyhow::anyhow!("'{name}' paused without a saved checkpoint"))?
+            // A pause links the backing layers it shares with other machines
+            // (the disk templates, a golden's layers) instead of packing them,
+            // and only this computer can resolve those links; the cloud needs
+            // them packed in.
+            let export = runtime.exportable_paused_checkpoint(name).map_err(|error| {
+                anyhow::anyhow!(
+                    "{error}\n'{name}' is paused locally with its execution saved; \
+                     `smol machine resume --name {name}` continues it on this computer"
+                )
+            })?;
+            exported.insert(export).path().to_path_buf()
         };
 
         let net = if self.net {
@@ -99,6 +107,7 @@ impl MoveCmd {
             }
             Err(error) => return Err(error),
         };
+        drop(exported);
         drop(staged);
         println!(
             "Moved '{name}' to Smol Cloud as '{cloud_name}' ({machine_id}), from checkpoint {checkpoint_id}"
