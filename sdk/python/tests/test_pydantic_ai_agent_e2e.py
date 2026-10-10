@@ -56,6 +56,62 @@ async def test_agent_uses_smol_vm_and_reattaches() -> None:
             await sandbox.destroy(ref)
 
 
+async def test_cloud_agent_tools_survive_pause_resume_and_reattachment() -> None:
+    if os.getenv("SMOL_SANDBOX_CLOUD_LIVE") != "1":
+        pytest.skip("set SMOL_SANDBOX_CLOUD_LIVE=1 after `smol auth login`")
+
+    sandbox = SmolSandbox(
+        target="cloud",
+        image="alpine:3.20",
+        memory_mb=768,
+        network=False,
+        branchable=True,
+        ttl_seconds=300,
+    )
+    backend = SmolSandboxBackend(
+        target="cloud",
+        image="alpine:3.20",
+        memory_mb=768,
+        network=False,
+        branchable=True,
+        ttl_seconds=300,
+    )
+    shell = Shell()
+    files = FileSystem()
+    agent = Agent(
+        TestModel(call_tools=["write_and_read"]), capabilities=[sandbox, shell, files]
+    )
+
+    @agent.tool
+    async def write_and_read(ctx: RunContext[object]) -> str:
+        toolset = files.get_toolset()
+        assert isinstance(toolset, FileSystemToolset)
+        await toolset.write_file(
+            "harness-cloud.txt", "from cloud guest", workspace=ctx.workspace
+        )
+        command = await shell.get_toolset().run_command(ctx, "cat harness-cloud.txt")
+        content = await toolset.read_file("harness-cloud.txt", workspace=ctx.workspace)
+        assert "from cloud guest" in command
+        return content
+
+    try:
+        result = await agent.run(
+            "Create and read a file inside the Cloud VM.", workspace=backend
+        )
+        assert "from cloud guest" in result.output
+        ref = result.workspace.ref
+        assert ref is not None and ref == backend.ref
+        machine = await backend.get_machine()
+        await machine.pause()
+        await machine.resume()
+        assert (
+            await sandbox.backend(ref).run(["cat", "/workspace/harness-cloud.txt"])
+        ).stdout == "from cloud guest"
+    finally:
+        if backend.ref is not None:
+            await sandbox.destroy(backend.ref)
+
+
 async def test_branchable_agent_workspace_is_independent() -> None:
     if os.getenv("SMOL_SANDBOX_LIVE") != "1":
         pytest.skip(
