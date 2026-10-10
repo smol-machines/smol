@@ -55,7 +55,8 @@ def test_local_interceptor_forwarded_on_create_reconnect_and_restart():
             return FakeMachine({"name": name})
 
     with mock.patch.object(transport_module, "_load_native", return_value=SimpleNamespace(Machine=FakeMachine)), \
-         mock.patch.object(transport_module.LocalTransport, "wait_until_ready"):
+         mock.patch.object(transport_module.LocalTransport, "wait_until_ready"), \
+         mock.patch.object(transport_module, "_wait_for_execution"):
         local = transport_module.make_transport(
             MachineConfig(name="intercepted", network=True, egress_interceptor=binding),
             ConnectOptions(target="local"),
@@ -318,8 +319,8 @@ def test_connect_preserves_frozen_checkpoint_without_readiness_wait():
     with (
         mock.patch.object(transport_module, "_load_native", return_value=Native),
         mock.patch.object(
-            transport_module.LocalTransport,
-            "wait_until_ready",
+            transport_module,
+            "_wait_for_execution",
             side_effect=AssertionError(
                 "a frozen fork source must not wait for its agent"
             ),
@@ -329,6 +330,34 @@ def test_connect_preserves_frozen_checkpoint_without_readiness_wait():
             "checkpoint", ConnectOptions(target="local")
         )
     assert connected.state() == "frozen"
+
+
+def test_local_connect_waits_for_agent_without_waiting_for_application_ports():
+    class Inner:
+        name = "service-not-started"
+
+        @staticmethod
+        def state():
+            return "running"
+
+        @staticmethod
+        def guest_ports():
+            return [8000]
+
+        @staticmethod
+        def host_port(port):
+            return 48374
+
+    class Native:
+        Machine = SimpleNamespace(connect=lambda name: Inner())
+
+    with (
+        mock.patch.object(transport_module, "_load_native", return_value=Native),
+        mock.patch.object(transport_module.LocalTransport, "wait_until_ready", side_effect=AssertionError("listener not ready")),
+        mock.patch.object(transport_module, "_wait_for_execution") as wait_for_agent,
+    ):
+        transport_module.connect_transport("service-not-started", ConnectOptions(target="local"))
+    wait_for_agent.assert_called_once()
 
 
 def test_local_checkpoint_forwards_store_and_reports_reuse():

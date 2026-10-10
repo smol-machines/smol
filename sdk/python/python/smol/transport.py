@@ -2183,7 +2183,10 @@ def connect_transport(machine_id: str, conn: Optional[ConnectOptions] = None) ->
             # A frozen checkpoint is intentionally not agent-ready; it remains
             # connectable so callers can fork its retained snapshot.
             if transport.state() != "frozen":
-                transport.wait_until_ready()
+                # Reconnecting can precede the workload's listener startup (or
+                # follow its shutdown). Only the agent needs to accept exec;
+                # create() alone honors wait_for_ports for application readiness.
+                _wait_for_execution(transport, 120.0)
             return transport
         except Exception as e:  # noqa: BLE001
             raise wrap_native_error(e) from e
