@@ -100,6 +100,36 @@ if ref is not None:
     asyncio.run(sandbox.destroy(ref))  # or await in an async application
 ```
 
+For parallel attempts, create a branchable source once, then run another agent
+on an independent copy of its RAM and files:
+
+```python
+from pydantic_ai import Agent
+from pydantic_ai.workspaces import WorkspaceRef
+from pydantic_ai_harness.filesystem import FileSystem
+from pydantic_ai_harness.shell import Shell
+from smol.pydantic_ai_harness import SmolSandbox
+
+async def try_another_approach():
+    sandbox = SmolSandbox(branchable=True)
+    agent = Agent('anthropic:claude-opus-5-5', capabilities=[sandbox, Shell(), FileSystem()])
+    prepared = await agent.run('Prepare the repository for my task.')
+    ref = prepared.workspace.ref
+    assert ref is not None
+    try:
+        source = await sandbox.backend(ref).get_machine()
+        branch = await source.branch('attempt-b')
+        try:
+            return await agent.run('Try another approach.', workspace=WorkspaceRef(provider='smol', id=branch.id))
+        finally:
+            await branch.delete()
+    finally:
+        await sandbox.destroy(ref)
+```
+
+Set `branchable=True` before the source VM is created; setting it on a capability
+that attaches to an existing VM cannot change the source's branchability.
+
 Use `SmolSandbox(target='cloud')` and set `SMOL_CLOUD_TOKEN` to run the same
 agent on Smol Cloud. Cloud machines default to a one-hour expiration; local
 machines have no TTL. For a new VM, enable `network=True` only when the guest

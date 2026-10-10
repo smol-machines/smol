@@ -78,7 +78,10 @@ async def test_cloud_lifecycle_and_streamed_command() -> None:
     )
     try:
         backend = SmolSandboxBackend(
-            target="cloud", base_url=sandbox.base_url, api_key="test-token"
+            target="cloud",
+            base_url=sandbox.base_url,
+            api_key="test-token",
+            branchable=True,
         )
         result = await backend.run(["echo", "hello"], env={"RUN": "yes"}, timeout=3)
         assert result.exit_code == 0 and result.stdout == "hello"
@@ -86,6 +89,7 @@ async def test_cloud_lifecycle_and_streamed_command() -> None:
         assert ref == WorkspaceRef(provider="smol", id="mach-cloud-1")
         assert ref is not None
         assert captured["create"]["ttlSeconds"] == 3600
+        assert captured["create"]["forkable"] is True
         assert captured["create"]["source"] == {
             "type": "image",
             "reference": "alpine:3.20",

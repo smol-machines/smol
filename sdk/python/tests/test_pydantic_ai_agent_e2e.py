@@ -10,7 +10,7 @@ from pydantic_ai.models.test import TestModel
 from pydantic_ai.workspaces import WorkspaceRef
 from pydantic_ai_harness.filesystem import FileSystem, FileSystemToolset
 from pydantic_ai_harness.shell import Shell
-from smol.pydantic_ai_harness import SmolSandbox
+from smol.pydantic_ai_harness import SmolSandbox, SmolSandboxBackend
 
 pytestmark = pytest.mark.anyio
 
@@ -54,3 +54,50 @@ async def test_agent_uses_smol_vm_and_reattaches() -> None:
     finally:
         if ref is not None:
             await sandbox.destroy(ref)
+
+
+async def test_branchable_agent_workspace_is_independent() -> None:
+    if os.getenv("SMOL_SANDBOX_LIVE") != "1":
+        pytest.skip(
+            "set SMOL_SANDBOX_LIVE=1 with local virtualization to run the VM test"
+        )
+
+    from uuid import uuid4
+
+    sandbox = SmolSandbox(branchable=True)
+    backend = SmolSandboxBackend(branchable=True)
+    source = await backend.get_machine()
+    child = None
+    try:
+        initial = await backend.run(
+            ["sh", "-c", "printf source > /workspace/branch-test.txt"]
+        )
+        assert initial.exit_code == 0
+        child = await source.branch(f"harness-branch-{uuid4().hex[:8]}")
+        child_ref = WorkspaceRef(provider="smol", id=child.id)
+
+        agent = Agent(TestModel(call_tools=["inspect_branch"]), capabilities=[sandbox])
+
+        @agent.tool
+        async def inspect_branch(ctx: RunContext[object]) -> str:
+            before = await ctx.workspace.run(["cat", "/workspace/branch-test.txt"])
+            assert before.stdout == "source"
+            changed = await ctx.workspace.run(
+                ["sh", "-c", "printf child > /workspace/branch-test.txt"]
+            )
+            assert changed.exit_code == 0
+            return (
+                await ctx.workspace.run(["cat", "/workspace/branch-test.txt"])
+            ).stdout
+
+        result = await agent.run(
+            "Try a different change in this branch.", workspace=child_ref
+        )
+        assert "child" in result.output
+        assert (
+            await backend.run(["cat", "/workspace/branch-test.txt"])
+        ).stdout == "source"
+    finally:
+        if child is not None:
+            await child.delete()
+        await source.delete()

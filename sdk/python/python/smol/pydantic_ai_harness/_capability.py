@@ -24,6 +24,7 @@ class SmolSandbox(AbstractCapability[AgentDepsT]):
     image: str = "alpine:3.20"
     memory_mb: int = 1024
     network: bool = False
+    branchable: bool = False
     working_dir: str = "/workspace"
     env: Mapping[str, str] | None = field(default=None, repr=False)
     api_key: str | None = field(default=None, repr=False)
@@ -40,6 +41,8 @@ class SmolSandbox(AbstractCapability[AgentDepsT]):
             raise UserError("target must be 'local' or 'cloud'")
         check_integer("memory_mb", self.memory_mb, minimum=256)
         check_integer("ttl_seconds", self.ttl_seconds)
+        if type(self.branchable) is not bool:
+            raise UserError("branchable must be a boolean")
         check_working_dir(self.working_dir)
 
     def backend(self, ref: WorkspaceRef) -> SmolSandboxBackend:
@@ -68,6 +71,7 @@ class SmolSandbox(AbstractCapability[AgentDepsT]):
             image=self.image,
             memory_mb=self.memory_mb,
             network=self.network,
+            branchable=self.branchable,
             working_dir=self.working_dir,
             env=self.env,
             api_key=self.api_key,

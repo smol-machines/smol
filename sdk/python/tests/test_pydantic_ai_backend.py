@@ -76,11 +76,12 @@ async def test_lazy_single_creation_and_reattach(
     machine_sdk: tuple[FakeMachine, list[MachineConfig]],
 ) -> None:
     machine, configs = machine_sdk
-    backend = SmolSandboxBackend(env={"BASE": "value"})
+    backend = SmolSandboxBackend(env={"BASE": "value"}, branchable=True)
     assert backend.ref is None and configs == []
     first, second = await asyncio.gather(backend.get_machine(), backend.get_machine())
     assert first is second is machine and len(configs) == 1
     assert configs[0].persistent and configs[0].image == "alpine:3.20"
+    assert configs[0].branchable is True
     ref = backend.ref
     assert ref == WorkspaceRef(provider="smol", id=machine.id)
     assert ref is not None

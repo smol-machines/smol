@@ -145,6 +145,7 @@ class SmolSandboxBackend(WorkspaceBackend, SupportsCommands):
         image: str = "alpine:3.20",
         memory_mb: int = 1024,
         network: bool = False,
+        branchable: bool = False,
         working_dir: str = "/workspace",
         env: Mapping[str, str] | None = None,
         api_key: str | None = None,
@@ -164,6 +165,8 @@ class SmolSandboxBackend(WorkspaceBackend, SupportsCommands):
             raise ValueError("target must be 'local' or 'cloud'")
         if memory_mb < 256 or type(memory_mb) is not int:
             raise ValueError("memory_mb must be an integer of at least 256")
+        if type(branchable) is not bool:
+            raise ValueError("branchable must be a boolean")
         if type(ttl_seconds) is not int or ttl_seconds < 1:
             raise ValueError("ttl_seconds must be a positive integer")
         check_timeout(ready_timeout)
@@ -179,6 +182,7 @@ class SmolSandboxBackend(WorkspaceBackend, SupportsCommands):
         self._image = image
         self._memory_mb = memory_mb
         self._network = network
+        self._branchable = branchable
         self._working_dir = absolute_path("working_dir", working_dir)
         assert self._working_dir is not None
         self._env = dict(env) if env is not None else None
@@ -233,6 +237,7 @@ class SmolSandboxBackend(WorkspaceBackend, SupportsCommands):
                             MachineConfig(
                                 image=self._image,
                                 persistent=True,
+                                branchable=self._branchable,
                                 resources=ResourceSpec(
                                     memory_mb=self._memory_mb, network=self._network
                                 ),
