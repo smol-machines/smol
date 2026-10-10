@@ -73,6 +73,45 @@ finally:
     m.delete()
 ```
 
+### Pydantic AI Harness workspace
+
+Install `smolmachines[pydantic-ai-harness]` with Python 3.11 or newer, plus
+`pydantic-ai-harness[anthropic]` for the example model. The integration
+supplies one persistent microVM per workspace, so Harness tools share a
+filesystem and shell. Model credentials stay on the host unless you pass them
+through `env=`.
+
+```python
+from pydantic_ai import Agent
+from pydantic_ai_harness.filesystem import FileSystem
+from pydantic_ai_harness.shell import Shell
+from smol.pydantic_ai_harness import SmolSandbox
+
+sandbox = SmolSandbox()  # local VM, outbound network disabled
+agent = Agent('anthropic:claude-opus-5-5', capabilities=[sandbox, Shell(), FileSystem()])
+result = agent.run_sync('Write hello.txt and display its contents.')
+
+# Keep result.workspace.ref to resume the same machine in a later run.
+ref = result.workspace.ref
+if ref is not None:
+    agent.run_sync('Read hello.txt.', workspace=ref)
+    # Explicit deletion: runs never delete your machine automatically.
+    import asyncio
+    asyncio.run(sandbox.destroy(ref))  # or await in an async application
+```
+
+Use `SmolSandbox(target='cloud')` and set `SMOL_CLOUD_TOKEN` to run the same
+agent on Smol Cloud. Cloud machines default to a one-hour expiration; local
+machines have no TTL. For a new VM, enable `network=True` only when the guest
+must reach the network. The default image includes the POSIX tools the Harness
+filesystem fallback uses; custom images need `sh`, `base64`, `cp`, `dd`, `find`,
+`mkdir`, `mv`, `readlink`, `rm`, and `wc`. Both targets require asyncio; Trio is
+unsupported. Workspaces return command output up to 10 MiB and close the stream
+on timeout or output overflow. On Cloud, disconnecting a stream can leave the
+guest command running until its configured deadline; delete the VM to stop an
+unbounded command. `SmolSandboxBackend` exposes `ref` and `get_machine()` if a
+caller needs explicit cleanup after a failed agent run.
+
 ### Async: `AsyncMachine` (non-blocking)
 
 `Machine` is synchronous — each call blocks the calling thread. When you're
