@@ -264,3 +264,27 @@ def test_bounded_read_does_not_silence_guest_read_failures():
         await client.delete(session)
 
     asyncio.run(scenario())
+
+
+def test_archive_cannot_write_through_symlink_outside_workspace():
+    from agents.sandbox.util.tar_utils import UnsafeTarMemberError
+
+    async def scenario():
+        client = adapter.SmolSandboxClient()
+        session = await client.create()
+        machine = FakeMachine.instances[session.state.machine_id]
+        archive = io.BytesIO()
+        with tarfile.open(fileobj=archive, mode="w") as tar:
+            link = tarfile.TarInfo("escape")
+            link.type = tarfile.SYMTYPE
+            link.linkname = "/etc"
+            tar.addfile(link)
+            file = tarfile.TarInfo("escape/passwd")
+            file.size = 1
+            tar.addfile(file, io.BytesIO(b"x"))
+        with pytest.raises(UnsafeTarMemberError):
+            await session.hydrate_workspace(io.BytesIO(archive.getvalue()))
+        assert machine.commands == []
+        await client.delete(session)
+
+    asyncio.run(scenario())

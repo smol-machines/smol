@@ -218,7 +218,7 @@ class SmolSandboxSession(BaseSandboxSession):
             if not result.success:
                 raise RuntimeError(f"Smol workspace export failed: {result.stderr}")
             archive = await self.machine.read_file(temp)
-            validate_tar_bytes(archive, allow_external_symlink_targets=False)
+            validate_tar_bytes(archive)
             return io.BytesIO(archive)
         finally:
             await self.machine.exec(["rm", "-f", temp])
@@ -227,7 +227,7 @@ class SmolSandboxSession(BaseSandboxSession):
         archive = data.read()
         if not isinstance(archive, bytes):
             raise TypeError("workspace archive must contain bytes")
-        validate_tar_bytes(archive, allow_external_symlink_targets=False)
+        validate_tar_bytes(archive)
         temp = f"/workspace/.smol-agents-import-{uuid.uuid4().hex}.tar"
         try:
             await self.machine.write_file(temp, archive)
