@@ -2180,9 +2180,9 @@ def connect_transport(machine_id: str, conn: Optional[ConnectOptions] = None) ->
                 if binding else native.Machine.connect(machine_id)
             )
             transport = LocalTransport(inner, cleanup_on_exit=False, interceptor=binding)
-            # A frozen checkpoint is intentionally not agent-ready; it remains
-            # connectable so callers can fork its retained snapshot.
-            if transport.state() != "frozen":
+            # Frozen and durably paused machines are not agent-ready. A paused
+            # machine must be resumed explicitly before it can serve work.
+            if transport.state() not in ("frozen", "paused", "pausing"):
                 transport.wait_until_ready()
             return transport
         except Exception as e:  # noqa: BLE001
