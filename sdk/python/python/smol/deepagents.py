@@ -42,15 +42,19 @@ class SmolSandbox(BaseSandbox):
             raise ValueError("timeout must be greater than zero")
         result = self.machine.exec(
             ["/bin/sh", "-lc", command],
-            ExecOptions(timeout=timeout if timeout is not None else 1800),
+            ExecOptions(timeout=timeout if timeout is not None else 1800, output="b64"),
         )
-        output = result.stdout
-        if result.stderr:
-            output = f"{output}\n{result.stderr}" if output else result.stderr
+        stdout, stdout_truncated = _complete_output(
+            result.stdout, result.stdout_bytes, result.stdout_truncated
+        )
+        stderr, stderr_truncated = _complete_output(
+            result.stderr, result.stderr_bytes, result.stderr_truncated
+        )
+        output = f"{stdout}\n{stderr}" if stdout and stderr else stdout or stderr
         return ExecuteResponse(
             output=output,
             exit_code=result.exit_code,
-            truncated=result.stdout_truncated or result.stderr_truncated,
+            truncated=stdout_truncated or stderr_truncated,
         )
 
     def download_files(self, paths: list[str]) -> list[FileDownloadResponse]:
@@ -111,6 +115,16 @@ class SmolSandbox(BaseSandbox):
                     FileUploadResponse(path=path, error=_file_error(error))
                 )
         return responses
+
+
+def _complete_output(text: str, data: bytes, truncated: bool) -> tuple[str, bool]:
+    """Prefer complete exec bytes; old controls expose only their capped text."""
+    if not data:
+        return text, truncated
+    # Older controls fall back to re-encoding the truncated text. Only clear
+    # the flag when the bytes demonstrably include data beyond that text.
+    complete = len(data) > len(text.encode("utf-8", "replace"))
+    return data.decode("utf-8", "replace"), truncated and not complete
 
 
 def _file_error(error: OSError | SmolError) -> str:
