@@ -87,7 +87,6 @@ def test_machine_lifecycle_state_round_trip_and_network_policy():
             await session.write(Path("/workspace/answer"), io.BytesIO(b"42"))
             payload = client.serialize_session_state(session.state)
             resumed = await client.resume(client.deserialize_session_state(payload))
-            await resumed.start()
             assert (await resumed.read(Path("/workspace/answer"))).read() == b"42"
         finally:
             await client.delete(session)
@@ -104,6 +103,20 @@ def test_missing_machine_without_snapshot_never_creates_an_empty_replacement():
         resumed = await client.resume(client.deserialize_session_state(payload))
         with pytest.raises(RuntimeError, match="snapshot is unavailable"):
             await resumed.start()
+        assert len(FakeMachine.created) == 1
+
+    asyncio.run(scenario())
+
+
+def test_resuming_started_session_without_snapshot_does_not_replace_machine():
+    async def scenario():
+        client = adapter.SmolSandboxClient()
+        session = await client.create(snapshot=NoopSnapshotSpec())
+        await session.start()
+        payload = client.serialize_session_state(session.state)
+        await client.delete(session)
+        with pytest.raises(RuntimeError, match="snapshot is unavailable"):
+            await client.resume(client.deserialize_session_state(payload))
         assert len(FakeMachine.created) == 1
 
     asyncio.run(scenario())
@@ -148,6 +161,24 @@ def test_network_access_requires_trusted_client_policy():
                 options=adapter.SmolSandboxClientOptions(network=True)
             )
         assert FakeMachine.created == []
+
+    asyncio.run(scenario())
+
+
+def test_network_access_remains_authorized_when_reattaching():
+    async def scenario():
+        client = adapter.SmolSandboxClient(allow_network=True)
+        session = await client.create(
+            options=adapter.SmolSandboxClientOptions(allow_hosts=("github.com",))
+        )
+        try:
+            await session.start()
+            serialized = client.serialize_session_state(session.state)
+            untrusted = adapter.SmolSandboxClient()
+            with pytest.raises(ValueError, match="allow_network=True"):
+                await untrusted.resume(untrusted.deserialize_session_state(serialized))
+        finally:
+            await client.delete(session)
 
     asyncio.run(scenario())
 

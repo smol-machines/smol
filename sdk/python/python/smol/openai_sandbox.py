@@ -356,9 +356,17 @@ class SmolSandboxClient(BaseSandboxClient[SmolSandboxClientOptions]):
             raise ValueError("Smol sandbox state and client target must match")
         state.assert_path_grants_rebound()
         self._validate_manifest(state.manifest)
-        return self._wrap_session(
-            SmolSandboxSession(state, self.conn, allow_network=self.allow_network)
-        )
+        if (
+            state.options.network or state.options.allow_hosts or state.options.allow_cidrs
+        ) and not self.allow_network:
+            raise ValueError("network access requires allow_network=True on the client")
+        inner = SmolSandboxSession(state, self.conn, allow_network=self.allow_network)
+        if state.workspace_root_ready:
+            # A resumed session must be usable after its activity worker restarts.
+            await inner._ensure_backend_started()
+            if not state.workspace_root_ready:
+                await inner.start()
+        return self._wrap_session(inner)
 
     async def delete(self, session: SandboxSession) -> SandboxSession:
         inner = session._inner
