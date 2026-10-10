@@ -5,7 +5,7 @@
 //! API is synchronous too (unlike Node, which must be async).
 //!
 //! `transport.py`'s `LocalTransport` expects exactly this surface:
-//!   Machine(config: dict) / Machine.connect(name) -> instance
+//!   Machine(config: dict) / Machine.connect(name) -> instance / Machine.list() -> summaries
 //!   .name (property), .state(), .start(), .stop(), .delete()
 //!   .fork(name, ports) / .fork_batch(names, ports, parallel) -> Machine(s)
 //!   .exec(command, options) / .run(image, command, options) -> ExecResult
@@ -146,6 +146,27 @@ struct ImageInfo {
     architecture: String,
     #[pyo3(get)]
     os: String,
+}
+
+/// One local machine in the shared embedded engine database. This mirrors
+/// the Node binding's native listing; Python applies label filters to both
+/// this and the Cloud listing after converting them to MachineSummary.
+#[pyclass]
+struct LocalMachineSummary {
+    #[pyo3(get)]
+    name: String,
+    #[pyo3(get)]
+    state: String,
+    #[pyo3(get)]
+    labels: std::collections::HashMap<String, String>,
+    #[pyo3(get)]
+    image: Option<String>,
+    #[pyo3(get)]
+    persistent: bool,
+    #[pyo3(get)]
+    branchable: bool,
+    #[pyo3(get)]
+    created_at: u64,
 }
 
 /// Result of writing a portable live checkpoint to local disk.
@@ -594,8 +615,13 @@ impl Machine {
             .unwrap_or_default();
 
         let (credentials, credential_values) = credential_policy(config)?;
+        let labels = match config.get_item("labels")? {
+            Some(value) if !value.is_none() => value.extract()?,
+            _ => std::collections::BTreeMap::new(),
+        };
         let spec = MachineSpec {
             name: name.clone(),
+            labels,
             mounts,
             ports,
             resources,
@@ -658,6 +684,33 @@ impl Machine {
         py.allow_threads(|| runtime.connect_or_start_machine_with_interceptor(&name, interceptor))
             .map_err(err)?;
         Ok(Self { name })
+    }
+
+    /// List every machine in the host's shared database, without starting it.
+    #[staticmethod]
+    fn list(py: Python<'_>) -> PyResult<Vec<LocalMachineSummary>> {
+        let runtime = runtime().map_err(err)?;
+        py.allow_threads(|| {
+            runtime.list_machines().map(|records| {
+                records
+                    .into_iter()
+                    .map(|record| LocalMachineSummary {
+                        state: runtime.state(&record.name),
+                        labels: record
+                            .labels
+                            .iter()
+                            .map(|(k, v)| (k.clone(), v.clone()))
+                            .collect(),
+                        branchable: record.forkable_on_start(),
+                        persistent: !record.ephemeral,
+                        image: record.image,
+                        created_at: record.created_at,
+                        name: record.name,
+                    })
+                    .collect()
+            })
+        })
+        .map_err(err)
     }
 
     /// Create a stopped machine from a portable live checkpoint on disk.
@@ -1063,6 +1116,7 @@ impl Machine {
 #[pymodule]
 fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<Machine>()?;
+    m.add_class::<LocalMachineSummary>()?;
     m.add_class::<ExecResult>()?;
     m.add_class::<ImageInfo>()?;
     m.add_class::<LocalCheckpointResult>()?;

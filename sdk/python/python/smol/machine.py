@@ -145,8 +145,11 @@ class Machine:
     def list(
         conn: Optional[ConnectOptions] = None, labels: Optional[dict[str, str]] = None
     ) -> "list[MachineSummary]":
-        """The cloud account's machines; with ``labels``, only those carrying
-        every one of them. Cloud only."""
+        """List machines on the selected target without starting them.
+
+        Local listing sees the shared host database; Cloud listing sees the
+        account's machines. ``labels`` filters on every given key/value.
+        """
         return list_machines_transport(conn, labels)
 
     @staticmethod

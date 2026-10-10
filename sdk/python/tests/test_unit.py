@@ -35,6 +35,53 @@ from smol.types import (  # noqa: E402
 )
 
 
+def test_local_machine_list_reads_shared_db_without_starting_machines():
+    records = [
+        SimpleNamespace(
+            name="one", state="stopped", labels={"project": "a"},
+            image="python:3.12-alpine", persistent=True, branchable=False,
+            created_at=1_700_000_000,
+        ),
+        SimpleNamespace(
+            name="two", state="running", labels={"project": "b"},
+            image=None, persistent=False, branchable=True,
+            created_at=1_700_000_001,
+        ),
+    ]
+    native = SimpleNamespace(Machine=SimpleNamespace(list=mock.Mock(return_value=records)))
+    with mock.patch.object(transport_module, "_load_native", return_value=native):
+        all_machines = machine_module.Machine.list(ConnectOptions(target="local"))
+        filtered = machine_module.Machine.list(
+            ConnectOptions(target="local"), {"project": "a"}
+        )
+
+    assert [machine.id for machine in all_machines] == ["one", "two"]
+    assert [machine.name for machine in filtered] == ["one"]
+    assert filtered[0].state == "stopped" and filtered[0].persistent
+    assert filtered[0].created_at.startswith("2023-")
+    assert not all_machines[1].persistent and all_machines[1].branchable
+    native.Machine.list.assert_called_with()
+
+
+def test_native_config_persists_local_labels_for_listing():
+    cfg = MachineConfig(labels={"project": "agents", "cased-sandboxes": "true"})
+    assert _native_config("m", cfg)["labels"] == cfg.labels
+    assert "labels" not in _native_config("m", MachineConfig())
+
+
+def test_local_machine_list_preserves_native_error_code():
+    native = SimpleNamespace(
+        Machine=SimpleNamespace(list=mock.Mock(side_effect=RuntimeError("[STORAGE_ERROR] database busy")))
+    )
+    with mock.patch.object(transport_module, "_load_native", return_value=native):
+        try:
+            machine_module.Machine.list(ConnectOptions(target="local"))
+        except SmolError as error:
+            assert error.code == "STORAGE_ERROR"
+        else:
+            raise AssertionError("native list failure was swallowed")
+
+
 def test_local_interceptor_forwarded_on_create_reconnect_and_restart():
     binding = EgressInterceptor("127.0.0.1:9000", "a5" * 32)
     calls = []

@@ -428,6 +428,8 @@ def _native_config(name: str, config: MachineConfig) -> dict:
     }
     if config.image is not None:
         cfg["image"] = config.image
+    if config.labels is not None:
+        cfg["labels"] = dict(config.labels)
     if config.command is not None:
         cfg["command"] = list(config.command)
     if config.env:
@@ -2416,12 +2418,34 @@ def upload_checkpoint(
 def list_machines_transport(
     conn: Optional[ConnectOptions] = None, labels: Optional[dict[str, str]] = None
 ) -> list[MachineSummary]:
-    """Every machine of the cloud account, optionally only those carrying every
-    one of ``labels``. Anything but a machine list (a proxy's page, a wrong base
-    URL) raises rather than reading as an account with no machines."""
+    """Every machine on the chosen target, optionally filtered by labels.
+
+    Local listing reads the shared embedded-engine database without starting
+    machines. A malformed cloud response raises instead of appearing empty.
+    """
     conn = conn or ConnectOptions(target="cloud")
     if conn.target == "local":
-        raise NotSupportedError("list is cloud-only in the Python SDK")
+        from datetime import datetime, timezone
+
+        try:
+            records = _load_native().Machine.list()
+        except Exception as e:  # noqa: BLE001 - native errors carry typed codes
+            raise wrap_native_error(e) from e
+        machines = [
+            MachineSummary(
+                id=m.name,
+                name=m.name,
+                state=m.state,
+                labels=dict(m.labels),
+                image=m.image,
+                persistent=m.persistent,
+                branchable=m.branchable,
+                created_at=datetime.fromtimestamp(m.created_at, timezone.utc).isoformat(),
+            )
+            for m in records
+        ]
+        want = (labels or {}).items()
+        return [m for m in machines if all(m.labels.get(k) == v for k, v in want)]
     base_url, api_key = _cloud_credentials(conn, "list")
     query = "&".join(f"label={quote(f'{k}={v}', safe='')}" for k, v in (labels or {}).items())
     listed = _cloud_fetch(base_url, api_key, "GET", f"/v1/machines{'?' + query if query else ''}")
