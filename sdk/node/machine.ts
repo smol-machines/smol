@@ -339,6 +339,13 @@ export class Machine {
     return this.transport.readFile(path);
   }
 
+  /** Read a file in chunks without buffering the entire Cloud response.
+   * Local machines currently yield one buffered chunk from the native binding.
+   * Stopping iteration early cancels the Cloud HTTP download. */
+  readFileStream(path: string): AsyncGenerator<Uint8Array> {
+    return this.transport.readFileStream(path);
+  }
+
   /** Write a file into the machine. */
   writeFile(
     path: string,

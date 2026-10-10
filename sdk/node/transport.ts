@@ -129,6 +129,7 @@ export interface Transport {
   run(image: string, command: string[], opts?: ExecOptions): Promise<RawExec>;
   execStream(command: string[], opts?: ExecOptions): AsyncGenerator<ExecEvent>;
   readFile(path: string): Promise<Buffer>;
+  readFileStream(path: string): AsyncGenerator<Uint8Array>;
   writeFile(path: string, data: Buffer, mode?: number): Promise<void>;
   pullImage(image: string): Promise<ImageInfo>;
   listImages(): Promise<ImageInfo[]>;
@@ -636,6 +637,12 @@ class LocalTransport implements Transport {
     }
   }
 
+  // The native local binding currently returns a Buffer; keep the same API
+  // across targets until native streaming is available.
+  async *readFileStream(path: string): AsyncGenerator<Uint8Array> {
+    yield await this.readFile(path);
+  }
+
   async writeFile(path: string, data: Buffer, mode?: number): Promise<void> {
     try {
       await this.inner.writeFile(
@@ -993,7 +1000,7 @@ async function cloudFetch<T = unknown>(
   opts: {
     json?: unknown;
     body?: Buffer;
-    accept?: "json" | "bytes" | "text";
+    accept?: "json" | "bytes" | "text" | "response";
     timeoutMs?: number;
     /** Caller abort; rejects with `signal.reason` rather than TIMEOUT. */
     signal?: AbortSignal | undefined;
@@ -1061,6 +1068,7 @@ async function cloudFetch<T = unknown>(
       `cloud ${method} ${path} → ${res.status}${text ? `: ${text}` : ""}${rid ? ` [request id: ${rid}]` : ""}`,
     );
   }
+  if (opts.accept === "response") return res as T;
   if (opts.accept === "text") return (await res.text()) as T;
   if (opts.accept === "bytes") {
     if (conn.readResponseBytes) {
@@ -1470,6 +1478,49 @@ class CloudTransport implements Transport {
         timeoutMs: transferTimeoutMs(CLOUD_MAX_FILE_BYTES),
       },
     );
+  }
+
+  async *readFileStream(path: string): AsyncGenerator<Uint8Array> {
+    const route = `/v1/machines/${this.id}/files/${encodePath(path)}`;
+    const res = await cloudFetch<Response>(this.conn, "GET", route, {
+      accept: "response",
+      timeoutMs: transferTimeoutMs(CLOUD_MAX_FILE_BYTES),
+    });
+    // A caller-supplied byte reader may transform the response. Honor it just
+    // as readFile does, even when the injected fetch exposes a body stream.
+    if (this.conn.readResponseBytes) {
+      const bytes = await this.conn.readResponseBytes(res);
+      if (bytes.length > 0) yield bytes;
+      return;
+    }
+    if (!res.body) return;
+
+    const reader = res.body.getReader();
+    try {
+      for (;;) {
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        let chunk: ReadableStreamReadResult<Uint8Array>;
+        try {
+          chunk = await Promise.race([
+            reader.read(),
+            new Promise<never>((_, reject) => {
+              timer = setTimeout(
+                () => reject(new SmolError("TIMEOUT", `cloud GET ${route} stalled for ${CLOUD_TIMEOUT_MS}ms`)),
+                CLOUD_TIMEOUT_MS,
+              );
+            }),
+          ]);
+        } finally {
+          if (timer !== undefined) clearTimeout(timer);
+        }
+        if (chunk.done) return;
+        if (chunk.value.length > 0) yield chunk.value;
+      }
+    } finally {
+      // `break`, a thrown error, or a stalled read must close the HTTP body.
+      await reader.cancel().catch(() => {});
+      reader.releaseLock();
+    }
   }
 
   async writeFile(path: string, data: Buffer, mode?: number): Promise<void> {

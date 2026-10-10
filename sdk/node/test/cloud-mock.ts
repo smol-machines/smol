@@ -577,6 +577,66 @@ async function main(): Promise<void> {
     back.toString(),
   );
 
+  const payload = Buffer.alloc(512 * 1024 + 17);
+  for (let i = 0; i < payload.length; i++) payload[i] = i % 251;
+  await m.writeFile("/tmp/large byte stream", payload);
+  const chunks: Uint8Array[] = [];
+  for await (const chunk of m.readFileStream("/tmp/large byte stream")) chunks.push(chunk);
+  check(
+    "Cloud readFileStream yields the exact bytes without truncation",
+    chunks.length > 0 && Buffer.concat(chunks).equals(payload),
+    `${chunks.length} chunks`,
+  );
+
+  let streamCancelled = false;
+  const hookFetch: typeof fetch = async (url, init) => {
+    if (String(url).endsWith("/files//early")) {
+      return new Response(new ReadableStream<Uint8Array>({
+        pull(controller) { controller.enqueue(new Uint8Array([42])); },
+        cancel() { streamCancelled = true; },
+      }), { status: 200 });
+    }
+    return fetch(url, init);
+  };
+  const hookedMachine = await Machine.connect("m1", {
+    target: "cloud", baseUrl, apiKey: "smk_test123", fetch: hookFetch,
+  });
+  let firstChunk = 0;
+  for await (const chunk of hookedMachine.readFileStream("/early")) {
+    firstChunk = chunk[0] ?? 0;
+    break;
+  }
+  check(
+    "readFileStream stops the Cloud HTTP body when iteration stops early",
+    firstChunk === 42 && streamCancelled,
+  );
+
+  const transformed = await Machine.connect("m1", {
+    target: "cloud", baseUrl, apiKey: "smk_test123",
+    readResponseBytes: async (_response) => new Uint8Array([4, 5]),
+  });
+  const transformedChunks: Uint8Array[] = [];
+  for await (const chunk of transformed.readFileStream("/tmp/x")) transformedChunks.push(chunk);
+  check(
+    "readFileStream honors an injected byte reader even if a body is available",
+    Buffer.concat(transformedChunks).equals(Buffer.from([4, 5])),
+  );
+
+  const unstreamable = await Machine.connect("m1", {
+    target: "cloud", baseUrl, apiKey: "smk_test123",
+    fetch: (async (url, init) =>
+      String(url).endsWith("/files//unstreamable")
+        ? new Response(null, { status: 200 })
+        : fetch(url, init)) as typeof fetch,
+    readResponseBytes: async () => new Uint8Array([8, 9]),
+  });
+  const fallbackChunks: Uint8Array[] = [];
+  for await (const chunk of unstreamable.readFileStream("/unstreamable")) fallbackChunks.push(chunk);
+  check(
+    "readFileStream retains the byte-reader hook for unstreamable fetch responses",
+    Buffer.concat(fallbackChunks).equals(Buffer.from([8, 9])),
+  );
+
   let runGated = false;
   try {
     await m.run("alpine", ["echo", "x"]);
@@ -939,6 +999,18 @@ async function main(): Promise<void> {
     "error message surfaces x-request-id",
     ridErrMsg.includes("[request id: req-test-abc]"),
     ridErrMsg,
+  );
+
+  let streamRidErr: unknown;
+  try {
+    for await (const _chunk of m.readFileStream("/does-not-exist")) { /* no data */ }
+  } catch (e) { streamRidErr = e; }
+  check(
+    "readFileStream preserves Cloud 404 and the request id",
+    streamRidErr instanceof SmolError &&
+      streamRidErr.code === "NOT_FOUND" &&
+      streamRidErr.message.includes("[request id: req-test-abc]"),
+    String(streamRidErr),
   );
 
   const link = await m.share();

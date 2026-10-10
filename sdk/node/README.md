@@ -215,6 +215,9 @@ Existing network connections may need to reconnect.
 - `machine.exec(command, opts?)` / `machine.run(image, command, opts?)` → `ExecResult`.
 - `machine.execStream(command, opts?)` → `AsyncGenerator<ExecEvent>`.
 - `machine.readFile(path)` / `machine.writeFile(path, data, mode?)`.
+- `machine.readFileStream(path)` yields `Uint8Array` chunks without buffering
+  the full Cloud download; stopping iteration cancels the response. Local
+  machines currently yield one buffered chunk.
 - `machine.pullImage(image)` / `machine.listImages()`.
 - `machine.branch(name, options?)` / `machine.branchBatch(options)`.
 - `machine.checkpoint(output, { store? })`, `Machine.restoreCheckpoint(...)`,
