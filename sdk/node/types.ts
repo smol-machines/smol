@@ -221,11 +221,11 @@ export interface MachineConfig {
    *  allocates the host port; readiness includes that published port accepting
    *  connections. */
   ports?: PortSpec[];
-  /** Locally, return from `Machine.create()` after the guest agent is ready,
-   *  even if a published port is not accepting connections yet. Use this when
-   *  `exec()` starts the service: the default port wait would deadlock before
-   *  `exec()` can run. Call `machine.waitUntilReady()` after starting it.
-   *  Default true; false is local-only and rejected on cloud. */
+  /** Return from `Machine.create()` after the guest agent is ready, even if a
+   *  published port is not accepting connections yet. Use this when `exec()`
+   *  starts the service: the default port wait would deadlock before `exec()`
+   *  can run. Call `machine.waitUntilReady()` after starting it.
+   *  Default true. On cloud, false probes in-guest execution before returning. */
   waitForPorts?: boolean;
   /** Resource allocation. */
   resources?: ResourceSpec;
@@ -519,11 +519,10 @@ export interface PortableCheckpointInfo {
 
 /** Selects and configures the backend. Local (embedded) is the default. */
 export interface ConnectOptions {
-  /** Locally, allow `Machine.connect()` to return after the guest agent is
-   *  ready even when a published port is not serving. Useful when reconnecting
-   *  to stop or delete a worker whose listener has exited. Default true;
-   *  false is local-only and rejected on cloud. For `create`, put this setting
-   *  on `MachineConfig` instead. */
+  /** On local machines, allow `Machine.connect()` to return without waiting
+   *  for published ports. On cloud, false waits for successful in-guest exec
+   *  without requiring a published listener; the default connection only
+   *  attaches to the existing machine. For `create`, set this on MachineConfig. */
   waitForPorts?: boolean;
   /** Binding for a stopped local machine that requires intercepted egress. */
   egressInterceptor?: EgressInterceptor;
