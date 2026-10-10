@@ -271,6 +271,11 @@ def test_local_missing_file_preserves_agents_not_found_error():
 
 
 def test_bounded_read_does_not_silence_guest_read_failures():
+    from agents.sandbox.session.base_sandbox_session import BaseSandboxSession
+
+    if not hasattr(BaseSandboxSession, "read_bounded"):
+        pytest.skip("The Agents SDK added bounded reads after 0.22")
+
     from agents.sandbox.errors import (
         WorkspaceArchiveReadError,
         WorkspaceReadNotFoundError,
