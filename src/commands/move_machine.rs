@@ -76,12 +76,14 @@ impl MoveCmd {
             // (the disk templates, a golden's layers) instead of packing them,
             // and only this computer can resolve those links; the cloud needs
             // them packed in.
-            let export = runtime.exportable_paused_checkpoint(name).map_err(|error| {
-                anyhow::anyhow!(
-                    "{error}\n'{name}' is paused locally with its execution saved; \
+            let export = runtime
+                .exportable_paused_checkpoint(name)
+                .map_err(|error| {
+                    anyhow::anyhow!(
+                        "{error}\n'{name}' is paused locally with its execution saved; \
                      `smol machine resume --name {name}` continues it on this computer"
-                )
-            })?;
+                    )
+                })?;
             exported.insert(export).path().to_path_buf()
         };
 
