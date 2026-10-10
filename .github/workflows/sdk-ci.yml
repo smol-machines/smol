@@ -182,6 +182,24 @@ jobs:
           XDG_CONFIG_HOME: ${{ runner.temp }}/rust-smol-config
         run: cargo run --example e2e_exec_control
 
+  pydantic-ai-workspace:
+    name: Python · Pydantic AI workspace contract
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: sdk/python
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install Pydantic AI contract test dependencies
+        run: python -m pip install 'pydantic-ai-slim>=2.54,<3' pytest
+      - name: Run Pydantic AI workspace tests
+        env:
+          PYTHONPATH: python
+        run: python -m pytest -q tests/test_pydantic_ai.py
+
   python-check:
     name: Python · unit + cloud-mock
     runs-on: ubuntu-latest
@@ -217,24 +235,6 @@ jobs:
         run: python tests/test_async_mock.py
       - name: verifiers runtime adapter (pure mapping; skips runtime checks without verifiers)
         run: python tests/test_verifiers_adapter.py
-
-  pydantic-ai-workspace:
-    name: Python · Pydantic AI workspace contract
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: sdk/python
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - name: Install Pydantic AI contract test dependencies
-        run: python -m pip install 'pydantic-ai-slim>=2.54,<3' pytest
-      - name: Run Pydantic AI workspace tests
-        env:
-          PYTHONPATH: python
-        run: python -m pytest -q tests/test_pydantic_ai.py
 
   harbor-adapter:
     name: Python · Harbor provider contract
