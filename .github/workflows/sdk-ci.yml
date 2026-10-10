@@ -235,3 +235,21 @@ jobs:
         env:
           PYTHONPATH: python
         run: python -m pytest -q tests/test_harbor_adapter.py
+
+  deepagents-adapter:
+    name: Python · Deep Agents sandbox contract
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: sdk/python
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install published Deep Agents contract
+        run: python -m pip install 'deepagents>=0.7,<0.8' pytest
+      - name: Run Deep Agents sandbox adapter tests
+        env:
+          PYTHONPATH: python
+        run: python -m pytest -q tests/test_deepagents_adapter.py
