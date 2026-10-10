@@ -18,6 +18,7 @@ pytest.importorskip("smolagents")
 from smol._smolagents_worker import _receive
 from smol.machine import Machine
 from smol.smolagents import SmolExecutor
+from smol.types import ResourceSpec
 
 
 def _round_trip(socket_path: Path, request: dict) -> dict:
@@ -177,3 +178,24 @@ def test_branchable_executor_preserves_state_through_pause_resume() -> None:
         executor.cleanup()
     with pytest.raises(RuntimeError, match="closed"):
         _ = executor.machine
+
+
+@pytest.mark.skipif(
+    os.environ.get("SMOL_SMOLAGENTS_CLOUD_INTEGRATION") != "1",
+    reason="opt-in live Smol Cloud microVM test",
+)
+def test_cloud_executor_preserves_python_state_through_pause_resume() -> None:
+    executor = SmolExecutor(
+        target="cloud",
+        image="python:3.12-slim",
+        resources=ResourceSpec(cpus=2, memory_mb=1024, network=False),
+        branchable=True,
+        timeout_seconds=30,
+    )
+    try:
+        assert executor("saved = 1024\nsaved").output == "1024"
+        executor.machine.pause()
+        executor.machine.resume()
+        assert executor("saved + 7").output == "1031"
+    finally:
+        executor.cleanup()
