@@ -231,10 +231,10 @@ jobs:
           python-version: "3.12"
       - name: Install Agent Framework shell contract dependencies
         run: python -m pip install 'agent-framework-tools>=1.0.0b261008,<2' pytest
-      - name: Test local and Cloud shell tool contracts
+      - name: Test local and Cloud shell and CodeAct contracts
         env:
           PYTHONPATH: python
-        run: python -m pytest -q tests/test_agent_framework_adapter.py
+        run: python -m pytest -q tests/test_agent_framework_adapter.py tests/test_code_act_adapter.py
 
   harbor-adapter:
     name: Python · Harbor provider contract
