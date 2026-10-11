@@ -73,6 +73,37 @@ finally:
     m.delete()
 ```
 
+### Strands agent sandbox
+
+Install `pip install 'smolmachines[strands]'` and pass `SmolSandbox` as the
+agent's sandbox. Strands' shell and file editor tools then work inside one
+microVM; closing the context deletes that VM. Network access is off by default.
+Use `ConnectOptions(target="cloud")` for the same agent on Smol Cloud
+(`SMOL_CLOUD_TOKEN` or `smol cloud login` supplies the credential). Cloud VMs
+created with the default config expire after one hour if the app exits without
+cleaning up.
+
+```python
+import asyncio
+import os
+
+from smol import ConnectOptions
+from smol.strands import SmolSandbox
+from strands import Agent
+
+async def main():
+    async with SmolSandbox(conn=ConnectOptions(target=os.getenv("SMOL_TARGET", "local"))) as sandbox:
+        agent = Agent(model="us.amazon.nova-lite-v1:0", sandbox=sandbox)
+        await agent.invoke_async("Use sandbox_shell to compute 6 * 7 and save the answer to a file.")
+
+asyncio.run(main())
+```
+
+Supply a `MachineConfig` for an image, resource limits, allowed network hosts,
+or explicit local mounts. Pass `machine=existing_machine` to reuse a VM without
+transferring its ownership to the adapter. Closing the agent alone does not
+close its sandbox; keep the `SmolSandbox` context around it.
+
 ### Async: `AsyncMachine` (non-blocking)
 
 `Machine` is synchronous — each call blocks the calling thread. When you're
