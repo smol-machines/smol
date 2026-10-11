@@ -58,7 +58,7 @@ try {
 }
 ```
 
-Cloud-only gaps (`run`, `execStream`, `pullImage`, `listImages`) throw `NotSupportedError`;
+Cloud-only gaps (`run`, `pullImage`, `listImages`) throw `NotSupportedError`;
 the common surface (create/exec/files/state/stop/delete) is identical on both.
 
 ### Disposable workers: wait for `ready`, then connect (cloud)
@@ -152,6 +152,33 @@ await existing.waitUntilReady();
 const { wsUrl, headers } = existing.endpoint(8080, '/socket');
 const ws = new WebSocket(wsUrl, { headers });   // e.g. the `ws` package
 ```
+
+## Strands agents
+
+Install `smolmachines` and `@strands-agents/sdk` (Node.js 22+), then pass a
+`SmolSandbox` to a Strands Agent. One VM backs the agent's shell, code, and
+file editor tools. Creation is lazy, so constructing the agent does not boot a
+VM. The sandbox deletes its VM when you call `close()`:
+
+```ts
+import { Agent } from '@strands-agents/sdk';
+import { SmolSandbox } from 'smolmachines/strands';
+
+const sandbox = new SmolSandbox(); // local VM; no network by default
+const agent = new Agent({ sandbox });
+try {
+  await agent.invoke('Create /workspace/answer.py and run it');
+} finally {
+  await sandbox.close();
+}
+```
+
+Pass `{ conn: { target: 'cloud' } }` to use Smol Cloud with the same agent code
+(authenticated with `SMOL_CLOUD_TOKEN` or `smol auth login`), or
+`{ machine }` to reuse a VM you manage yourself. `close()` leaves an injected machine running. To share a
+local project, set `config.mounts` explicitly; files otherwise stay inside the
+VM. Set `config.resources.network: true` or an egress allow list when the
+workload needs outbound access.
 
 ## Install
 

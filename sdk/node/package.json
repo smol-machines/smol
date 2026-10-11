@@ -27,6 +27,10 @@
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./strands": {
+      "types": "./dist/strands.d.mts",
+      "default": "./dist/strands.mjs"
     }
   },
   "files": [
@@ -45,7 +49,7 @@
   },
   "scripts": {
     "build:native": "napi build --platform --release --js binding.js --dts binding.d.ts",
-    "build:ts": "tsc -p tsconfig.json",
+    "build:ts": "tsc -p tsconfig.json && tsc -p tsconfig.strands.json",
     "build": "npm run build:native && npm run build:ts && npm run bundle:native",
     "bundle:native": "cp binding.js binding.d.ts *.node dist/ 2>/dev/null || true",
     "test:e2e": "napi build --platform --js binding.js --dts binding.d.ts && tsx test/e2e.ts",
@@ -54,13 +58,23 @@
     "test:paused-connect": "tsx test/local-paused-connect.ts",
     "gen:openapi": "bash scripts/gen-openapi.sh",
     "test:cloud": "tsx test/cloud-mock.ts && tsx test/cloud-deferred-ports.ts",
-    "test:unit": "tsx test/unit.ts"
+    "test:unit": "tsx test/unit.ts",
+    "test:strands": "npm run build:ts && tsx test/strands.ts"
   },
   "devDependencies": {
     "@napi-rs/cli": "^2.18.4",
+    "@strands-agents/sdk": "^1.20.0",
     "@types/node": "^20.11.0",
     "openapi-typescript": "^7.13.0",
     "tsx": "^4.19.0",
     "typescript": "^5.6.0"
+  },
+  "peerDependencies": {
+    "@strands-agents/sdk": "^1.20.0"
+  },
+  "peerDependenciesMeta": {
+    "@strands-agents/sdk": {
+      "optional": true
+    }
   }
 }

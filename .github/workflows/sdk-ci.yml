@@ -48,6 +48,23 @@ jobs:
       - name: Type-check (no native addon required)
         run: npx tsc -p tsconfig.json --noEmit
 
+  node-strands:
+    name: Node · Strands sandbox contract
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: sdk/node
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: sdk/node/package-lock.json
+      - run: npm ci
+      - name: Check published Strands agent and tool contract
+        run: npm run test:strands
+
   rust-check:
     name: Rust · fmt, clippy, tests
     runs-on: ubuntu-latest
