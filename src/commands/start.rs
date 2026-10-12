@@ -110,6 +110,19 @@ impl StartCmd {
             );
         }
 
+        // A machine whose guest cannot reach its registry (no network, an
+        // inbound-only network, or an allow list that does not name the
+        // registry) has its image fetched on the host and pinned as a local
+        // archive the guest flattens offline, exactly as the engine's
+        // `machine start` does. The record then names a `local:` ref, which the
+        // pull below skips; later starts keep the pinned image.
+        let record = smolvm::image_store::pin_for_start(
+            &db,
+            &name,
+            record,
+            &smolvm::registry::PullAuth::FromConfig,
+        )?;
+
         let mounts = record.host_mounts();
         let ports = record.port_mappings();
         let mut resources = record.vm_resources();
@@ -153,6 +166,19 @@ impl StartCmd {
             &smolvm::agent::machine_layers_cache_dir(&name),
             record.source_smolmachine.as_deref(),
         )?;
+        // A host-fetched registry image (pinned above) or a locally sourced one
+        // persists as a `local:…` ref whose layers live on the host; point the
+        // launcher at them so the guest assembles its rootfs from the virtiofs
+        // mount instead of pulling, as the engine's `machine start` does.
+        if features.packed_layers_dir.is_none() {
+            if let Some(dir) = record
+                .image
+                .as_deref()
+                .and_then(smolvm::data::image_source::packed_layers_dir_for_ref)
+            {
+                features.packed_layers_dir = Some(dir);
+            }
+        }
 
         // Fork base: memfd-back guest RAM + expose a control socket so `smol machine fork`
         // can later freeze it as a CoW base. These MUST go on the launch features
@@ -234,9 +260,14 @@ impl StartCmd {
             }
         }
 
-        // Pull image if configured — unless the machine was created `--from` a
-        // .smolmachine, in which case its layers are already extracted locally.
-        if record.source_smolmachine.is_none() {
+        // Pull image if configured — unless its layers are already on the host:
+        // a machine created `--from` a .smolmachine has them extracted, and an
+        // image the host fetched above is a `local:` ref the guest reads offline.
+        let image_is_local = record
+            .image
+            .as_deref()
+            .is_some_and(smolvm::data::image_source::is_local_ref);
+        if record.source_smolmachine.is_none() && !image_is_local {
             if let Some(ref image) = record.image {
                 let mut client = smolvm::AgentClient::connect_with_retry(manager.vsock_socket())?;
                 println!("Pulling {}...", image);
