@@ -1,0 +1,4 @@
+{
+  "extends": "./tsconfig.json",
+  "include": ["ai-sdk.ts", "test/ai-sdk-types.ts", "test/ai-sdk-bootstrap-abort.ts"]
+}

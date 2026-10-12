@@ -41,12 +41,16 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "22"
           cache: npm
           cache-dependency-path: sdk/node/package-lock.json
       - run: npm ci
       - name: Type-check (no native addon required)
         run: npx tsc -p tsconfig.json --noEmit
+      - name: Check AI SDK sandbox contract
+        run: npx tsc -p tsconfig.ai-sdk.json --noEmit
+      - name: Check AI SDK bootstrap cancellation
+        run: npx tsx test/ai-sdk-bootstrap-abort.ts
 
   rust-check:
     name: Rust · fmt, clippy, tests
@@ -171,6 +175,7 @@ jobs:
         run: |
           unset SMOLVM_BOOT_BINARY SMOLVM_LIB_DIR SMOLVM_AGENT_ROOTFS SMOLVM_AGENT_ROOTFS_TAR LD_LIBRARY_PATH
           bun test/e2e.ts
+          bun test/ai-sdk-e2e.ts
           bun test/bun-package-e2e.ts
           bun test/local-image-e2e.ts
           bun test/fork-service-e2e.ts
