@@ -148,7 +148,7 @@ fn main() -> smolmachines::Result<()> {
     outcome?;
 
     let image = Machine::builder(format!("rs-img-{pid}"))
-        .image("alpine")
+        .image("public.ecr.aws/docker/library/alpine:3.20")
         .network(true)
         .create()?;
     let outcome = (|| {

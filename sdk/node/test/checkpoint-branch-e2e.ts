@@ -19,7 +19,7 @@ async function main(): Promise<void> {
   try {
     source = await Machine.create({
       name: `sdk-checkpoint-source-${suffix}`,
-      image: "nginx:1.27-alpine",
+      image: "public.ecr.aws/docker/library/nginx:1.27-alpine",
       resources: { cpus: 2, memoryMb: 1024, network: true },
       persistent: true,
       branchable: true,

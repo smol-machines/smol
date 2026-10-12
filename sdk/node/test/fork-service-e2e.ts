@@ -47,7 +47,7 @@ async function main(): Promise<void> {
   const suffix = `${process.pid}-${Date.now()}`;
   const golden = await Machine.create({
     name: `sdk-golden-${suffix}`,
-    image: "nginx:1.27-alpine",
+    image: "public.ecr.aws/docker/library/nginx:1.27-alpine",
     ports: [{ host: await availablePort(), guest: 80 }],
     resources: { cpus: 2, memoryMb: 1024, network: true },
     persistent: true,

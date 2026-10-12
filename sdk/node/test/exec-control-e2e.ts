@@ -102,7 +102,7 @@ async function main() {
     check('bare VM rejects a per-exec user clearly', /image machine/.test(err), err.slice(0, 80));
   } finally { await bare.delete().catch(() => {}); }
 
-  const img = await Machine.create({ name: `val-img-${process.pid}`, image: 'alpine', network: true }, opts);
+  const img = await Machine.create({ name: `val-img-${process.pid}`, image: 'public.ecr.aws/docker/library/alpine:latest', network: true }, opts);
   try {
     const asUser = await img.exec(['id', '-u'], { user: 'nobody' });
     check('exec runs as the requested user', asUser.stdout.trim() === '65534', asUser.stdout.trim());
@@ -112,7 +112,7 @@ async function main() {
     for await (const e of img.execStream(['id', '-u'], { user: 'nobody' })) if (e.kind === 'stdout') streamed += e.data;
     check('execStream runs as the requested user', streamed.trim() === '65534', streamed.trim());
     let runErr = '';
-    try { await img.run('alpine', ['id'], { user: 'nobody' }); } catch (e) { runErr = String((e as Error).message); }
+    try { await img.run('public.ecr.aws/docker/library/alpine:latest', ['id'], { user: 'nobody' }); } catch (e) { runErr = String((e as Error).message); }
     check('run() rejects a per-exec user clearly', /not supported by run/.test(runErr), runErr.slice(0, 80));
     await suite('image machine (alpine)', img);
   } finally { await img.delete().catch(() => {}); }

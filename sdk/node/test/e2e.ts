@@ -45,7 +45,7 @@ async function main(): Promise<void> {
     check('exec success flag', echo.success === true);
 
     // 2) run a command in a container image
-    const py = await machine.run('python:3.12-alpine', ['python', '-c', 'print(2 ** 10)']);
+    const py = await machine.run('public.ecr.aws/docker/library/python:3.12-alpine', ['python', '-c', 'print(2 ** 10)']);
     check('run exit code 0', py.exitCode === 0, `exit=${py.exitCode} stderr=${py.stderr}`);
     check('run stdout = 1024', py.stdout.trim() === '1024', JSON.stringify(py.stdout));
 
