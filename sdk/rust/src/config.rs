@@ -175,6 +175,20 @@ impl Port {
     }
 }
 
+/// What a stopped machine's guest may reach once it starts, set exactly by
+/// [`crate::Machine::update_network`] and read back by [`crate::Machine::network`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum NetworkPolicy {
+    /// No network device: nothing leaves the guest.
+    Blocked,
+    /// Outbound networking to every host.
+    Open,
+    /// Outbound networking to these hosts only, each an exact hostname or a
+    /// `*.domain` pattern for its subdomains, enforced for every connection the
+    /// guest makes. The engine refuses an empty list; use [`Self::Blocked`].
+    AllowHosts(Vec<String>),
+}
+
 /// What the VM is given. Every field falls back to the engine's default.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Resources {

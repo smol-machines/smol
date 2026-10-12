@@ -1014,6 +1014,19 @@ impl Machine {
         self.transport.resize(resize)
     }
 
+    /// Replace this stopped machine's network policy with exactly `policy`:
+    /// no network, every host, or an allow-list that drops whatever the machine
+    /// allowed before. Takes effect on the next start. Local only; a cloud
+    /// machine's network is set when it is created. Needs engine 1.28 or newer.
+    pub fn update_network(&self, policy: &crate::config::NetworkPolicy) -> Result<()> {
+        self.transport.update_network(policy)
+    }
+
+    /// The network policy this machine starts with.
+    pub fn network(&self) -> Result<crate::config::NetworkPolicy> {
+        self.transport.network()
+    }
+
     /// Save RAM and disk durably, then stop at that boundary.
     pub fn pause(&self) -> Result<()> {
         self.transport.pause()

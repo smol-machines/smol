@@ -226,6 +226,82 @@ pub(crate) fn explicit_cli(path: PathBuf) -> Result<PathBuf> {
     }
 }
 
+/// The one `machine update` call that leaves a stopped machine with exactly
+/// `policy`. `--reset-allow-list` drops whatever the machine allowed before, so
+/// an earlier, wider grant never lingers beside the new one; `--net` with an
+/// empty list is the engine's explicit "every host".
+pub(crate) fn update_network_args(
+    name: &str,
+    policy: &crate::config::NetworkPolicy,
+) -> Result<Vec<String>> {
+    use crate::config::NetworkPolicy;
+    let mut args: Vec<String> = ["machine", "update", "--name", name]
+        .into_iter()
+        .map(str::to_string)
+        .collect();
+    match policy {
+        NetworkPolicy::Blocked => args.push("--no-net".to_string()),
+        NetworkPolicy::Open => args.extend(["--net".to_string(), "--reset-allow-list".to_string()]),
+        NetworkPolicy::AllowHosts(hosts) => {
+            if hosts.iter().all(|host| host.trim().is_empty()) {
+                return Err(Error::new(
+                    ErrorKind::Config,
+                    "AllowHosts needs at least one host; use NetworkPolicy::Blocked for no network",
+                ));
+            }
+            args.extend(["--net".to_string(), "--reset-allow-list".to_string()]);
+            for host in hosts {
+                let host = host.trim();
+                if host.is_empty() {
+                    continue;
+                }
+                args.push("--allow-host-pattern".to_string());
+                args.push(host.to_string());
+            }
+        }
+    }
+    Ok(args)
+}
+
+/// The policy a `machine ls --json` row describes, with the engine's stored
+/// allow-list entries turned back into the patterns `update_network` takes:
+/// `=host` (an exact match) becomes `host`, `*.domain` stays, and a bare
+/// `host` (the engine's apex-and-subdomains form) becomes `host` plus
+/// `*.host`. An engine that predates the `allowed_hosts` field reports a
+/// networked machine as open.
+pub(crate) fn network_policy_of(row: &serde_json::Value) -> crate::config::NetworkPolicy {
+    use crate::config::NetworkPolicy;
+    if !row
+        .get("network")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false)
+    {
+        return NetworkPolicy::Blocked;
+    }
+    let mut hosts: Vec<String> = Vec::new();
+    for entry in row
+        .get("allowed_hosts")
+        .and_then(|v| v.as_array())
+        .into_iter()
+        .flatten()
+        .filter_map(|host| host.as_str())
+    {
+        if let Some(exact) = entry.strip_prefix('=') {
+            hosts.push(exact.to_string());
+        } else if entry.starts_with("*.") {
+            hosts.push(entry.to_string());
+        } else {
+            hosts.push(entry.to_string());
+            hosts.push(format!("*.{entry}"));
+        }
+    }
+    if hosts.is_empty() {
+        NetworkPolicy::Open
+    } else {
+        NetworkPolicy::AllowHosts(hosts)
+    }
+}
+
 /// The rows of `machine ls --json`, which older engines wrap in `machines`.
 fn machine_rows(out: &[u8]) -> Result<Vec<serde_json::Value>> {
     let rows: serde_json::Value = serde_json::from_slice(out)
@@ -870,6 +946,16 @@ impl Transport for LocalTransport {
         }))
     }
 
+    fn update_network(&self, policy: &crate::config::NetworkPolicy) -> Result<()> {
+        let args = update_network_args(&self.name, policy)?;
+        let args: Vec<&str> = args.iter().map(String::as_str).collect();
+        self.run(&args).map(|_| ())
+    }
+
+    fn network(&self) -> Result<crate::config::NetworkPolicy> {
+        Ok(network_policy_of(&self.record()?))
+    }
+
     fn resize(&self, resize: &Resize) -> Result<MachineResources> {
         // The engine checks every target first, then applies RAM, CPUs and
         // disks in that order.
@@ -1246,6 +1332,111 @@ mod io_tests {
         }
         assert_eq!(out, b"\nlast\n");
         assert_eq!(err, b"error\n");
+    }
+
+    #[test]
+    fn update_network_sets_the_policy_exactly() {
+        use crate::config::NetworkPolicy;
+        assert_eq!(
+            update_network_args("m", &NetworkPolicy::Blocked).unwrap(),
+            ["machine", "update", "--name", "m", "--no-net"]
+        );
+        assert_eq!(
+            update_network_args("m", &NetworkPolicy::Open).unwrap(),
+            [
+                "machine",
+                "update",
+                "--name",
+                "m",
+                "--net",
+                "--reset-allow-list"
+            ]
+        );
+        assert_eq!(
+            update_network_args(
+                "m",
+                &NetworkPolicy::AllowHosts(vec!["pypi.org".into(), " *.npmjs.org ".into()])
+            )
+            .unwrap(),
+            [
+                "machine",
+                "update",
+                "--name",
+                "m",
+                "--net",
+                "--reset-allow-list",
+                "--allow-host-pattern",
+                "pypi.org",
+                "--allow-host-pattern",
+                "*.npmjs.org",
+            ]
+        );
+        let empty = update_network_args("m", &NetworkPolicy::AllowHosts(vec![" ".into()]));
+        assert_eq!(empty.unwrap_err().kind(), ErrorKind::Config);
+    }
+
+    #[test]
+    fn network_policy_is_read_from_the_machine_row() {
+        use crate::config::NetworkPolicy;
+        let row = |json: &str| serde_json::from_str::<serde_json::Value>(json).unwrap();
+        assert_eq!(
+            network_policy_of(&row(
+                r#"{"network": false, "allowed_hosts": ["a.example"]}"#
+            )),
+            NetworkPolicy::Blocked
+        );
+        assert_eq!(
+            network_policy_of(&row(r#"{"network": true}"#)),
+            NetworkPolicy::Open
+        );
+        assert_eq!(
+            network_policy_of(&row(r#"{"network": true, "allowed_hosts": []}"#)),
+            NetworkPolicy::Open
+        );
+        // Stored entries come back as patterns: `=exact`, `*.wildcard`, and the
+        // bare apex-and-subdomains form as both.
+        assert_eq!(
+            network_policy_of(&row(
+                r#"{"network": true, "allowed_hosts": ["=pypi.org", "*.npmjs.org", "example.com"]}"#
+            )),
+            NetworkPolicy::AllowHosts(vec![
+                "pypi.org".into(),
+                "*.npmjs.org".into(),
+                "example.com".into(),
+                "*.example.com".into(),
+            ])
+        );
+    }
+
+    #[test]
+    fn update_network_runs_one_engine_call_and_network_reads_the_record() {
+        use crate::config::NetworkPolicy;
+        let dir = tempfile::tempdir().unwrap();
+        let log = dir.path().join("calls");
+        let transport = cli(
+            dir.path(),
+            &format!(
+                "echo \"$*\" >> {log}\n\
+                 [ \"$2\" = ls ] && printf '%s' '[{{\"name\":\"test\",\"network\":true,\"allowed_hosts\":[\"=pypi.org\"]}}]'\n\
+                 exit 0",
+                log = log.display()
+            ),
+        );
+        transport
+            .update_network(&NetworkPolicy::AllowHosts(vec!["pypi.org".into()]))
+            .unwrap();
+        assert_eq!(
+            transport.network().unwrap(),
+            NetworkPolicy::AllowHosts(vec!["pypi.org".into()])
+        );
+        let calls = std::fs::read_to_string(&log).unwrap();
+        assert_eq!(
+            calls.lines().collect::<Vec<_>>(),
+            [
+                "machine update --name test --net --reset-allow-list --allow-host-pattern pypi.org",
+                "machine ls --json",
+            ]
+        );
     }
 
     #[test]

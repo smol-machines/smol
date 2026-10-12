@@ -121,6 +121,22 @@ pub(crate) trait Transport: Send + Sync + std::fmt::Debug {
     fn checkpoint(&self, output: Option<&Path>, options: CheckpointOptions) -> Result<Checkpoint>;
     fn checkpoints(&self) -> Result<Vec<Checkpoint>>;
 
+    /// Replace a stopped machine's network policy with exactly `policy`.
+    fn update_network(&self, _policy: &crate::config::NetworkPolicy) -> Result<()> {
+        Err(unsupported(
+            "update_network()",
+            "a cloud machine's network is set when it is created",
+        ))
+    }
+
+    /// The network policy the machine starts with.
+    fn network(&self) -> Result<crate::config::NetworkPolicy> {
+        Err(unsupported(
+            "network()",
+            "a cloud machine's network is set when it is created",
+        ))
+    }
+
     /// Grow the running machine without rebooting it.
     fn resize(&self, _resize: &Resize) -> Result<MachineResources> {
         Err(unsupported(

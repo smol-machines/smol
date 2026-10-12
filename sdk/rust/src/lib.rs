@@ -133,7 +133,8 @@ mod tunnel;
 pub use assets::{configure_runtime_assets, RuntimeAssets};
 pub use availability::local_availability;
 pub use config::{
-    Credential, EgressInterceptor, MachineBuilder, MachineConfig, Mount, Port, Resources,
+    Credential, EgressInterceptor, MachineBuilder, MachineConfig, Mount, NetworkPolicy, Port,
+    Resources,
 };
 pub use connect::{ConnectOptions, Target};
 pub use error::{Error, ErrorKind, Result};
@@ -149,6 +150,17 @@ pub use smol_cloud::types::{
 };
 pub use transport::ReadyOptions;
 pub use tunnel::Tunnel;
+
+/// The engine binary this SDK drives for local machines: the one `SMOLVM`
+/// names, else a compatible install on `PATH`, else the release this crate was
+/// built against, fetched into the cache if needed.
+///
+/// For programs that embed the engine's interactive exec in their own
+/// terminal, such as an editor spawning `smolvm machine exec -t …` in a pty
+/// while this SDK manages the machine's lifecycle.
+pub fn engine_cli() -> Result<std::path::PathBuf> {
+    transport::local::resolve_cli()
+}
 
 /// The shared control-plane crate, re-exported so a caller can reach the raw
 /// API without taking a second dependency on it.

@@ -45,6 +45,35 @@ machine.start_with_interceptor(&binding)?;
 # }
 ```
 
+## Network policy
+
+A stopped machine's egress can be replaced exactly, and read back:
+
+```rust,no_run
+# use smolmachines::{Machine, NetworkPolicy};
+# fn main() -> smolmachines::Result<()> {
+let machine = Machine::attach("sandbox")?;
+machine.update_network(&NetworkPolicy::AllowHosts(vec![
+    "pypi.org".into(),
+    "*.npmjs.org".into(),
+]))?;
+assert!(matches!(machine.network()?, NetworkPolicy::AllowHosts(_)));
+machine.update_network(&NetworkPolicy::Blocked)?; // no network device
+machine.update_network(&NetworkPolicy::Open)?;    // every host
+# Ok(())
+# }
+```
+
+`update_network` drops whatever the machine allowed before, so a wider earlier
+grant never lingers beside the new one. Local only; a cloud machine's network is
+set when it is created. Needs an engine whose `machine update` has
+`--reset-allow-list`.
+
+Programs that embed the engine's interactive exec in their own terminal while
+this SDK manages the machine (an editor spawning `smolvm machine exec -t …` in a
+pty) get the engine binary from `smolmachines::engine_cli()`, which resolves it
+the same way the SDK does.
+
 ## TCP tunnels
 
 Use `machine.tunnel(22)?` to reach a published port through a scoped loopback
