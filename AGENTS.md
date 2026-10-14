@@ -137,6 +137,7 @@ Full reference in [`docs/cli.md`](docs/cli.md); `smol <command> --help` for flag
 | `src/` | The `smol` CLI (Rust). One file per command in `src/commands/`. |
 | `sdk/node` | Node SDK — NAPI native core (`sdk/node/src/*.rs`) + TypeScript (`machine.ts`, `index.ts`). |
 | `sdk/python` | Python SDK — pyo3 native core (`sdk/python/src/*.rs`) + pure Python (`sdk/python/python/smol/`). |
+| `sdk/go` | Go SDK — C-ABI native core (`sdk/go/native/src/*.rs`, one JSON `smol_call` entry point) loaded with purego + pure Go (`machine.go`, `local.go`, `cloud.go`). |
 | `docs/cli.md` | CLI command reference. |
 
 Both SDK native cores and the CLI path-depend on the **smolvm engine** in the

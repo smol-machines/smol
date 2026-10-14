@@ -359,6 +359,109 @@ jobs:
             npm publish --access public --provenance
           fi
 
+  # ─── Go: per-platform runtime bundles ──────────────────────────────────────
+  # A Go module can't carry per-platform binaries, so the Go SDK downloads its
+  # runtime from the smol release on first local use. The bundle is the npm
+  # platform package's native/ dir (boot helper, libkrun, guest rootfs) plus
+  # the Go native core, libsmol_go, which the SDK loads with purego.
+  go-build:
+    name: go · build ${{ matrix.target }}
+    needs: node-build
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: macos-14, target: aarch64-apple-darwin, plat: darwin-arm64, lib: libsmol_go.dylib }
+          - { os: ubuntu-latest, target: x86_64-unknown-linux-gnu, plat: linux-x64, lib: libsmol_go.so }
+          - { os: ubuntu-24.04-arm, target: aarch64-unknown-linux-gnu, plat: linux-arm64, lib: libsmol_go.so }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ vars.SMOLVM_ENGINE_REPO }}
+          ref: ${{ env.ENGINE_VERSION }}
+          path: __engine__
+          lfs: true
+      - name: Repoint SDK path deps at the engine checkout
+        working-directory: sdk/go/native
+        run: perl -i -pe 's{\.\./\.\./\.\./\.\./}{../../../__engine__/}g' Cargo.toml
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      # Linux: link against glibc 2.34 (libkrun's floor), like the addon and helper.
+      - name: Set up zig (Linux glibc-floor cross-link)
+        if: runner.os == 'Linux'
+        uses: goto-bus-stop/setup-zig@v2
+        with:
+          version: 0.13.0
+      - name: Install cargo-zigbuild (Linux)
+        if: runner.os == 'Linux'
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-zigbuild
+      - name: Build the Go native core
+        working-directory: sdk/go/native
+        env:
+          SMOLVM_LIB_DIR: ${{ github.workspace }}/__engine__/lib
+        run: |
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            cargo zigbuild --release --target ${{ matrix.target }}.2.34
+          else
+            cargo build --release --target ${{ matrix.target }}
+          fi
+      - name: Download the npm platform runtime
+        uses: actions/download-artifact@v4
+        with:
+          name: node-native-${{ matrix.target }}
+          path: node-native
+      - name: Package the runtime bundle
+        run: |
+          bash sdk/go/scripts/bundle-runtime.sh node-native/native/${{ matrix.plat }} \
+            sdk/go/native/target/${{ matrix.target }}/release/${{ matrix.lib }} ${{ matrix.plat }} go-runtime
+      - uses: actions/upload-artifact@v4
+        with:
+          name: go-runtime-${{ matrix.plat }}
+          path: go-runtime/*.tar.gz
+          if-no-files-found: error
+
+  # The bundles go on the smol GitHub release that release-smol.yml creates,
+  # with their own checksum file so neither job overwrites the other's. The Go module itself is served by the module proxy from the
+  # sdk/go/vX.Y.Z tag cut-release.sh pushes.
+  go-release:
+    name: go · attach runtime bundles to the release
+    needs: go-build
+    if: ${{ github.event_name == 'push' || inputs.publish }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: go-runtime
+          pattern: go-runtime-*
+          merge-multiple: true
+      - name: Upload bundles and checksums
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ env.ENGINE_VERSION }}
+        run: |
+          cd go-runtime
+          sha256sum smol-go-runtime-*.tar.gz > go-runtime-checksums.sha256
+          cat go-runtime-checksums.sha256
+          # release-smol.yml creates the release with its install notes; wait
+          # for it rather than creating a bare one that would keep them out.
+          for attempt in $(seq 1 60); do
+            if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+              gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" --clobber \
+                smol-go-runtime-*.tar.gz go-runtime-checksums.sha256
+              exit 0
+            fi
+            sleep 30
+          done
+          echo "::error::release $TAG did not appear within 30 minutes; re-run this job once release-smol.yml has published it"
+          exit 1
+
   # ─── Python: abi3 wheels (one per platform, Py3.9+) ────────────────────────
   python-wheels:
     name: py · wheel ${{ matrix.target }}

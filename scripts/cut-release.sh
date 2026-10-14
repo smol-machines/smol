@@ -19,17 +19,18 @@ MODE="${2:-}"
 [[ $# -le 2 && ( -z "$MODE" || "$MODE" == --prepare ) ]] || { echo "usage: cut-release.sh X.Y.Z [--prepare]" >&2; exit 1; }
 
 bump_versions() {
-  for f in Cargo.toml sdk/python/Cargo.toml sdk/python/pyproject.toml sdk/node/Cargo.toml sdk/rust/Cargo.toml crates/smol-cloud/Cargo.toml; do
+  for f in Cargo.toml sdk/python/Cargo.toml sdk/python/pyproject.toml sdk/node/Cargo.toml sdk/go/native/Cargo.toml sdk/rust/Cargo.toml crates/smol-cloud/Cargo.toml; do
     perl -i -pe "s/^version = \"[^\"]+\"/version = \"$VERSION\"/" "$f"
   done
   perl -i -pe "s/^(smol-cloud = .*version = )\"[^\"]+\"/\$1\"$VERSION\"/" sdk/rust/Cargo.toml
   perl -i -pe "s/^  \"version\": \"[^\"]+\"/  \"version\": \"$VERSION\"/" sdk/node/package.json
   perl -i -pe "s/__version__ = \"[^\"]+\"/__version__ = \"$VERSION\"/" sdk/python/python/smol/__init__.py
+  perl -i -pe "s/^const Version = \"[^\"]+\"/const Version = \"$VERSION\"/" sdk/go/assets.go
   perl -0777 -i -pe "s/(\"name\": \"smolmachines\",\n\\s*\"version\": )\"[^\"]+\"/\$1\"$VERSION\"/g" sdk/node/package-lock.json
   perl -i -pe "s/^  \"version\": \"[^\"]+\"/  \"version\": \"$VERSION\"/" sdk/mcp/package.json
   perl -0777 -i -pe "s/(\"name\": \"smolmachines-mcp\",\n\\s*\"version\": )\"[^\"]+\"/\$1\"$VERSION\"/g" sdk/mcp/package-lock.json
-  for f in Cargo.lock sdk/node/Cargo.lock sdk/python/Cargo.lock sdk/rust/Cargo.lock; do
-    perl -0777 -i -pe "s/(name = \"(?:smol-cli|smol-cloud|smol-node|smol-py|smolmachines)\"\nversion = )\"[^\"]+\"/\$1\"$VERSION\"/g" "$f"
+  for f in Cargo.lock sdk/node/Cargo.lock sdk/python/Cargo.lock sdk/go/native/Cargo.lock sdk/rust/Cargo.lock; do
+    perl -0777 -i -pe "s/(name = \"(?:smol-cli|smol-cloud|smol-node|smol-py|smol-go|smolmachines)\"\nversion = )\"[^\"]+\"/\$1\"$VERSION\"/g" "$f"
   done
   bash scripts/check-versions.sh
 }
@@ -78,8 +79,10 @@ if ! git diff --cached --quiet; then
   git commit -m "Bump smol CLI and SDKs to $VERSION"
 fi
 git tag -a "v$VERSION" -m "smol v$VERSION"
+# Go resolves a module in a subdirectory by a tag carrying its path.
+git tag -a "sdk/go/v$VERSION" -m "smol Go SDK v$VERSION"
 git push -u origin "$BRANCH"
-git push origin "v$VERSION"
+git push origin "v$VERSION" "sdk/go/v$VERSION"
 
 echo ">>> v$VERSION tagged and pushed. Watch the CLI + SDK release workflows:"
 echo "    gh run list --repo smol-machines/smol --limit 4"

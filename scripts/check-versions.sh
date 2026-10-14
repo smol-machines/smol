@@ -24,6 +24,8 @@ versions["sdk/python/python/smol/__init__.py"]=$(extract "sdk/python/python/smol
 versions["sdk/node/package.json"]=$(extract "sdk/node/package.json" '"version"[[:space:]]*:')
 versions["sdk/node/Cargo.toml"]=$(extract "sdk/node/Cargo.toml" '^version[[:space:]]*=')
 versions["sdk/rust/Cargo.toml"]=$(extract "sdk/rust/Cargo.toml" '^version[[:space:]]*=')
+versions["sdk/go/native/Cargo.toml"]=$(extract "sdk/go/native/Cargo.toml" '^version[[:space:]]*=')
+versions["sdk/go/assets.go"]=$(extract "sdk/go/assets.go" '^const Version[[:space:]]*=')
 versions["crates/smol-cloud/Cargo.toml"]=$(extract "crates/smol-cloud/Cargo.toml" '^version[[:space:]]*=')
 versions["sdk/rust/Cargo.toml:smol-cloud"]=$(extract "sdk/rust/Cargo.toml" '^smol-cloud =')
 versions["sdk/node/package-lock.json"]=$(extract "sdk/node/package-lock.json" '"version"[[:space:]]*:')
@@ -31,7 +33,7 @@ versions["sdk/node/package-lock.json:root"]=$(perl -0777 -ne 'print $1 if /"pack
 versions["sdk/mcp/package.json"]=$(extract "sdk/mcp/package.json" '"version"[[:space:]]*:')
 versions["sdk/mcp/package-lock.json:root"]=$(perl -0777 -ne 'print $1 if /"packages":\s*\{\s*"":\s*\{[^}]*"version":\s*"([^"]+)"/' sdk/mcp/package-lock.json)
 
-for entry in 'Cargo.lock:smol-cli' 'Cargo.lock:smol-cloud' 'sdk/node/Cargo.lock:smol-node' 'sdk/python/Cargo.lock:smol-py' 'sdk/rust/Cargo.lock:smolmachines' 'sdk/rust/Cargo.lock:smol-cloud'; do
+for entry in 'Cargo.lock:smol-cli' 'Cargo.lock:smol-cloud' 'sdk/node/Cargo.lock:smol-node' 'sdk/python/Cargo.lock:smol-py' 'sdk/go/native/Cargo.lock:smol-go' 'sdk/rust/Cargo.lock:smolmachines' 'sdk/rust/Cargo.lock:smol-cloud'; do
     versions["$entry"]=$(awk -v name="${entry##*:}" '
         $0 == "name = \"" name "\"" { getline; split($0, parts, "\""); print parts[2]; exit }
     ' "${entry%:*}")

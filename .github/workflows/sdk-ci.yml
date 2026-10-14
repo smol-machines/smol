@@ -6,6 +6,8 @@ name: SDK CI
 #             via a dynamic require, so `tsc --noEmit` needs no built binary).
 #   * Python: the pure-stdlib unit + cloud-mock test scripts (the native
 #             extension is imported lazily, only when a local Machine is created).
+#   * Go:     gofmt, vet for every OS, and the unit + cloud-mock tests (the
+#             native core is loaded lazily, only when a local Machine is created).
 #   * Rust:   fmt, clippy and the unit tests, for the SDK and the shared
 #             `smol-cloud` crate. These compile the engine but never boot a VM,
 #             and the cloud tests run against a loopback mock, so they need the
@@ -65,6 +67,31 @@ jobs:
       # tsc both type-checks and emits dist/, the same build release.yml publishes.
       - run: npm run build
       - run: npm pack --dry-run
+
+  go-check:
+    name: Go · fmt, vet, tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: sdk/go
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: sdk/go/go.mod
+          cache-dependency-path: sdk/go/go.sum
+      - name: gofmt
+        run: test -z "$(gofmt -l . | tee /dev/stderr)"
+      - name: vet (linux, darwin, windows)
+        run: |
+          go vet ./...
+          GOOS=darwin GOARCH=arm64 go vet ./...
+          GOOS=windows go vet ./...
+      - name: Build without cgo
+        run: CGO_ENABLED=0 go build ./...
+      # The e2e tests skip without SMOL_E2E=1; the cloud tests use a loopback mock.
+      - name: Unit + cloud-mock tests
+        run: go test ./...
 
   rust-check:
     name: Rust · fmt, clippy, tests

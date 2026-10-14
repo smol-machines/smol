@@ -1,0 +1,28 @@
+# Native core of the smol Go SDK — embeds the smolvm engine behind a C ABI the
+# Go package loads at run time. Its own workspace; it path-depends on the
+# smolvm engine checkout this `smol/` directory sits inside, like the sibling
+# `smol-node` (NAPI) and `smol-py` (pyo3) crates.
+[workspace]
+
+[package]
+name = "smol-go"
+version = "1.22.2"
+edition = "2021"
+description = "Native C-ABI core for the smol Go SDK — embed microVMs directly in Go"
+license = "Apache-2.0"
+
+[lib]
+name = "smol_go"
+crate-type = ["cdylib"]
+
+[dependencies]
+# The smolvm engine lives four levels up (smol/sdk/go/native → engine root).
+smolvm = { path = "../../../../" }
+smolvm-protocol = { path = "../../../../crates/smolvm-protocol" }
+base64 = "0.22"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[profile.release]
+lto = true
+strip = "symbols"

@@ -46,6 +46,7 @@ up front on cloud rather than silently dropped.)
 npm install smolmachines      # Node
 pip install smolmachines      # Python
 cargo add smolmachines        # Rust
+go get github.com/smol-machines/smol/sdk/go   # Go
 ```
 
 The Rust crate does not bundle an engine: its local transport runs an installed
@@ -85,6 +86,7 @@ Pin a release with `SMOL_VERSION=v1.3.7`; override locations with `PREFIX` /
 | `sdk/node` | Node SDK — NAPI native core + TypeScript. Local (embedded) or cloud. |
 | `sdk/python` | Python SDK — pyo3 native core + pure-Python layer. Same API. |
 | `sdk/rust` | Rust SDK — drives a version-matched `smolvm` locally, or smol cloud over REST. Same API. |
+| `sdk/go` | Go SDK — C-ABI native core loaded without cgo, runtime downloaded on first local use. Same API. |
 | `src/` | The `smol` CLI (Rust): create / run / exec / files / logs, plus cloud deploy + a container registry. |
 | `docs/cli.md` | CLI command reference. |
 
