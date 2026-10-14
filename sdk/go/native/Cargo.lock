@@ -417,6 +417,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "clap_complete"
+version = "4.6.11"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "037e2a1a92236d0aff7e845093f64661d6df4c02c9fcc61a60e9e1d736fa392f"
+dependencies = [
+ "clap",
+]
+
+[[package]]
 name = "clap_derive"
 version = "4.6.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -463,6 +472,22 @@ name = "const-oid"
 version = "0.10.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a6ef517f0926dd24a1582492c791b6a4818a4d94e789a334894aa15b0d12f55c"
+
+[[package]]
+name = "core-foundation"
+version = "0.10.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b2a6cd9ae233e7f62ba4e9353e81a88df7fc8a5987b8d445b4d90c879bd156f6"
+dependencies = [
+ "core-foundation-sys",
+ "libc",
+]
+
+[[package]]
+name = "core-foundation-sys"
+version = "0.8.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "773648b94d0e5d620f64f280777445740e61fe701025087ec8b57f45c791888b"
 
 [[package]]
 name = "cpufeatures"
@@ -1109,6 +1134,7 @@ dependencies = [
  "hyper",
  "hyper-util",
  "rustls",
+ "rustls-native-certs",
  "tokio",
  "tokio-rustls",
  "tower-service",
@@ -1678,6 +1704,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "384b8ab6d37215f3c5301a95a4accb5d64aa607f1fcb26a11b5303878451b4fe"
 
 [[package]]
+name = "openssl-probe"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7c87def4c32ab89d880effc9e097653c8da5d6ef28e6b539d313baaacfbafcbe"
+
+[[package]]
 name = "option-ext"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2061,6 +2093,7 @@ dependencies = [
  "pin-project-lite",
  "quinn",
  "rustls",
+ "rustls-native-certs",
  "rustls-pki-types",
  "serde",
  "serde_json",
@@ -2196,6 +2229,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "rustls-native-certs"
+version = "0.8.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4a073f5dc7469f984c52ad2752b63b0807745133b6de880b7b64c1ac4c48aec4"
+dependencies = [
+ "openssl-probe",
+ "rustls-pki-types",
+ "schannel",
+ "security-framework",
+]
+
+[[package]]
 name = "rustls-pemfile"
 version = "2.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2248,6 +2293,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "schannel"
+version = "0.1.29"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "91c1b7e4904c873ef0710c1f407dde2e6287de2bebc1bbbf7d430bb7cbffd939"
+dependencies = [
+ "windows-sys 0.61.2",
+]
+
+[[package]]
 name = "scopeguard"
 version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2259,6 +2313,29 @@ version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "345a3e4dddf721a478089d4697b83c6c0a8f5bf16086f6c13397e4534eb6e2e5"
 dependencies = [
+ "libc",
+]
+
+[[package]]
+name = "security-framework"
+version = "3.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b7f4bc775c73d9a02cde8bf7b2ec4c9d12743edf609006c7facc23998404cd1d"
+dependencies = [
+ "bitflags 2.13.2",
+ "core-foundation",
+ "core-foundation-sys",
+ "libc",
+ "security-framework-sys",
+]
+
+[[package]]
+name = "security-framework-sys"
+version = "2.17.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6ce2691df843ecc5d231c0b14ece2acc3efb62c0a398c7e1d875f3983ce020e3"
+dependencies = [
+ "core-foundation-sys",
  "libc",
 ]
 
@@ -2440,7 +2517,7 @@ checksum = "5b3dc8af474f516a851ff4bd12db780f948b9250ad37211e4eec0bccea54e01b"
 
 [[package]]
 name = "smol-go"
-version = "1.22.2"
+version = "1.27.3"
 dependencies = [
  "base64 0.22.1",
  "serde",
@@ -2451,7 +2528,7 @@ dependencies = [
 
 [[package]]
 name = "smolfile"
-version = "1.23.1"
+version = "1.27.3"
 dependencies = [
  "serde",
  "smolvm-protocol",
@@ -2476,13 +2553,14 @@ dependencies = [
 
 [[package]]
 name = "smolvm"
-version = "1.23.1"
+version = "1.27.3"
 dependencies = [
  "async-stream",
  "axum",
  "axum-server",
  "base64 0.22.1",
  "clap",
+ "clap_complete",
  "dirs",
  "futures-util",
  "getrandom 0.3.4",
@@ -2542,7 +2620,7 @@ dependencies = [
 
 [[package]]
 name = "smolvm-checkpoint"
-version = "1.23.1"
+version = "1.27.3"
 dependencies = [
  "hex",
  "libc",
@@ -2557,7 +2635,7 @@ dependencies = [
 
 [[package]]
 name = "smolvm-credentials"
-version = "1.23.1"
+version = "1.27.3"
 dependencies = [
  "anyhow",
  "bytes",
@@ -2581,7 +2659,7 @@ dependencies = [
 
 [[package]]
 name = "smolvm-cuda"
-version = "1.23.1"
+version = "1.27.3"
 dependencies = [
  "getrandom 0.3.4",
  "libc",
@@ -2590,13 +2668,14 @@ dependencies = [
 
 [[package]]
 name = "smolvm-network"
-version = "1.23.1"
+version = "1.27.3"
 dependencies = [
  "crossbeam-queue",
  "getrandom 0.3.4",
  "humantime",
  "libc",
  "polling",
+ "serde_json",
  "sha2 0.10.9",
  "smoltcp",
  "smolvm-protocol",
@@ -2606,7 +2685,7 @@ dependencies = [
 
 [[package]]
 name = "smolvm-pack"
-version = "1.23.1"
+version = "1.27.3"
 dependencies = [
  "crc32fast",
  "dirs",
@@ -2626,7 +2705,7 @@ dependencies = [
 
 [[package]]
 name = "smolvm-protocol"
-version = "1.23.1"
+version = "1.27.3"
 dependencies = [
  "base64 0.22.1",
  "serde",
@@ -2636,7 +2715,7 @@ dependencies = [
 
 [[package]]
 name = "smolvm-registry"
-version = "1.23.1"
+version = "1.27.3"
 dependencies = [
  "bytes",
  "dirs",
@@ -2644,6 +2723,8 @@ dependencies = [
  "futures-util",
  "hex",
  "reqwest",
+ "rustls",
+ "rustls-native-certs",
  "serde",
  "serde_json",
  "sha2 0.10.9",
