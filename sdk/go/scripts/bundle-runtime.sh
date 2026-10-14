@@ -31,8 +31,9 @@ done
 NAME="smol-go-runtime-$VERSION-$PLAT"
 STAGE="$(mktemp -d)/$NAME"
 mkdir -p "$STAGE" "$OUT"
-# -P keeps libkrunfw.dylib -> libkrunfw.5.dylib a symlink.
-cp -P "$NATIVE"/* "$STAGE/"
+# -R copies subdirectories such as licenses/; -P keeps
+# libkrunfw.dylib -> libkrunfw.5.dylib a symlink.
+cp -RP "$NATIVE"/* "$STAGE/"
 # The npm package's addon is not part of the Go runtime.
 rm -f "$STAGE"/*.node
 cp "$LIB" "$STAGE/$LIBNAME"
