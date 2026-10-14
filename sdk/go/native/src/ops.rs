@@ -395,6 +395,7 @@ fn exec_options(o: ExecOptions) -> Result<smolvm::embedded::ExecOptions, CallErr
         workdir: o.workdir,
         timeout: o.timeout_ms.map(Duration::from_millis),
         user: o.user,
+        ..Default::default()
     })
 }
 
