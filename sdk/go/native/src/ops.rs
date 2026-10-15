@@ -19,7 +19,7 @@ use serde::de::DeserializeOwned;
 use serde::Deserialize;
 use serde_json::{json, Value};
 use smolvm::agent::{ExecEvent, HostMount, VmResources};
-use smolvm::data::network::PortMapping;
+use smolvm::data::network::{PortMapping, PortProtocol};
 use smolvm::data::resources::{DEFAULT_MICROVM_CPU_COUNT, DEFAULT_MICROVM_MEMORY_MIB};
 use smolvm::embedded::{runtime, EmbeddedRuntime, ExecCancel, MachineSpec, ResizeSpec};
 
@@ -86,6 +86,35 @@ pub(crate) fn dispatch(op: &str, args: Value, payload: &mut Payload) -> CallResu
             payload.output = Some(data);
             Ok(json!({ "len": len }))
         }
+        "published_ports" => {
+            let a: Named = parse(args)?;
+            let record = rt()?.machine_record(&a.name)?.ok_or_else(|| {
+                CallError::new(crate::NOT_FOUND, format!("machine '{}' not found", a.name))
+            })?;
+            let ports: Vec<Value> = record.port_mappings().iter().map(port_json).collect();
+            Ok(Value::Array(ports))
+        }
+        "set_ports" => {
+            let a: SetPortsArgs = parse(args)?;
+            let mappings = a
+                .ports
+                .iter()
+                .map(|p| {
+                    let protocol = match p.protocol.as_deref().unwrap_or("tcp") {
+                        "tcp" => PortProtocol::Tcp,
+                        "udp" => PortProtocol::Udp,
+                        other => {
+                            return Err(CallError::config(format!(
+                                "unknown port protocol '{other}': use tcp or udp"
+                            )))
+                        }
+                    };
+                    Ok(PortMapping::with_protocol(p.host, p.guest, protocol))
+                })
+                .collect::<Result<Vec<_>, CallError>>()?;
+            rt()?.set_ports(&a.name, &mappings)?;
+            Ok(Value::Null)
+        }
         "sync" => named_unit(args, |rt, name| rt.sync_machine(name)),
         "stop" => named_unit(args, |rt, name| rt.stop_machine(name)),
         "pause" => named_unit(args, |rt, name| rt.pause_machine(name)),
@@ -129,6 +158,28 @@ pub(crate) fn dispatch(op: &str, args: Value, payload: &mut Payload) -> CallResu
         }
         other => Err(CallError::config(format!("unknown op {other:?}"))),
     }
+}
+
+#[derive(Deserialize)]
+struct PortArg {
+    host: u16,
+    guest: u16,
+    #[serde(default)]
+    protocol: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct SetPortsArgs {
+    name: String,
+    ports: Vec<PortArg>,
+}
+
+fn port_json(p: &PortMapping) -> Value {
+    let protocol = match p.protocol {
+        PortProtocol::Udp => "udp",
+        PortProtocol::Tcp => "tcp",
+    };
+    json!({ "host": p.host, "guest": p.guest, "protocol": protocol })
 }
 
 fn parse<T: DeserializeOwned>(args: Value) -> Result<T, CallError> {

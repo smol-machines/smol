@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"iter"
+	"net"
 	"os"
 	"path/filepath"
 	"time"
@@ -235,6 +236,123 @@ func (m *Machine) Share(ctx context.Context) (*ShareLink, error) { return m.t.sh
 
 // Unshare revokes the machine's share link. Cloud only.
 func (m *Machine) Unshare(ctx context.Context) error { return m.t.unshare(ctx) }
+
+// Ports lists the machine's published ports, whether or not it runs. On the
+// cloud each host port is the node's, and a port not placed yet reports Host 0.
+func (m *Machine) Ports(ctx context.Context) ([]PublishedPort, error) { return m.t.ports(ctx) }
+
+// Publish publishes a guest port on the host, on a running machine too,
+// without a restart, and returns the mapping now in effect. Host 0 picks a
+// free host port. A running machine takes a TCP port now; a UDP port, or a
+// machine not on virtio-net networking, needs it stopped. On the cloud the
+// machine's node picks the host port (Host is ignored) and ports are TCP;
+// reach the port with Endpoint or the machine's URL.
+func (m *Machine) Publish(ctx context.Context, opts PublishOptions) (PublishedPort, error) {
+	protocol := protocolOrTCP(opts.Protocol)
+	host := opts.Host
+	if host == 0 {
+		free, err := freeHostPort(protocol)
+		if err != nil {
+			return PublishedPort{}, err
+		}
+		host = free
+	}
+	current, err := m.t.ports(ctx)
+	if err != nil {
+		return PublishedPort{}, err
+	}
+	mapping := PublishedPort{Host: host, Guest: opts.Guest, Protocol: protocol}
+	next := make([]PublishedPort, 0, len(current)+1)
+	for _, p := range current {
+		if !(p.Host == host && protocolOrTCP(p.Protocol) == protocol) {
+			next = append(next, p)
+		}
+	}
+	if err := m.t.setPorts(ctx, append(next, mapping)); err != nil {
+		return PublishedPort{}, err
+	}
+	// Report what took effect: on the cloud the node chose the host port.
+	now, err := m.t.ports(ctx)
+	if err != nil {
+		return PublishedPort{}, err
+	}
+	same := func(p PublishedPort) bool { return p.Guest == opts.Guest && protocolOrTCP(p.Protocol) == protocol }
+	for _, p := range now {
+		if same(p) && p.Host == host {
+			return p, nil
+		}
+	}
+	for _, p := range now {
+		if same(p) {
+			return p, nil
+		}
+	}
+	return mapping, nil
+}
+
+// Unpublish stops publishing the ports opts matches: by Guest port (every host
+// port forwarding to it), by Host port, or both. Connections already open
+// carry on.
+func (m *Machine) Unpublish(ctx context.Context, opts UnpublishOptions) error {
+	if opts.Guest == 0 && opts.Host == 0 {
+		return invalidConfig("Unpublish needs a guest or a host port.")
+	}
+	protocol := protocolOrTCP(opts.Protocol)
+	current, err := m.t.ports(ctx)
+	if err != nil {
+		return err
+	}
+	next := make([]PublishedPort, 0, len(current))
+	for _, p := range current {
+		keep := protocolOrTCP(p.Protocol) != protocol ||
+			(opts.Guest != 0 && p.Guest != opts.Guest) ||
+			(opts.Host != 0 && p.Host != opts.Host)
+		if keep {
+			next = append(next, p)
+		}
+	}
+	if len(next) == len(current) {
+		return nil
+	}
+	return m.t.setPorts(ctx, next)
+}
+
+// PortLinks returns a URL for each published port that reaches it with no
+// login, keyed by guest port: for a client that cannot send an API key, such
+// as a sandbox framework calling its tunnel URLs. Anyone holding a link
+// reaches the port, so treat it as a credential. The machine keeps one token,
+// so calling again returns the same links; a port published later appears on
+// the next call. Cloud only.
+func (m *Machine) PortLinks(ctx context.Context) (map[int]string, error) { return m.t.portLinks(ctx) }
+
+// RevokePortLinks revokes the machine's port links: every link stops working
+// at once, and the next PortLinks issues new ones. Cloud only.
+func (m *Machine) RevokePortLinks(ctx context.Context) error { return m.t.revokePortLinks(ctx) }
+
+func protocolOrTCP(protocol string) string {
+	if protocol == "" {
+		return "tcp"
+	}
+	return protocol
+}
+
+// freeHostPort asks the OS for a free loopback port of the given protocol.
+func freeHostPort(protocol string) (int, error) {
+	if protocol == "udp" {
+		c, err := net.ListenPacket("udp", "127.0.0.1:0")
+		if err != nil {
+			return 0, err
+		}
+		defer c.Close()
+		return c.LocalAddr().(*net.UDPAddr).Port, nil
+	}
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		return 0, err
+	}
+	defer l.Close()
+	return l.Addr().(*net.TCPAddr).Port, nil
+}
 
 // Checkpoint captures this running branchable machine. Locally output is the
 // .smolcheckpoint path to write (or, with opts.Store, a self-contained

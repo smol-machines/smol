@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
+	"net"
 	"os"
 	"strings"
 	"testing"
@@ -273,5 +275,63 @@ func TestE2ENotSupportedLocally(t *testing.T) {
 	}
 	if _, err := Connect(ctx, "smol-go-e2e-does-not-exist", &ConnectOptions{Target: TargetLocal}); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("Connect to a missing machine = %v; want ErrNotFound", err)
+	}
+}
+
+// TestE2EPorts publishes a port on a running machine, reaches the guest's
+// server through it from the host, and unpublishes it again.
+func TestE2EPorts(t *testing.T) {
+	requireE2E(t)
+	ctx := context.Background()
+	// Live port changes need the virtio-net backend.
+	m := newE2EMachine(t, MachineConfig{Resources: ResourceSpec{CPUs: 1, MemoryMB: 512, Network: Bool(true), NetworkBackend: NetworkBackendVirtioNet}})
+	server := `nohup sh -c 'while true; do printf "HTTP/1.0 200 OK\r\n\r\nhi-from-guest" | nc -l -p 8080; done' >/dev/null 2>&1 &`
+	if _, err := m.Exec(ctx, []string{"sh", "-c", server}, nil); err != nil {
+		t.Fatalf("start guest server: %v", err)
+	}
+
+	p, err := m.Publish(ctx, PublishOptions{Guest: 8080})
+	if err != nil {
+		t.Fatalf("Publish: %v", err)
+	}
+	if p.Guest != 8080 || p.Host == 0 || p.Protocol != "tcp" {
+		t.Fatalf("Publish = %+v", p)
+	}
+	ports, err := m.Ports(ctx)
+	if err != nil || len(ports) != 1 || ports[0] != p {
+		t.Fatalf("Ports = %+v, %v; want [%+v]", ports, err, p)
+	}
+
+	addr := fmt.Sprintf("127.0.0.1:%d", p.Host)
+	var body string
+	deadline := time.Now().Add(15 * time.Second)
+	for time.Now().Before(deadline) {
+		if c, err := net.DialTimeout("tcp", addr, time.Second); err == nil {
+			_ = c.SetDeadline(time.Now().Add(3 * time.Second))
+			b, _ := io.ReadAll(c)
+			c.Close()
+			if body = string(b); strings.Contains(body, "hi-from-guest") {
+				break
+			}
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+	if !strings.Contains(body, "hi-from-guest") {
+		t.Fatalf("host %s did not reach the guest server, got %q", addr, body)
+	}
+
+	if err := m.Unpublish(ctx, UnpublishOptions{Guest: 8080}); err != nil {
+		t.Fatalf("Unpublish: %v", err)
+	}
+	if ports, err := m.Ports(ctx); err != nil || len(ports) != 0 {
+		t.Fatalf("Ports after Unpublish = %+v, %v", ports, err)
+	}
+	if c, err := net.DialTimeout("tcp", addr, time.Second); err == nil {
+		_ = c.SetDeadline(time.Now().Add(2 * time.Second))
+		b, _ := io.ReadAll(c)
+		c.Close()
+		if strings.Contains(string(b), "hi-from-guest") {
+			t.Fatalf("%s still reaches the guest after Unpublish", addr)
+		}
 	}
 }

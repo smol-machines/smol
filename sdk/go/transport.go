@@ -41,6 +41,10 @@ type transport interface {
 	usage(ctx context.Context) (*MachineUsageReport, error)
 	share(ctx context.Context) (*ShareLink, error)
 	unshare(ctx context.Context) error
+	ports(ctx context.Context) ([]PublishedPort, error)
+	setPorts(ctx context.Context, ports []PublishedPort) error
+	portLinks(ctx context.Context) (map[int]string, error)
+	revokePortLinks(ctx context.Context) error
 	checkpoint(ctx context.Context, output string, opts CheckpointOptions) (*PortableCheckpointInfo, error)
 	checkpoints(ctx context.Context) ([]PortableCheckpointInfo, error)
 	resize(ctx context.Context, opts ResizeOptions) (*MachineResources, error)

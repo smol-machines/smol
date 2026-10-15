@@ -419,6 +419,47 @@ func (t *localTransport) usage(context.Context) (*MachineUsageReport, error) {
 	return nil, notSupported("Usage is a cloud-only metering feature; the local target has no billing.")
 }
 
+func (t *localTransport) ports(ctx context.Context) ([]PublishedPort, error) {
+	var ports []nativePublishedPort
+	if err := localCall(ctx, "published_ports", nameArgs{t.n}, &ports); err != nil {
+		return nil, err
+	}
+	out := make([]PublishedPort, len(ports))
+	for i, p := range ports {
+		out[i] = PublishedPort{Host: p.Host, Guest: p.Guest, Protocol: p.Protocol}
+	}
+	return out, nil
+}
+
+// setPorts makes ports the machine's published ports. A running machine
+// changes its TCP ports now; UDP ports, or any port of a machine not on
+// virtio-net, change only while it is stopped.
+func (t *localTransport) setPorts(ctx context.Context, ports []PublishedPort) error {
+	wire := make([]nativePublishedPort, len(ports))
+	for i, p := range ports {
+		if p.Host == 0 {
+			return invalidConfig(fmt.Sprintf("port %d has no host port", p.Guest))
+		}
+		wire[i] = nativePublishedPort{Host: p.Host, Guest: p.Guest, Protocol: protocolOrTCP(p.Protocol)}
+	}
+	return localCall(ctx, "set_ports", map[string]any{"name": t.n, "ports": wire}, nil)
+}
+
+func (t *localTransport) portLinks(context.Context) (map[int]string, error) {
+	return nil, notSupported("PortLinks is cloud-only; a local machine's ports are on this host (see Endpoint).")
+}
+
+func (t *localTransport) revokePortLinks(context.Context) error {
+	return notSupported("RevokePortLinks is cloud-only; a local machine has no port links.")
+}
+
+// nativePublishedPort is a published port as the native core sends and takes it.
+type nativePublishedPort struct {
+	Host     int    `json:"host"`
+	Guest    int    `json:"guest"`
+	Protocol string `json:"protocol"`
+}
+
 func (t *localTransport) share(context.Context) (*ShareLink, error) {
 	return nil, notSupported("Share is cloud-only; a local machine has no published app URL to hand out.")
 }

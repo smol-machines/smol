@@ -114,6 +114,31 @@ type PortSpec struct {
 	Guest int
 }
 
+// PublishedPort is one published port mapping. On the cloud the host port is
+// the node's, and a port not placed on a node yet reports Host 0.
+type PublishedPort struct {
+	Host     int
+	Guest    int
+	Protocol string // "tcp" or "udp"
+}
+
+// PublishOptions selects a port for Machine.Publish. Host 0 picks a free host
+// port; Protocol "" means TCP.
+type PublishOptions struct {
+	Guest    int
+	Host     int
+	Protocol string
+}
+
+// UnpublishOptions matches the ports Machine.Unpublish removes: by Guest port
+// (every host port forwarding to it), by Host port, or both. Protocol "" means
+// TCP.
+type UnpublishOptions struct {
+	Guest    int
+	Host     int
+	Protocol string
+}
+
 // MachineConfig configures a new machine. Every field is optional locally.
 type MachineConfig struct {
 	// Name of the machine; generated when empty.

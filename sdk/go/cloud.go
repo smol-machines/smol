@@ -742,6 +742,63 @@ func (t *cloudTransport) unshare(ctx context.Context) error {
 	return err
 }
 
+func (t *cloudTransport) ports(ctx context.Context) ([]PublishedPort, error) {
+	m, err := t.info(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]PublishedPort, 0, len(m.Ports))
+	for _, p := range m.Ports {
+		host := 0
+		if p.HostPort != nil {
+			host = *p.HostPort
+		}
+		out = append(out, PublishedPort{Host: host, Guest: p.Port, Protocol: "tcp"})
+	}
+	return out, nil
+}
+
+// setPorts publishes TCP guest ports; the machine's node picks each one's host
+// port, and clients reach them through Endpoint, tunnels and the proxy.
+func (t *cloudTransport) setPorts(ctx context.Context, ports []PublishedPort) error {
+	seen := map[int]bool{}
+	wire := []map[string]int{}
+	for _, p := range ports {
+		if protocolOrTCP(p.Protocol) == "udp" {
+			return notSupported("UDP ports are local-only; the cloud publishes TCP ports.")
+		}
+		if !seen[p.Guest] {
+			seen[p.Guest] = true
+			wire = append(wire, map[string]int{"port": p.Guest})
+		}
+	}
+	_, err := cloudDo(ctx, t.conn, "PUT", t.path("/ports"), fetchOpts{json: map[string]any{"ports": wire}})
+	return err
+}
+
+func (t *cloudTransport) portLinks(ctx context.Context) (map[int]string, error) {
+	var out struct {
+		URLs map[string]string `json:"urls"`
+	}
+	if err := cloudJSON(ctx, t.conn, "POST", t.path("/port-links"), fetchOpts{}, &out); err != nil {
+		return nil, err
+	}
+	links := make(map[int]string, len(out.URLs))
+	for port, url := range out.URLs {
+		n, err := strconv.Atoi(port)
+		if err != nil {
+			return nil, fmt.Errorf("port link for %q: %w", port, err)
+		}
+		links[n] = url
+	}
+	return links, nil
+}
+
+func (t *cloudTransport) revokePortLinks(ctx context.Context) error {
+	_, err := cloudDo(ctx, t.conn, "DELETE", t.path("/port-links"), fetchOpts{})
+	return err
+}
+
 // checkpointWire is the control plane's PortableCheckpointInfo.
 type checkpointWire struct {
 	ID          string  `json:"id"`
