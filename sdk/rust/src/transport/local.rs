@@ -561,14 +561,15 @@ impl Transport for LocalTransport {
     }
 
     fn state(&self) -> MachineState {
-        self.record()
-            .ok()
-            .and_then(|row| {
-                row.get("state")
-                    .and_then(|s| s.as_str())
-                    .map(MachineState::parse)
-            })
-            .unwrap_or(MachineState::Unknown)
+        match self.record() {
+            Ok(row) => row
+                .get("state")
+                .and_then(|s| s.as_str())
+                .map(MachineState::parse)
+                .unwrap_or(MachineState::Unknown),
+            Err(e) if e.kind() == ErrorKind::NotFound => MachineState::Deleted,
+            Err(_) => MachineState::Unknown,
+        }
     }
 
     fn is_running(&self) -> bool {
@@ -1567,6 +1568,19 @@ mod io_tests {
                 "machine ls --json",
             ]
         );
+    }
+
+    #[test]
+    fn state_reads_the_row_and_a_machine_missing_from_the_list_is_deleted() {
+        let dir = tempfile::tempdir().unwrap();
+        let rows = dir.path().join("rows");
+        let transport = cli(dir.path(), &format!("cat {}", rows.display()));
+        std::fs::write(&rows, r#"[{"name":"test","state":"created"}]"#).unwrap();
+        assert_eq!(transport.state(), MachineState::Stopped);
+        std::fs::write(&rows, r#"[{"name":"other","state":"running"}]"#).unwrap();
+        assert_eq!(transport.state(), MachineState::Deleted);
+        std::fs::write(&rows, "not json").unwrap();
+        assert_eq!(transport.state(), MachineState::Unknown);
     }
 
     #[test]
