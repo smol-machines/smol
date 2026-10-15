@@ -133,8 +133,8 @@ mod tunnel;
 pub use assets::{configure_runtime_assets, RuntimeAssets};
 pub use availability::local_availability;
 pub use config::{
-    Credential, EgressInterceptor, MachineBuilder, MachineConfig, Mount, NetworkPolicy, Port,
-    Resources,
+    Credential, EgressInterceptor, MachineBuilder, MachineConfig, Mount, NetworkBackend,
+    NetworkPolicy, Port, Resources,
 };
 pub use connect::{ConnectOptions, Target};
 pub use error::{Error, ErrorKind, Result};
