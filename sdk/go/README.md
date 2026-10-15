@@ -83,6 +83,16 @@ for ev, err := range m.ExecStream(ctx, []string{"make", "test"}, nil) {
 err = m.WriteFile(ctx, "/workspace/in.txt", []byte("hello"), 0o644)
 data, err := m.ReadFile(ctx, "/workspace/in.txt")
 
+// Ports: publish a guest port on a running machine, then reach it.
+p, err := m.Publish(ctx, smol.PublishOptions{Guest: 8080}) // free host port picked
+res, err := m.Fetch(ctx, 8080, "/health")
+err = m.Unpublish(ctx, smol.UnpublishOptions{Guest: 8080})
+
+// Jobs (cloud): run detached, read output later, wait or cancel.
+job, err := m.StartJob(ctx, []string{"make", "test"}, smol.JobOptions{Timeout: time.Hour})
+final, err := job.Wait(ctx, smol.JobWaitOptions{})
+out, err := job.ReadAll(ctx, "stdout")
+
 // Branching: copy-on-write children with the source's warm RAM and disk.
 src, err := smol.Create(ctx, smol.MachineConfig{Branchable: true}, nil)
 child, err := src.Branch(ctx, "child-1", smol.BranchOptions{})
