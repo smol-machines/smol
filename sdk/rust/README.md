@@ -327,6 +327,14 @@ for event in machine.exec_stream(["sh", "-c", "make 2>&1"], ExecOptions::new())?
 }
 ```
 
+A terminal or an open stdin go through the same stream: `ExecOptions::new().tty(true)`
+gives the command a pseudo-terminal, `.stdin(true)` keeps stdin writable through
+`stream.stdin()`. Both are local only. `machine.export_pack(path, PackOptions::new())`
+writes a stopped machine's disks as a `.smolmachine`, and
+`Machine::builder(..).allow_host_pattern("*.example.com")` admits exact host
+patterns through the egress filter, and `BranchOptions::new().label("k", "v")`
+sets a label on a branch over the ones it inherits.
+
 `stream.kill()` (or a `KillHandle` from `stream.kill_handle()`, usable from
 another thread) kills the command and ends the stream. Dropping the stream
 without killing it leaves the command running in the guest, like dropping a

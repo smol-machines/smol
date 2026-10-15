@@ -12,14 +12,14 @@
 pub(crate) mod cloud;
 pub(crate) mod local;
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use crate::error::Result;
 use crate::exec::{ExecOptions, ExecResult, ExecStream};
 use crate::machine::{
     BranchOptions, Checkpoint, CheckpointOptions, ImageInfo, MachineResources, MachineState,
-    PortEndpoint, Resize, ShareLink, UsageReport,
+    PackOptions, PortEndpoint, Resize, ShareLink, UsageReport,
 };
 
 /// How long to wait for a machine to become ready, and how often to look.
@@ -178,6 +178,14 @@ pub(crate) trait Transport: Send + Sync + std::fmt::Debug {
     }
 
     /// Export a stopped machine as a `.smolmachine`. Cloud only.
+    /// Write the machine's disks as a `.smolmachine` pack. Local only.
+    fn export_pack(&self, _output: &Path, _options: &PackOptions) -> Result<PathBuf> {
+        Err(unsupported(
+            "export_pack()",
+            "a cloud machine is exported with export_artifact()",
+        ))
+    }
+
     fn export_artifact(&self) -> Result<serde_json::Value> {
         Err(unsupported("export_artifact", "it is cloud-only"))
     }

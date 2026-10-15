@@ -266,6 +266,12 @@ impl Transport for CloudTransport {
     }
 
     fn exec_stream(&self, command: Vec<String>, options: ExecOptions) -> Result<ExecStream> {
+        if options.needs_stream() {
+            return Err(unsupported(
+                "exec_stream() with a tty or stdin",
+                "the cloud exec stream carries output only",
+            ));
+        }
         if let Some(user) = &options.user {
             self.ensure_user(user)?;
         }

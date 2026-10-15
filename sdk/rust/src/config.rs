@@ -247,8 +247,11 @@ pub struct MachineConfig {
     pub resources: Resources,
     /// Caller metadata. The engine never interprets these.
     pub labels: Vec<(String, String)>,
-    /// Hostnames the egress filter permits.
+    /// Hostnames the egress filter permits, each with its subdomains.
     pub allowed_hosts: Vec<String>,
+    /// Exact host patterns the egress filter permits: `api.example.com` for
+    /// that name only, `*.example.com` for its subdomains only. Local only.
+    pub allowed_host_patterns: Vec<String>,
     /// Keep the machine's disks across stop and start.
     pub persistent: bool,
     /// Back guest RAM with a memfd on every start, so the machine can be
@@ -350,6 +353,10 @@ impl MachineConfig {
         for host in &self.allowed_hosts {
             args.push("--allow-host".into());
             args.push(host.clone());
+        }
+        for pattern in &self.allowed_host_patterns {
+            args.push("--allow-host-pattern".into());
+            args.push(pattern.clone());
         }
         for cidr in &self.allowed_cidrs {
             args.push("--allow-cidr".into());
@@ -486,6 +493,12 @@ impl MachineConfig {
     /// anyway would quietly produce a machine missing the data it was supposed
     /// to have.
     pub(crate) fn into_cloud_request(self) -> Result<smol_cloud::types::CreateMachine> {
+        if !self.allowed_host_patterns.is_empty() {
+            return Err(Error::new(
+                ErrorKind::NotSupported,
+                "allow_host_pattern() is local only; the cloud takes allow_host()",
+            ));
+        }
         use smol_cloud::types as wire;
 
         if self.egress_interceptor.is_some() {
@@ -790,9 +803,16 @@ impl MachineBuilder {
         self
     }
 
-    /// Permit a hostname through the egress filter.
+    /// Permit a hostname and its subdomains through the egress filter.
     pub fn allow_host(mut self, host: impl Into<String>) -> Self {
         self.config.allowed_hosts.push(host.into());
+        self
+    }
+
+    /// Permit exactly this pattern through the egress filter: a bare name
+    /// matches only that host, `*.example.com` only its subdomains. Local only.
+    pub fn allow_host_pattern(mut self, pattern: impl Into<String>) -> Self {
+        self.config.allowed_host_patterns.push(pattern.into());
         self
     }
 
@@ -1037,6 +1057,29 @@ mod tests {
         assert!(joined.contains("--allow-host example.com"), "{joined}");
         assert!(joined.contains("-- sleep infinity"), "{joined}");
         assert_eq!(ports.len(), 1);
+    }
+
+    #[test]
+    fn host_patterns_become_allow_host_pattern_flags_locally_and_are_refused_on_cloud() {
+        let config = crate::Machine::builder("m")
+            .image("alpine")
+            .allow_host("example.com")
+            .allow_host_pattern("api.example.com")
+            .allow_host_pattern("*.files.example.com")
+            .build();
+        let (args, _) = config.clone().into_local_args().unwrap();
+        let joined = args.join(" ");
+        assert!(joined.contains("--allow-host example.com"), "{joined}");
+        assert!(
+            joined.contains("--allow-host-pattern api.example.com"),
+            "{joined}"
+        );
+        assert!(
+            joined.contains("--allow-host-pattern *.files.example.com"),
+            "{joined}"
+        );
+        let error = config.into_cloud_request().unwrap_err();
+        assert_eq!(error.kind(), ErrorKind::NotSupported);
     }
 
     fn built_config() -> MachineConfig {

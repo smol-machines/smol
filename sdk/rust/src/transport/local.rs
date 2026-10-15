@@ -23,7 +23,7 @@ use crate::error::{Error, ErrorKind, Result};
 use crate::exec::{ExecEvent, ExecOptions, ExecResult, ExecStream, KillHandle};
 use crate::machine::{
     BranchOptions, Checkpoint, CheckpointOptions, CheckpointResult, CloudCheckpoint, ImageInfo,
-    MachineResources, MachineState, PortEndpoint, Resize, ShareLink, UsageReport,
+    MachineResources, MachineState, PackOptions, PortEndpoint, Resize, ShareLink, UsageReport,
 };
 
 /// How many branches boot at once when a batch does not say.
@@ -496,6 +496,12 @@ impl LocalTransport {
             args.push(workdir.clone());
         }
         push_timeout_and_user(&mut args, options);
+        if options.tty {
+            args.push("--tty".into());
+        }
+        if options.stdin {
+            args.push("--interactive".into());
+        }
         args.push("--".into());
         args.extend(command.iter().cloned());
         args
@@ -699,19 +705,27 @@ impl Transport for LocalTransport {
 
     fn exec_stream(&self, command: Vec<String>, options: ExecOptions) -> Result<ExecStream> {
         let mut args = self.exec_args(&command, &options);
-        args.insert(2, "--stream".into());
+        // A terminal carries its own framing; `--stream` is for the plain case.
+        if !options.tty {
+            args.insert(2, "--stream".into());
+        }
         let mut command = Command::new(&self.cli);
         command
             .args(&args)
-            // Give the child no stdin. Inheriting the caller's makes the CLI
-            // treat the exec as interactive and attach a terminal to the
-            // guest, which is not what a streaming API asked for.
-            .stdin(Stdio::null())
+            // Give the child no stdin unless asked. Inheriting the caller's
+            // makes the CLI treat the exec as interactive and attach a
+            // terminal to the guest, which is not what a streaming API asked for.
+            .stdin(if options.stdin {
+                Stdio::piped()
+            } else {
+                Stdio::null()
+            })
             .env_remove("SMOLVM_BOOT_BINARY")
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
         let mut child = retry_text_busy(|| command.spawn())
             .map_err(|e| Error::new(ErrorKind::Other, format!("start exec: {e}")))?;
+        let stdin = child.stdin.take();
 
         let (tx, rx) = mpsc::channel();
         let out = child.stdout.take().expect("piped stdout");
@@ -751,7 +765,41 @@ impl Transport for LocalTransport {
                 let _ = child.kill();
             }
         });
-        Ok(ExecStream::new(rx, kill))
+        let stream = ExecStream::new(rx, kill);
+        Ok(match stdin {
+            Some(stdin) => stream.with_stdin(Box::new(stdin)),
+            None => stream,
+        })
+    }
+
+    fn export_pack(&self, output: &Path, options: &PackOptions) -> Result<PathBuf> {
+        // The CLI names the executable stub and writes the `.smolmachine`
+        // sidecar beside it. Accept either spelling; return the file that exists.
+        let output = output.to_string_lossy().into_owned();
+        let stub = output
+            .strip_suffix(".smolmachine")
+            .map(str::to_owned)
+            .unwrap_or_else(|| output.clone());
+        let mut args = vec![
+            "pack",
+            "create",
+            "--from-vm",
+            self.name.as_str(),
+            "-o",
+            &stub,
+        ];
+        if options.include_workspace {
+            args.push("--include-workspace");
+        }
+        if options.single_file {
+            args.push("--single-file");
+        }
+        self.run(&args)?;
+        Ok(PathBuf::from(if options.single_file {
+            stub
+        } else {
+            format!("{stub}.smolmachine")
+        }))
     }
 
     /// Run a command in a *fresh ephemeral* machine from `image`.
@@ -1016,6 +1064,10 @@ impl Transport for LocalTransport {
         }
         if options.freeze_source {
             args.push("--freeze-source".into());
+        }
+        for (key, value) in &options.labels {
+            args.push("--label".into());
+            args.push(format!("{key}={value}"));
         }
         let borrowed: Vec<&str> = args.iter().map(String::as_str).collect();
         self.run(&borrowed)?;
@@ -1296,6 +1348,84 @@ mod io_tests {
             ports: vec![],
             interceptor: std::sync::Mutex::new(None),
         }
+    }
+
+    #[test]
+    fn a_tty_or_stdin_exec_adds_the_cli_flags_and_opens_stdin() {
+        let dir = tempfile::tempdir().unwrap();
+        let log = dir.path().join("args");
+        let transport = cli(dir.path(), &format!("echo \"$*\" > {}\ncat", log.display()));
+        use std::io::Write as _;
+        let options = ExecOptions::new().tty(true).stdin(true);
+        let mut stream = transport.exec_stream(vec!["sh".into()], options).unwrap();
+        let mut stdin = stream.stdin().expect("stdin requested");
+        stdin.write_all(b"typed\n").unwrap();
+        drop(stdin);
+        let result = stream.collect_result();
+        assert_eq!(result.exit_code, 0, "{}", result.stderr_utf8());
+        assert_eq!(result.stdout_utf8(), "typed\n");
+        let args = std::fs::read_to_string(&log).unwrap();
+        assert!(args.contains("--tty"), "{args}");
+        assert!(args.contains("--interactive"), "{args}");
+        assert!(
+            !args.contains("--stream"),
+            "a tty carries its own framing: {args}"
+        );
+
+        let mut plain = transport
+            .exec_stream(vec!["sh".into()], ExecOptions::new())
+            .unwrap();
+        assert!(plain.stdin().is_none());
+        // With no stdin the script's `cat` ends at once; wait so the log is written.
+        assert_eq!(plain.collect_result().exit_code, 0);
+        let args = std::fs::read_to_string(&log).unwrap();
+        assert!(args.contains("--stream"), "{args}");
+        assert!(
+            !args.contains("--tty") && !args.contains("--interactive"),
+            "{args}"
+        );
+    }
+
+    #[test]
+    fn branch_labels_are_passed_to_the_cli() {
+        let dir = tempfile::tempdir().unwrap();
+        let log = dir.path().join("args");
+        let transport = cli(dir.path(), &format!("echo \"$*\" > {}", log.display()));
+        transport
+            .branch("child", &BranchOptions::new().label("owner", "child"))
+            .unwrap();
+        let args = std::fs::read_to_string(&log).unwrap();
+        assert!(
+            args.contains("--from test --name child --label owner=child"),
+            "{args}"
+        );
+    }
+
+    #[test]
+    fn export_pack_runs_pack_create_from_the_machine() {
+        let dir = tempfile::tempdir().unwrap();
+        let log = dir.path().join("args");
+        let transport = cli(dir.path(), &format!("echo \"$*\" > {}", log.display()));
+        let sidecar = dir.path().join("m.smolmachine");
+        let stub = dir.path().join("m");
+        let written = transport
+            .export_pack(&sidecar, &PackOptions::new().include_workspace(true))
+            .unwrap();
+        assert_eq!(written, sidecar);
+        let args = std::fs::read_to_string(&log).unwrap();
+        assert!(
+            args.starts_with(&format!(
+                "pack create --from-vm test -o {} --include-workspace",
+                stub.display()
+            )),
+            "{args}"
+        );
+        let single = transport
+            .export_pack(&stub, &PackOptions::new().single_file(true))
+            .unwrap();
+        assert_eq!(single, stub);
+        let args = std::fs::read_to_string(&log).unwrap();
+        assert!(args.ends_with("--single-file\n"), "{args}");
     }
 
     #[test]

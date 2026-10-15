@@ -24,6 +24,12 @@ pub struct ExecOptions {
     /// Cloud only: start the command detached and return at once with its
     /// [`ExecResult::pid`], leaving it running (a dev server, an agent).
     pub background: bool,
+    /// Give the command a pseudo-terminal. Output then arrives on stdout only.
+    /// [`crate::Machine::exec_stream`] and local machines only.
+    pub tty: bool,
+    /// Keep the command's stdin open and writable through [`ExecStream::stdin`].
+    /// [`crate::Machine::exec_stream`] and local machines only.
+    pub stdin: bool,
 }
 
 impl ExecOptions {
@@ -60,6 +66,24 @@ impl ExecOptions {
     pub fn background(mut self, background: bool) -> Self {
         self.background = background;
         self
+    }
+
+    /// Give the command a pseudo-terminal.
+    pub fn tty(mut self, tty: bool) -> Self {
+        self.tty = tty;
+        self
+    }
+
+    /// Keep stdin open and writable through [`ExecStream::stdin`].
+    pub fn stdin(mut self, stdin: bool) -> Self {
+        self.stdin = stdin;
+        self
+    }
+
+    /// Whether this exec needs the stream API: a terminal or an open stdin
+    /// have nowhere to go in a collected [`ExecResult`].
+    pub(crate) fn needs_stream(&self) -> bool {
+        self.tty || self.stdin
     }
 
     /// Refuse options no target could honor, before anything runs.
@@ -141,6 +165,7 @@ pub enum ExecEvent {
 pub struct ExecStream {
     rx: Receiver<ExecEvent>,
     kill: KillHandle,
+    stdin: Option<Box<dyn std::io::Write + Send>>,
 }
 
 /// Stops a streaming command from any thread. Cloned handles share one stream.
@@ -189,7 +214,22 @@ impl ExecStream {
     /// Wrap a channel some other producer is feeding; `kill` stops that
     /// producer's command.
     pub(crate) fn new(rx: Receiver<ExecEvent>, kill: KillHandle) -> Self {
-        Self { rx, kill }
+        Self {
+            rx,
+            kill,
+            stdin: None,
+        }
+    }
+
+    pub(crate) fn with_stdin(mut self, stdin: Box<dyn std::io::Write + Send>) -> Self {
+        self.stdin = Some(stdin);
+        self
+    }
+
+    /// The command's stdin, once, when the exec asked for one with
+    /// [`ExecOptions::stdin`]. Dropping the writer closes stdin.
+    pub fn stdin(&mut self) -> Option<Box<dyn std::io::Write + Send>> {
+        self.stdin.take()
     }
 
     /// Kill the command. See [`KillHandle::kill`].

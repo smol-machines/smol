@@ -337,6 +337,34 @@ impl Checkpoint {
     }
 }
 
+/// What a `.smolmachine` export of a machine carries.
+#[derive(Debug, Clone, Default)]
+pub struct PackOptions {
+    /// Include the `/workspace` mount's contents, not only the machine's disks.
+    pub include_workspace: bool,
+    /// Write one self-contained file instead of a stub plus assets.
+    pub single_file: bool,
+}
+
+impl PackOptions {
+    /// Options with nothing set.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Include the workspace mount's contents.
+    pub fn include_workspace(mut self, include: bool) -> Self {
+        self.include_workspace = include;
+        self
+    }
+
+    /// Write one self-contained file.
+    pub fn single_file(mut self, single: bool) -> Self {
+        self.single_file = single;
+        self
+    }
+}
+
 /// How a branch is made.
 #[derive(Debug, Clone, Default)]
 pub struct BranchOptions {
@@ -352,6 +380,9 @@ pub struct BranchOptions {
     /// frozen source no longer counts toward the concurrency cap. The source
     /// cannot run commands again; work in its branches, or stop it.
     pub freeze_source: bool,
+    /// Labels set on the branch over the ones it inherits from its source.
+    /// Needs an engine with `machine branch --label`.
+    pub labels: Vec<(String, String)>,
 }
 
 impl BranchOptions {
@@ -381,6 +412,12 @@ impl BranchOptions {
     /// Keep the source paused as a reusable branch base.
     pub fn freeze_source(mut self, freeze_source: bool) -> Self {
         self.freeze_source = freeze_source;
+        self
+    }
+
+    /// Set a label on the branch, replacing an inherited value of the same key.
+    pub fn label(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
+        self.labels.push((key.into(), value.into()));
         self
     }
 }
@@ -751,6 +788,14 @@ impl Machine {
         self.transport.export_artifact()
     }
 
+    /// Write this machine's disks (and optionally its workspace) as a pack.
+    /// `output` names the `.smolmachine` sidecar or the executable stub; the
+    /// returned path is the file that exists. The machine must be stopped.
+    /// Local only.
+    pub fn export_pack(&self, output: impl AsRef<Path>, options: PackOptions) -> Result<PathBuf> {
+        self.transport.export_pack(output.as_ref(), &options)
+    }
+
     /// Whether the machine is ready to do work.
     ///
     /// This is strictly later than running: a started machine is still booting,
@@ -839,6 +884,12 @@ impl Machine {
         S: Into<String>,
     {
         options.validate()?;
+        if options.needs_stream() {
+            return Err(crate::Error::new(
+                crate::ErrorKind::Config,
+                "a tty or an open stdin needs exec_stream()",
+            ));
+        }
         self.transport
             .exec(command.into_iter().map(Into::into).collect(), options)
     }
@@ -1238,6 +1289,13 @@ impl CacheDisk {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn exec_options_needing_a_stream_are_named() {
+        assert!(!crate::ExecOptions::new().needs_stream());
+        assert!(crate::ExecOptions::new().tty(true).needs_stream());
+        assert!(crate::ExecOptions::new().stdin(true).needs_stream());
+    }
+
     use super::*;
 
     /// A row as `smolvm machine ls --json` prints it.
