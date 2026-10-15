@@ -109,7 +109,7 @@ permission to exec, connect, or expect the workload to respond.
 
 | Command | Description |
 |---------|-------------|
-| `smol cloud deploy --image <ref>` | Create + start a machine on the cloud cluster. Scope egress with `--allow-host`/`--allow-cidr`. |
+| `smol cloud deploy <ref>` | Create + start a machine on the cloud cluster. Scope egress with `--allow-host`/`--allow-cidr`. |
 | `smol cloud ls` | List cloud machines. |
 | `smol cloud rm <id>` | Delete a cloud machine. |
 | `smol cloud scale …` | Scale a cloud deployment. |

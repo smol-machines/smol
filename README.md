@@ -180,7 +180,7 @@ smol machine rm --name mybox
 
 # smol cloud
 smol auth login
-smol cloud deploy --image alpine:3.20
+smol cloud deploy library/alpine:3.20
 smol machine ls --cloud
 ```
 
