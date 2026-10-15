@@ -4,8 +4,10 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"io"
 	"iter"
 	"net"
+	"net/http"
 	"os"
 	"path/filepath"
 	"time"
@@ -328,6 +330,71 @@ func (m *Machine) PortLinks(ctx context.Context) (map[int]string, error) { retur
 // RevokePortLinks revokes the machine's port links: every link stops working
 // at once, and the next PortLinks issues new ones. Cloud only.
 func (m *Machine) RevokePortLinks(ctx context.Context) error { return m.t.revokePortLinks(ctx) }
+
+// ReadFileStream reads a file from the machine in chunks, so a large file
+// never has to fit in memory. Locally the file arrives as one chunk.
+func (m *Machine) ReadFileStream(ctx context.Context, path string) iter.Seq2[[]byte, error] {
+	return m.t.readFileStream(ctx, path)
+}
+
+// Fetch sends an HTTP GET to the machine's guest port, with the headers that
+// target needs. Use NewRequest for any other method or a body.
+func (m *Machine) Fetch(ctx context.Context, port int, path string) (*http.Response, error) {
+	req, err := m.NewRequest(ctx, http.MethodGet, port, path, nil)
+	if err != nil {
+		return nil, err
+	}
+	return http.DefaultClient.Do(req)
+}
+
+// NewRequest builds an HTTP request to the machine's guest port, carrying the
+// headers that target needs (the bearer token on the cloud). Send it with any
+// http.Client.
+func (m *Machine) NewRequest(ctx context.Context, method string, port int, path string, body io.Reader) (*http.Request, error) {
+	e, err := m.t.endpoint(port, path)
+	if err != nil {
+		return nil, err
+	}
+	req, err := http.NewRequestWithContext(ctx, method, e.HTTPURL, body)
+	if err != nil {
+		return nil, invalidConfig("build request: " + err.Error())
+	}
+	for k, v := range e.Headers {
+		req.Header.Set(k, v)
+	}
+	return req, nil
+}
+
+// Pack packs this stopped machine into a .smolmachine at path: its disks and
+// configuration in one artifact that stays on this host. Create machines from
+// it with MachineConfig.Image set to the path. Returns the artifact's path.
+// Local only.
+func (m *Machine) Pack(ctx context.Context, path string) (string, error) { return m.t.pack(ctx, path) }
+
+// Info returns the control plane's full record for the machine. Cloud only.
+func (m *Machine) Info(ctx context.Context) (map[string]any, error) { return m.t.describe(ctx) }
+
+// Logs returns the last tail lines of the machine's workload log (100 when
+// tail is zero). Cloud only.
+func (m *Machine) Logs(ctx context.Context, tail int) (string, error) {
+	if tail <= 0 {
+		tail = 100
+	}
+	return m.t.logs(ctx, tail)
+}
+
+// ExportArtifact exports the stopped machine as a stored artifact and returns
+// its record. Cloud only.
+func (m *Machine) ExportArtifact(ctx context.Context) (map[string]any, error) {
+	return m.t.exportArtifact(ctx)
+}
+
+// PublishCacheDisk publishes this machine's cache disk, the version it started
+// from plus everything it wrote, as the cache disk's next version. Stop the
+// machine first: a running machine is still writing it. Cloud only.
+func (m *Machine) PublishCacheDisk(ctx context.Context) (*PublishedCacheDisk, error) {
+	return m.t.publishCacheDisk(ctx)
+}
 
 func protocolOrTCP(protocol string) string {
 	if protocol == "" {

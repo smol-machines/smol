@@ -180,6 +180,69 @@ func cloudDo(ctx context.Context, c cloudConn, method, path string, opts fetchOp
 	return data, nil
 }
 
+// cloudStream sends a GET and returns its body unread, for transfers too big
+// to buffer. The transfer may take as long as it needs, but a read that makes
+// no progress for cloudTimeout fails it. The caller closes the body.
+func cloudStream(ctx context.Context, c cloudConn, path string) (io.ReadCloser, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	reqCtx, cancel := context.WithCancel(ctx)
+	req, err := http.NewRequestWithContext(reqCtx, "GET", c.baseURL+path, nil)
+	if err != nil {
+		cancel()
+		return nil, invalidConfig("build request: " + err.Error())
+	}
+	req.Header.Set("authorization", "Bearer "+c.apiKey)
+	stall := time.AfterFunc(cloudTimeout, cancel)
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		stall.Stop()
+		cancel()
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return nil, ctxErr
+		}
+		return nil, &Error{Code: CodeConnection, Message: "cloud request failed: " + err.Error()}
+	}
+	if res.StatusCode < 200 || res.StatusCode > 299 {
+		defer res.Body.Close()
+		stall.Stop()
+		cancel()
+		return nil, httpError("GET", path, res)
+	}
+	return &stallReader{body: res.Body, stall: stall, cancel: cancel, ctx: ctx, path: path}, nil
+}
+
+// stallReader resets its stall timer on every read, so only a transfer that
+// stops making progress is cut off.
+type stallReader struct {
+	body   io.ReadCloser
+	stall  *time.Timer
+	cancel context.CancelFunc
+	ctx    context.Context
+	path   string
+}
+
+func (r *stallReader) Read(p []byte) (int, error) {
+	n, err := r.body.Read(p)
+	if n > 0 {
+		r.stall.Reset(cloudTimeout)
+	}
+	if err != nil && err != io.EOF {
+		if ctxErr := r.ctx.Err(); ctxErr != nil {
+			return n, ctxErr
+		}
+		return n, &Error{Code: CodeTimeout, Message: fmt.Sprintf("cloud GET %s stalled for %s", r.path, cloudTimeout)}
+	}
+	return n, err
+}
+
+func (r *stallReader) Close() error {
+	r.stall.Stop()
+	r.cancel()
+	return r.body.Close()
+}
+
 // cloudJSON sends one request and decodes its JSON body into out (when both
 // exist).
 func cloudJSON(ctx context.Context, c cloudConn, method, path string, opts fetchOpts, out any) error {
@@ -797,6 +860,151 @@ func (t *cloudTransport) portLinks(ctx context.Context) (map[int]string, error) 
 func (t *cloudTransport) revokePortLinks(ctx context.Context) error {
 	_, err := cloudDo(ctx, t.conn, "DELETE", t.path("/port-links"), fetchOpts{})
 	return err
+}
+
+func (t *cloudTransport) readFileStream(ctx context.Context, path string) iter.Seq2[[]byte, error] {
+	return func(yield func([]byte, error) bool) {
+		body, err := cloudStream(ctx, t.conn, t.path("/files/"+encodePath(path)))
+		if err != nil {
+			yield(nil, err)
+			return
+		}
+		defer body.Close()
+		buf := make([]byte, 256*1024)
+		for {
+			n, err := body.Read(buf)
+			if n > 0 {
+				chunk := make([]byte, n)
+				copy(chunk, buf[:n])
+				if !yield(chunk, nil) {
+					return
+				}
+			}
+			if err == io.EOF {
+				return
+			}
+			if err != nil {
+				yield(nil, err)
+				return
+			}
+		}
+	}
+}
+
+func (t *cloudTransport) pack(context.Context, string) (string, error) {
+	return "", notSupported("Pack is local-only; use ExportArtifact or Checkpoint on the cloud.")
+}
+
+func (t *cloudTransport) describe(ctx context.Context) (map[string]any, error) {
+	out := map[string]any{}
+	if err := cloudJSON(ctx, t.conn, "GET", t.path(""), fetchOpts{}, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (t *cloudTransport) logs(ctx context.Context, tail int) (string, error) {
+	data, err := cloudDo(ctx, t.conn, "GET", t.path(fmt.Sprintf("/logs?tail=%d", tail)), fetchOpts{bytes: true})
+	return string(data), err
+}
+
+func (t *cloudTransport) exportArtifact(ctx context.Context) (map[string]any, error) {
+	out := map[string]any{}
+	if err := cloudJSON(ctx, t.conn, "POST", t.path("/export"), fetchOpts{json: map[string]any{}, timeout: cloudStartTimeout}, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (t *cloudTransport) publishCacheDisk(ctx context.Context) (*PublishedCacheDisk, error) {
+	// Flattening and uploading a large cache can take minutes.
+	var out PublishedCacheDisk
+	if err := cloudJSON(ctx, t.conn, "POST", t.path("/cache-disk/publish"), fetchOpts{timeout: 30 * time.Minute}, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+func (t *cloudTransport) startJob(ctx context.Context, command []string, opts JobOptions) (*JobInfo, error) {
+	body := map[string]any{"command": command, "env": map[string]string{}}
+	if opts.Env != nil {
+		body["env"] = opts.Env
+	}
+	if opts.Workdir != "" {
+		body["cwd"] = opts.Workdir
+	}
+	if opts.Timeout > 0 {
+		secs := int64(opts.Timeout / time.Second)
+		if secs < 1 {
+			secs = 1
+		}
+		body["timeoutSeconds"] = secs
+	}
+	if opts.User != "" {
+		body["user"] = opts.User
+	}
+	var info JobInfo
+	if err := cloudJSON(ctx, t.conn, "POST", t.path("/jobs"), fetchOpts{json: body, timeout: cloudStartTimeout}, &info); err != nil {
+		return nil, err
+	}
+	return &info, nil
+}
+
+func (t *cloudTransport) getJob(ctx context.Context, id string) (*JobInfo, error) {
+	var info JobInfo
+	if err := cloudJSON(ctx, t.conn, "GET", t.path("/jobs/"+url.PathEscape(id)), fetchOpts{}, &info); err != nil {
+		return nil, err
+	}
+	return &info, nil
+}
+
+func (t *cloudTransport) listJobs(ctx context.Context) ([]JobInfo, error) {
+	var out struct {
+		Jobs []JobInfo `json:"jobs"`
+	}
+	if err := cloudJSON(ctx, t.conn, "GET", t.path("/jobs"), fetchOpts{}, &out); err != nil {
+		return nil, err
+	}
+	return out.Jobs, nil
+}
+
+func (t *cloudTransport) cancelJob(ctx context.Context, id string) (*JobInfo, error) {
+	var info JobInfo
+	if err := cloudJSON(ctx, t.conn, "POST", t.path("/jobs/"+url.PathEscape(id)+"/cancel"), fetchOpts{}, &info); err != nil {
+		return nil, err
+	}
+	return &info, nil
+}
+
+func (t *cloudTransport) jobOutput(ctx context.Context, id string, opts JobOutputOptions) (*JobOutput, error) {
+	stream := opts.Stream
+	if stream == "" {
+		stream = "stdout"
+	}
+	q := url.Values{"stream": {stream}, "offset": {strconv.FormatInt(opts.Offset, 10)}}
+	if opts.Limit > 0 {
+		q.Set("limit", strconv.Itoa(opts.Limit))
+	}
+	var wire struct {
+		Stream     string  `json:"stream"`
+		Offset     int64   `json:"offset"`
+		NextOffset int64   `json:"nextOffset"`
+		Data       string  `json:"data"`
+		DataB64    *string `json:"dataB64"`
+		EOF        bool    `json:"eof"`
+	}
+	if err := cloudJSON(ctx, t.conn, "GET", t.path("/jobs/"+url.PathEscape(id)+"/output?"+q.Encode()), fetchOpts{}, &wire); err != nil {
+		return nil, err
+	}
+	data := []byte(wire.Data)
+	if wire.DataB64 != nil {
+		b, err := base64.StdEncoding.DecodeString(*wire.DataB64)
+		if err != nil {
+			return nil, &Error{Code: CodeSmolvm, Message: "job output: invalid dataB64: " + err.Error()}
+		}
+		data = b
+	}
+	return &JobOutput{Stream: wire.Stream, Offset: wire.Offset, NextOffset: wire.NextOffset, Data: data, EOF: wire.EOF}, nil
 }
 
 // checkpointWire is the control plane's PortableCheckpointInfo.

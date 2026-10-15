@@ -114,6 +114,98 @@ type PortSpec struct {
 	Guest int
 }
 
+// JobOptions configures Machine.StartJob. Cloud only.
+type JobOptions struct {
+	// Env adds environment variables.
+	Env map[string]string
+	// Workdir is the working directory inside the machine.
+	Workdir string
+	// Timeout stops the job with SIGTERM after this long (whole seconds); it
+	// then exits 143. Zero means no timeout.
+	Timeout time.Duration
+	// User runs the job as a name from the image or a numeric uid[:gid].
+	User string
+}
+
+// JobInfo describes a job. State is "running", "exited" (see ExitCode), or
+// "lost" when the machine stopped or restarted while the job ran.
+type JobInfo struct {
+	ID        string   `json:"id"`
+	MachineID string   `json:"machineId"`
+	Command   []string `json:"command"`
+	State     string   `json:"state"`
+	// ExitCode is set once the job exited; 143 when cancelled or timed out.
+	ExitCode   *int   `json:"exitCode,omitempty"`
+	CreatedAt  string `json:"createdAt"`
+	FinishedAt string `json:"finishedAt,omitempty"`
+	// StdoutBytes and StderrBytes are the bytes written so far, when known.
+	StdoutBytes *int64 `json:"stdoutBytes,omitempty"`
+	StderrBytes *int64 `json:"stderrBytes,omitempty"`
+}
+
+// JobOutputOptions selects a slice of a job's output for Job.Output.
+type JobOutputOptions struct {
+	// Stream is "stdout" (the default) or "stderr".
+	Stream string
+	// Offset is the byte offset to start at.
+	Offset int64
+	// Limit caps the bytes returned; zero lets the server choose (256 KiB,
+	// capped at 1 MiB).
+	Limit int
+}
+
+// JobOutput is a slice of a job's stdout or stderr.
+type JobOutput struct {
+	Stream     string
+	Offset     int64
+	NextOffset int64
+	// Data is the slice, byte-exact.
+	Data []byte
+	// EOF is true once the job has finished and this slice reaches the end of
+	// the stream: nothing more will be written.
+	EOF bool
+}
+
+// JobWaitOptions configures Job.Wait.
+type JobWaitOptions struct {
+	// Poll is the delay between polls; zero means one second.
+	Poll time.Duration
+	// Timeout gives up with ErrTimeout after this long; zero waits until ctx ends.
+	Timeout time.Duration
+}
+
+// CacheDiskVersion is one published version of a cache disk.
+type CacheDiskVersion struct {
+	// Version 0 is the empty filesystem a cache disk starts as; each publish
+	// adds one.
+	Version   int    `json:"version"`
+	SizeBytes int64  `json:"sizeBytes"`
+	SHA256    string `json:"sha256"`
+	CreatedAt string `json:"createdAt"`
+	// SourceMachineID is the machine this version was published from; empty
+	// for version 0.
+	SourceMachineID string `json:"sourceMachineId,omitempty"`
+}
+
+// CacheDiskInfo is a cache disk: a disk image many machines start from, each
+// through its own copy-on-write layer.
+type CacheDiskInfo struct {
+	ID            string `json:"id"`
+	Name          string `json:"name"`
+	SizeGB        int    `json:"sizeGb"`
+	MountPath     string `json:"mountPath"`
+	LatestVersion int    `json:"latestVersion"`
+	// Versions is newest first.
+	Versions  []CacheDiskVersion `json:"versions"`
+	CreatedAt string             `json:"createdAt"`
+}
+
+// PublishedCacheDisk is the result of Machine.PublishCacheDisk.
+type PublishedCacheDisk struct {
+	CacheDisk CacheDiskInfo    `json:"cacheDisk"`
+	Version   CacheDiskVersion `json:"version"`
+}
+
 // PublishedPort is one published port mapping. On the cloud the host port is
 // the node's, and a port not placed on a node yet reports Host 0.
 type PublishedPort struct {

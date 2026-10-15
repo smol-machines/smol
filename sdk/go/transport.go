@@ -45,6 +45,17 @@ type transport interface {
 	setPorts(ctx context.Context, ports []PublishedPort) error
 	portLinks(ctx context.Context) (map[int]string, error)
 	revokePortLinks(ctx context.Context) error
+	readFileStream(ctx context.Context, path string) iter.Seq2[[]byte, error]
+	pack(ctx context.Context, output string) (string, error)
+	describe(ctx context.Context) (map[string]any, error)
+	logs(ctx context.Context, tail int) (string, error)
+	exportArtifact(ctx context.Context) (map[string]any, error)
+	publishCacheDisk(ctx context.Context) (*PublishedCacheDisk, error)
+	startJob(ctx context.Context, command []string, opts JobOptions) (*JobInfo, error)
+	getJob(ctx context.Context, id string) (*JobInfo, error)
+	listJobs(ctx context.Context) ([]JobInfo, error)
+	cancelJob(ctx context.Context, id string) (*JobInfo, error)
+	jobOutput(ctx context.Context, id string, opts JobOutputOptions) (*JobOutput, error)
 	checkpoint(ctx context.Context, output string, opts CheckpointOptions) (*PortableCheckpointInfo, error)
 	checkpoints(ctx context.Context) ([]PortableCheckpointInfo, error)
 	resize(ctx context.Context, opts ResizeOptions) (*MachineResources, error)

@@ -453,6 +453,72 @@ func (t *localTransport) revokePortLinks(context.Context) error {
 	return notSupported("RevokePortLinks is cloud-only; a local machine has no port links.")
 }
 
+// readFileStream yields the whole file once: a local read is already a
+// single in-process copy.
+func (t *localTransport) readFileStream(ctx context.Context, path string) iter.Seq2[[]byte, error] {
+	return func(yield func([]byte, error) bool) {
+		data, err := t.readFile(ctx, path)
+		if err != nil {
+			yield(nil, err)
+			return
+		}
+		if len(data) > 0 {
+			yield(data, nil)
+		}
+	}
+}
+
+func (t *localTransport) pack(ctx context.Context, output string) (string, error) {
+	if output == "" {
+		return "", invalidConfig("Pack needs an output path.")
+	}
+	abs, err := filepath.Abs(output)
+	if err != nil {
+		return "", err
+	}
+	var path string
+	if err := localCall(ctx, "pack", map[string]any{"name": t.n, "output": abs}, &path); err != nil {
+		return "", err
+	}
+	return path, nil
+}
+
+func (t *localTransport) describe(context.Context) (map[string]any, error) {
+	return nil, notSupported("Info is cloud-only.")
+}
+
+func (t *localTransport) logs(context.Context, int) (string, error) {
+	return "", notSupported("Logs is cloud-only.")
+}
+
+func (t *localTransport) exportArtifact(context.Context) (map[string]any, error) {
+	return nil, notSupported("ExportArtifact is cloud-only; use Pack for a local machine.")
+}
+
+func (t *localTransport) publishCacheDisk(context.Context) (*PublishedCacheDisk, error) {
+	return nil, notSupported("PublishCacheDisk is cloud-only; a local machine has no cache disk.")
+}
+
+func (t *localTransport) startJob(context.Context, []string, JobOptions) (*JobInfo, error) {
+	return nil, notSupported("StartJob is cloud-only; use ExecStream for a local machine.")
+}
+
+func (t *localTransport) getJob(context.Context, string) (*JobInfo, error) {
+	return nil, notSupported("Job is cloud-only.")
+}
+
+func (t *localTransport) listJobs(context.Context) ([]JobInfo, error) {
+	return nil, notSupported("Jobs is cloud-only.")
+}
+
+func (t *localTransport) cancelJob(context.Context, string) (*JobInfo, error) {
+	return nil, notSupported("Job is cloud-only.")
+}
+
+func (t *localTransport) jobOutput(context.Context, string, JobOutputOptions) (*JobOutput, error) {
+	return nil, notSupported("Job is cloud-only.")
+}
+
 // nativePublishedPort is a published port as the native core sends and takes it.
 type nativePublishedPort struct {
 	Host     int    `json:"host"`

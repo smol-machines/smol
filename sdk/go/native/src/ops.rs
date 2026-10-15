@@ -115,6 +115,11 @@ pub(crate) fn dispatch(op: &str, args: Value, payload: &mut Payload) -> CallResu
             rt()?.set_ports(&a.name, &mappings)?;
             Ok(Value::Null)
         }
+        "pack" => {
+            let a: PackArgs = parse(args)?;
+            let path = rt()?.pack_machine(&a.name, Path::new(&a.output))?;
+            Ok(json!(path.to_string_lossy()))
+        }
         "sync" => named_unit(args, |rt, name| rt.sync_machine(name)),
         "stop" => named_unit(args, |rt, name| rt.stop_machine(name)),
         "pause" => named_unit(args, |rt, name| rt.pause_machine(name)),
@@ -158,6 +163,12 @@ pub(crate) fn dispatch(op: &str, args: Value, payload: &mut Payload) -> CallResu
         }
         other => Err(CallError::config(format!("unknown op {other:?}"))),
     }
+}
+
+#[derive(Deserialize)]
+struct PackArgs {
+    name: String,
+    output: String,
 }
 
 #[derive(Deserialize)]

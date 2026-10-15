@@ -319,6 +319,24 @@ func TestE2EPorts(t *testing.T) {
 	if !strings.Contains(body, "hi-from-guest") {
 		t.Fatalf("host %s did not reach the guest server, got %q", addr, body)
 	}
+	// Fetch resolves the guest port to its published host port. The nc loop
+	// restarts between connections, so retry like the dial above.
+	var fetched string
+	var fetchErr error
+	for until := time.Now().Add(10 * time.Second); time.Now().Before(until); time.Sleep(200 * time.Millisecond) {
+		res, err := m.Fetch(ctx, 8080, "/")
+		if fetchErr = err; err != nil {
+			continue
+		}
+		b, _ := io.ReadAll(res.Body)
+		res.Body.Close()
+		if fetched = string(b); strings.Contains(fetched, "hi-from-guest") {
+			break
+		}
+	}
+	if !strings.Contains(fetched, "hi-from-guest") {
+		t.Fatalf("Fetch body = %q, last error %v", fetched, fetchErr)
+	}
 
 	if err := m.Unpublish(ctx, UnpublishOptions{Guest: 8080}); err != nil {
 		t.Fatalf("Unpublish: %v", err)
@@ -334,4 +352,45 @@ func TestE2EPorts(t *testing.T) {
 			t.Fatalf("%s still reaches the guest after Unpublish", addr)
 		}
 	}
+}
+
+// TestE2EPackAndStream streams a file back out of a machine, then packs the
+// stopped machine into a .smolmachine.
+func TestE2EPackAndStream(t *testing.T) {
+	requireE2E(t)
+	ctx := context.Background()
+	m := newE2EMachine(t, MachineConfig{Resources: ResourceSpec{CPUs: 1, MemoryMB: 512}})
+	want := strings.Repeat("smol-stream-", 50_000) // 600 KB
+	if err := m.WriteFile(ctx, "/workspace/big.txt", []byte(want), 0); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	var got strings.Builder
+	for chunk, err := range m.ReadFileStream(ctx, "/workspace/big.txt") {
+		if err != nil {
+			t.Fatalf("ReadFileStream: %v", err)
+		}
+		got.Write(chunk)
+	}
+	if got.String() != want {
+		t.Fatalf("ReadFileStream returned %d bytes, want %d", got.Len(), len(want))
+	}
+
+	if err := m.Stop(ctx); err != nil {
+		t.Fatalf("Stop: %v", err)
+	}
+	out := t.TempDir() + "/packed.smolmachine"
+	path, err := m.Pack(ctx, out)
+	if err != nil {
+		t.Fatalf("Pack: %v", err)
+	}
+	st, err := os.Stat(path)
+	if err != nil || st.Size() == 0 {
+		t.Fatalf("Pack wrote %q: %v (size %d)", path, err, func() int64 {
+			if st != nil {
+				return st.Size()
+			}
+			return 0
+		}())
+	}
+	t.Logf("packed %s (%d bytes)", path, st.Size())
 }
