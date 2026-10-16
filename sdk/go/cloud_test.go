@@ -645,6 +645,29 @@ func TestCloudExecStreamSSE(t *testing.T) {
 	}
 }
 
+func TestCloudBackgroundExecSendsTheFlagAndReturnsThePid(t *testing.T) {
+	isolateCloudEnv(t)
+	var body map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body = map[string]any{}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		w.Header().Set("content-type", "application/json")
+		_, _ = io.WriteString(w, `{"exitCode":0,"stdout":"pid=4242\n","stderr":""}`)
+	}))
+	defer srv.Close()
+	tr := newCloud(cloudConn{baseURL: srv.URL, apiKey: "k"}, "m1", "m1")
+	res, err := tr.exec(context.Background(), []string{"sleep", "999"}, &ExecOptions{Background: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if body["background"] != true || res.Pid != 4242 {
+		t.Fatalf("background = %v, pid = %d; want true, 4242", body["background"], res.Pid)
+	}
+	if _, err := tr.exec(context.Background(), []string{"true"}, nil); err != nil || body["background"] != nil {
+		t.Fatalf("a plain exec sent background = %v (%v)", body["background"], err)
+	}
+}
+
 func TestCloudErrorSentence(t *testing.T) {
 	cases := map[string]string{
 		`{"type":"about:blank","title":"Not Found","detail":"no machine m9"}`: "no machine m9",

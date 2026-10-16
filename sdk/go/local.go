@@ -207,6 +207,15 @@ func (t *localTransport) exec(ctx context.Context, command []string, opts *ExecO
 		return nil, err
 	}
 	args := map[string]any{"name": t.n, "command": command, "options": toNativeExec(opts)}
+	if opts != nil && opts.Background {
+		// Started, not awaited: ctx bounds only the start.
+		var pid int
+		if err := callInto("exec_background", args, &pid); err != nil {
+			return nil, err
+		}
+		stdout := fmt.Sprintf("pid=%d\n", pid)
+		return &ExecResult{Stdout: stdout, StdoutBytes: []byte(stdout), Pid: pid}, nil
+	}
 	var r nativeExecResult
 	if ctx.Done() == nil {
 		if err := callInto("exec", args, &r); err != nil {

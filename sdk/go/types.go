@@ -354,6 +354,9 @@ type ExecOptions struct {
 	// Output picks which encodings the cloud returns: "text", "b64" or the
 	// default both. Ignored locally.
 	Output string
+	// Background starts the command detached and returns at once with its
+	// Pid, leaving it running (a dev server, an agent). It takes no timeout.
+	Background bool
 }
 
 // ExecResult is a finished command.
@@ -370,6 +373,8 @@ type ExecResult struct {
 	// StdoutBytes is byte-exact, untruncated stdout.
 	StdoutBytes []byte
 	StderrBytes []byte
+	// Pid is the detached process's pid for a Background exec; 0 otherwise.
+	Pid int
 }
 
 // Success reports whether the command exited 0.

@@ -72,3 +72,51 @@ fn tty_stdin_and_pack_export_work_on_a_real_machine() {
     let _ = std::fs::remove_file(&written);
     machine.delete().expect("delete");
 }
+
+#[test]
+#[ignore]
+fn background_exec_returns_its_pid_and_keeps_running_on_a_real_machine() {
+    let Some(image) = image() else {
+        return;
+    };
+    let name = format!("sdk-live-bg-{}", std::process::id());
+    let machine = Machine::builder(&name)
+        .image(image)
+        .cpus(1)
+        .memory_mib(512)
+        .create()
+        .expect("create");
+    machine.start().expect("start");
+    machine.wait_until_ready().expect("ready");
+
+    let started = std::time::Instant::now();
+    let bg = machine
+        .exec_with(
+            ["sh", "-c", "sleep 3; echo done > /tmp/bg-done"],
+            ExecOptions::new().background(true),
+        )
+        .expect("background exec");
+    assert!(
+        started.elapsed() < Duration::from_secs(3),
+        "{:?}",
+        started.elapsed()
+    );
+    let pid = bg.pid.expect("a background exec returns its pid");
+    assert_eq!(bg.stdout_utf8(), format!("pid={pid}\n"));
+
+    let deadline = std::time::Instant::now() + Duration::from_secs(60);
+    loop {
+        let done = machine
+            .exec(["sh", "-c", "cat /tmp/bg-done 2>/dev/null"])
+            .expect("exec");
+        if done.stdout_utf8() == "done\n" {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the background command never finished"
+        );
+        std::thread::sleep(Duration::from_millis(500));
+    }
+    machine.delete().expect("delete");
+}
