@@ -754,6 +754,8 @@ class LocalTransport:
         """Run a command and wait. ``cancel`` (from :meth:`canceller`) lets
         another thread kill it."""
         options = _native_exec_options(opts)
+        if opts is not None and opts.background:
+            return self._exec_background(command, options, cancel)
         try:
             if cancel is None:
                 r = self._inner.exec(command, options)
@@ -768,6 +770,18 @@ class LocalTransport:
             stdout_bytes=r.stdout.encode("utf-8", "replace"),
             stderr_bytes=r.stderr.encode("utf-8", "replace"),
         )
+
+    def _exec_background(self, command: list[str], options: Optional[dict], cancel: Any) -> ExecResult:
+        """Start a command and return at once, as the cloud does: its pid in
+        ``pid`` and as ``pid=<n>`` on stdout."""
+        if cancel is not None:
+            raise InvalidConfigError("a background command cannot be cancelled; kill its pid instead")
+        try:
+            pid = self._inner.exec_background(command, options)
+        except Exception as e:  # noqa: BLE001 - re-typed below
+            raise wrap_native_error(e) from e
+        stdout = f"pid={pid}\n"
+        return ExecResult(exit_code=0, stdout=stdout, stderr="", stdout_bytes=stdout.encode(), pid=pid)
 
     def canceller(self) -> Any:
         """A token that kills an :meth:`exec` from another thread."""

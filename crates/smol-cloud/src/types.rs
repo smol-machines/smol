@@ -353,6 +353,9 @@ pub struct Command {
     /// Start the command detached; the response's stdout carries `pid=<n>`.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub background: bool,
+    /// Text written to the command's stdin, which is then closed.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stdin: Option<String>,
 }
 
 /// What a finished command produced.

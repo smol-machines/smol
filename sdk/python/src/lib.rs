@@ -1131,6 +1131,21 @@ impl Machine {
         Ok(names.into_iter().map(|name| Machine { name }).collect())
     }
 
+    /// Start a command without waiting for it and return its guest pid. It
+    /// keeps running after this returns; it takes no stdin and no timeout.
+    #[pyo3(signature = (command, options=None))]
+    fn exec_background(
+        &self,
+        py: Python<'_>,
+        command: Vec<String>,
+        options: Option<&Bound<'_, PyDict>>,
+    ) -> PyResult<u32> {
+        let opts = parse_exec_opts(options)?;
+        let runtime = runtime().map_err(err)?;
+        py.allow_threads(|| runtime.exec_background(&self.name, command, opts))
+            .map_err(err)
+    }
+
     /// Run a command and wait for it. With `cancel`, another thread can kill
     /// it through that `ExecCanceller`; the call then raises `[CANCELLED]`.
     #[pyo3(signature = (command, options=None, cancel=None))]

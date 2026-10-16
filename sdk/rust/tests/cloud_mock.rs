@@ -1341,6 +1341,9 @@ fn the_cloud_platform_surface_reaches_the_right_routes() {
         .exec_with(["sleep", "999"], ExecOptions::new().background(true))
         .expect("background exec");
     assert_eq!(result.pid, Some(4242));
+    machine
+        .exec_with(["cat"], ExecOptions::new().stdin_text("piped"))
+        .expect("exec with stdin text");
     assert_eq!(machine.logs(5).expect("logs"), "boot ok\nserving\n");
     assert!(machine.export_artifact().expect("export")["reference"].is_string());
     assert_eq!(machine.info().expect("info")["id"], "m-9");
@@ -1360,12 +1363,15 @@ fn the_cloud_platform_surface_reaches_the_right_routes() {
         .find(|r| r.path.starts_with("/v1/machines?"))
         .expect("a labeled list request");
     assert!(list.path.contains("label=team%3Dx"), "{}", list.path);
-    let exec = sent
+    let execs: Vec<serde_json::Value> = sent
         .iter()
-        .find(|r| r.path == "/v1/machines/m-9/exec")
-        .expect("an exec request");
-    let body: serde_json::Value = serde_json::from_str(&exec.body).expect("valid JSON body");
-    assert_eq!(body["background"], true);
+        .filter(|r| r.path == "/v1/machines/m-9/exec")
+        .map(|r| serde_json::from_str(&r.body).expect("valid JSON body"))
+        .collect();
+    assert_eq!(execs.len(), 2);
+    assert_eq!(execs[0]["background"], true);
+    assert!(execs[0].get("stdin").is_none(), "{}", execs[0]);
+    assert_eq!(execs[1]["stdin"], "piped");
     assert!(sent
         .iter()
         .any(|r| r.path == "/v1/machines/m-9/logs?tail=5"));

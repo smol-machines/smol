@@ -63,6 +63,11 @@ pub(crate) fn dispatch(op: &str, args: Value, payload: &mut Payload) -> CallResu
         "fork" => fork(parse(args)?),
         "fork_batch" => fork_batch(parse(args)?),
         "exec" => exec(parse(args)?),
+        "exec_background" => {
+            let a: ExecArgs = parse(args)?;
+            let pid = rt()?.exec_background(&a.name, a.command, exec_options(a.options)?)?;
+            Ok(json!(pid))
+        }
         "run" => run(parse(args)?),
         "pull_image" => {
             let a: ImageArgs = parse(args)?;
@@ -420,6 +425,7 @@ struct ExecOptions {
     workdir: Option<String>,
     timeout_ms: Option<u64>,
     user: Option<String>,
+    stdin: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -457,7 +463,7 @@ fn exec_options(o: ExecOptions) -> Result<smolvm::embedded::ExecOptions, CallErr
         workdir: o.workdir,
         timeout: o.timeout_ms.map(Duration::from_millis),
         user: o.user,
-        ..Default::default()
+        stdin: o.stdin,
     })
 }
 
