@@ -31,6 +31,9 @@ pub struct ExecOptions {
     /// Keep the command's stdin open and writable through [`ExecStream::stdin`].
     /// [`crate::Machine::exec_stream`] and local machines only.
     pub stdin: bool,
+    /// Text written to the command's stdin, which is then closed: the
+    /// Python and Node SDKs' `stdin`.
+    pub stdin_text: Option<String>,
 }
 
 impl ExecOptions {
@@ -63,7 +66,7 @@ impl ExecOptions {
         self
     }
 
-    /// Start the command detached. Cloud only.
+    /// Start the command detached and return its pid at once.
     pub fn background(mut self, background: bool) -> Self {
         self.background = background;
         self
@@ -72,6 +75,12 @@ impl ExecOptions {
     /// Give the command a pseudo-terminal.
     pub fn tty(mut self, tty: bool) -> Self {
         self.tty = tty;
+        self
+    }
+
+    /// Write this text to the command's stdin, then close it.
+    pub fn stdin_text(mut self, text: impl Into<String>) -> Self {
+        self.stdin_text = Some(text.into());
         self
     }
 

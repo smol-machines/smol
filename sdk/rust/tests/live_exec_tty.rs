@@ -89,6 +89,16 @@ fn background_exec_returns_its_pid_and_keeps_running_on_a_real_machine() {
     machine.start().expect("start");
     machine.wait_until_ready().expect("ready");
 
+    let piped = machine
+        .exec_with(["cat"], ExecOptions::new().stdin_text("from stdin\n"))
+        .expect("exec with stdin text");
+    assert_eq!(
+        piped.stdout_utf8(),
+        "from stdin\n",
+        "{}",
+        piped.stderr_utf8()
+    );
+
     let started = std::time::Instant::now();
     let bg = machine
         .exec_with(
