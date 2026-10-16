@@ -71,6 +71,11 @@ func TestE2ELifecycle(t *testing.T) {
 		t.Fatalf("Exec with env/workdir = %q, %v", env.Stdout, err)
 	}
 
+	piped, err := m.Exec(ctx, []string{"cat"}, &ExecOptions{Stdin: "from stdin\n"})
+	if err != nil || piped.Stdout != "from stdin\n" {
+		t.Fatalf("Exec with Stdin = %q, %v", piped.Stdout, err)
+	}
+
 	// A background exec returns at once with its pid; the command keeps
 	// running and writes its file only after the call has returned.
 	bgStart := time.Now()

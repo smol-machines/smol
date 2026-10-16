@@ -167,13 +167,14 @@ type nativeExecOptions struct {
 	Workdir   string      `json:"workdir,omitempty"`
 	TimeoutMS int64       `json:"timeout_ms,omitempty"`
 	User      string      `json:"user,omitempty"`
+	Stdin     string      `json:"stdin,omitempty"`
 }
 
 func toNativeExec(o *ExecOptions) nativeExecOptions {
 	if o == nil {
 		return nativeExecOptions{}
 	}
-	n := nativeExecOptions{Env: envList(o.Env), Workdir: o.Workdir, User: o.User}
+	n := nativeExecOptions{Env: envList(o.Env), Workdir: o.Workdir, User: o.User, Stdin: o.Stdin}
 	if o.Timeout > 0 {
 		n.TimeoutMS = max(1, o.Timeout.Milliseconds())
 	}

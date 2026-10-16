@@ -386,6 +386,7 @@ type commandRequest struct {
 	TimeoutSeconds *int64            `json:"timeoutSeconds"`
 	User           *string           `json:"user,omitempty"`
 	Background     bool              `json:"background,omitempty"`
+	Stdin          *string           `json:"stdin,omitempty"`
 }
 
 func timeoutSeconds(d time.Duration) int64 {
@@ -411,6 +412,9 @@ func newCommandRequest(command []string, opts *ExecOptions) commandRequest {
 		r.User = &opts.User
 	}
 	r.Background = opts.Background
+	if opts.Stdin != "" {
+		r.Stdin = &opts.Stdin
+	}
 	return r
 }
 

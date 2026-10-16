@@ -355,8 +355,12 @@ type ExecOptions struct {
 	// default both. Ignored locally.
 	Output string
 	// Background starts the command detached and returns at once with its
-	// Pid, leaving it running (a dev server, an agent). It takes no timeout.
+	// Pid, leaving it running (a dev server, an agent). It takes no timeout
+	// and no Stdin.
 	Background bool
+	// Stdin is UTF-8 text written to the command's stdin, which is then
+	// closed. Empty means no input.
+	Stdin string
 }
 
 // ExecResult is a finished command.

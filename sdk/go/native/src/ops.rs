@@ -425,6 +425,7 @@ struct ExecOptions {
     workdir: Option<String>,
     timeout_ms: Option<u64>,
     user: Option<String>,
+    stdin: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -462,7 +463,7 @@ fn exec_options(o: ExecOptions) -> Result<smolvm::embedded::ExecOptions, CallErr
         workdir: o.workdir,
         timeout: o.timeout_ms.map(Duration::from_millis),
         user: o.user,
-        ..Default::default()
+        stdin: o.stdin,
     })
 }
 

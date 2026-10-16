@@ -663,8 +663,11 @@ func TestCloudBackgroundExecSendsTheFlagAndReturnsThePid(t *testing.T) {
 	if body["background"] != true || res.Pid != 4242 {
 		t.Fatalf("background = %v, pid = %d; want true, 4242", body["background"], res.Pid)
 	}
-	if _, err := tr.exec(context.Background(), []string{"true"}, nil); err != nil || body["background"] != nil {
-		t.Fatalf("a plain exec sent background = %v (%v)", body["background"], err)
+	if _, err := tr.exec(context.Background(), []string{"true"}, nil); err != nil || body["background"] != nil || body["stdin"] != nil {
+		t.Fatalf("a plain exec sent background = %v, stdin = %v (%v)", body["background"], body["stdin"], err)
+	}
+	if _, err := tr.exec(context.Background(), []string{"cat"}, &ExecOptions{Stdin: "piped"}); err != nil || body["stdin"] != "piped" {
+		t.Fatalf("stdin = %v (%v); want piped", body["stdin"], err)
 	}
 }
 
