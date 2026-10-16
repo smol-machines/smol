@@ -65,6 +65,21 @@ async function main(): Promise<void> {
     const readBack = await machine.readFile('/tmp/smol-e2e.txt');
     check('file round-trip', readBack.toString() === payload, JSON.stringify(readBack.toString()));
 
+    // A background exec returns at once with its pid, and the command keeps
+    // running: it writes its file only after the call has returned.
+    const bgStarted = Date.now();
+    const bg = await machine.exec(['sh', '-c', 'sleep 3; echo done > /tmp/bg-done'], { background: true });
+    const bgTook = Date.now() - bgStarted;
+    check('background exec returns at once with its pid',
+      bgTook < 3000 && typeof bg.pid === 'number' && bg.pid > 0 && bg.stdout === `pid=${bg.pid}\n`,
+      `${bgTook}ms pid=${bg.pid} stdout=${JSON.stringify(bg.stdout)}`);
+    let bgDone = '';
+    for (let i = 0; i < 60 && bgDone === ''; i++) {
+      await new Promise((r) => setTimeout(r, 500));
+      bgDone = (await machine.exec(['sh', '-c', 'cat /tmp/bg-done 2>/dev/null'])).stdout;
+    }
+    check('background command finished after exec returned', bgDone === 'done\n', JSON.stringify(bgDone));
+
     // 5) streaming exec collects an exit event
     let sawExit = false;
     let streamedOut = '';

@@ -21,8 +21,9 @@ pub struct ExecOptions {
     /// SDK first checks that the control plane applies it, and refuses with
     /// [`crate::ErrorKind::NotSupported`] before running anything if it would not.
     pub user: Option<String>,
-    /// Cloud only: start the command detached and return at once with its
-    /// [`ExecResult::pid`], leaving it running (a dev server, an agent).
+    /// Start the command detached and return at once with its
+    /// [`ExecResult::pid`], leaving it running (a dev server, an agent). It
+    /// takes no timeout, terminal or stdin.
     pub background: bool,
     /// Give the command a pseudo-terminal. Output then arrives on stdout only.
     /// [`crate::Machine::exec_stream`] and local machines only.

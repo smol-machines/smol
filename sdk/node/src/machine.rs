@@ -723,6 +723,23 @@ impl NapiMachine {
         })
     }
 
+    /// Start a command without waiting for it and return its guest pid. It
+    /// keeps running after this returns; it takes no stdin and no timeout.
+    #[napi]
+    pub async fn exec_background(
+        &self,
+        command: Vec<String>,
+        options: Option<ExecOptions>,
+    ) -> napi::Result<u32> {
+        let runtime = runtime().into_napi()?;
+        let name = self.name.clone();
+        let options = parse_exec_options(options);
+        tokio::task::spawn_blocking(move || runtime.exec_background(&name, command, options))
+            .await
+            .map_err(join_error)?
+            .into_napi()
+    }
+
     /// Pull an OCI image and run a command inside it.
     ///
     /// This pulls the image (if not already cached), creates an overlay rootfs,

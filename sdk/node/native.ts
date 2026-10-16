@@ -166,6 +166,7 @@ export interface NapiMachine {
     command: string[],
     options?: NativeExecOptions,
   ): Promise<NativeExecResult>;
+  execBackground(command: string[], options?: NativeExecOptions): Promise<number>;
   run(
     image: string,
     command: string[],

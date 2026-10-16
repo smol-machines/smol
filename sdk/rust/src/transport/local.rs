@@ -480,6 +480,37 @@ impl LocalTransport {
             .ok_or_else(|| Error::new(ErrorKind::NotFound, format!("VM not found: {}", self.name)))
     }
 
+    /// Start a command and return at once, as the cloud does: its pid in
+    /// [`ExecResult::pid`] and as `pid=<n>` on stdout.
+    fn exec_background(&self, command: &[String], options: &ExecOptions) -> Result<ExecResult> {
+        if options.timeout.is_some() || options.tty || options.stdin {
+            return Err(Error::new(
+                ErrorKind::Config,
+                "a background command takes no timeout, terminal or stdin",
+            ));
+        }
+        let mut args = self.exec_args(command, options);
+        args.insert(2, "--detach".into());
+        let borrowed: Vec<&str> = args.iter().map(String::as_str).collect();
+        let (code, stdout, stderr) = self.cli(&borrowed)?;
+        if code != 0 {
+            return Err(cli_error(&borrowed, &stderr, &stdout));
+        }
+        let printed = String::from_utf8_lossy(&stdout);
+        let pid: u32 = printed.trim().parse().map_err(|_| {
+            Error::new(
+                ErrorKind::Other,
+                format!("background exec printed no pid: {printed:?}"),
+            )
+        })?;
+        Ok(ExecResult {
+            exit_code: 0,
+            stdout: format!("pid={pid}\n").into_bytes(),
+            stderr: Vec::new(),
+            pid: Some(pid),
+        })
+    }
+
     fn exec_args<'a>(&'a self, command: &'a [String], options: &'a ExecOptions) -> Vec<String> {
         let mut args = vec![
             "machine".into(),
@@ -692,6 +723,9 @@ impl Transport for LocalTransport {
     }
 
     fn exec(&self, command: Vec<String>, options: ExecOptions) -> Result<ExecResult> {
+        if options.background {
+            return self.exec_background(&command, &options);
+        }
         let args = self.exec_args(&command, &options);
         let borrowed: Vec<&str> = args.iter().map(String::as_str).collect();
         let (exit_code, stdout, stderr) = self.cli(&borrowed)?;
@@ -1351,6 +1385,36 @@ mod io_tests {
     }
 
     #[test]
+    fn a_background_exec_detaches_and_returns_the_pid() {
+        let dir = tempfile::tempdir().unwrap();
+        let log = dir.path().join("args");
+        let transport = cli(
+            dir.path(),
+            &format!("echo \"$*\" > {}\necho 4242", log.display()),
+        );
+        let result = transport
+            .exec(
+                vec!["sleep".into(), "9".into()],
+                ExecOptions::new().background(true),
+            )
+            .unwrap();
+        assert_eq!(result.pid, Some(4242));
+        assert_eq!(result.stdout_utf8(), "pid=4242\n");
+        let args = std::fs::read_to_string(&log).unwrap();
+        assert!(
+            args.starts_with("machine exec --detach --name test"),
+            "{args}"
+        );
+        let refused = transport.exec(
+            vec!["true".into()],
+            ExecOptions::new()
+                .background(true)
+                .timeout(std::time::Duration::from_secs(1)),
+        );
+        assert_eq!(refused.unwrap_err().kind(), crate::ErrorKind::Config);
+    }
+
+    #[test]
     fn a_tty_or_stdin_exec_adds_the_cli_flags_and_opens_stdin() {
         let dir = tempfile::tempdir().unwrap();
         let log = dir.path().join("args");
@@ -1442,13 +1506,16 @@ mod io_tests {
     fn streaming_preserves_bytes_before_exit_and_delivers_partial_lines() {
         let dir = tempfile::tempdir().unwrap();
         let transport = cli(dir.path(), "test \"$3\" = --stream\nprintf 'first\\000'\nsleep 1\nprintf '\\nlast\\n'\nprintf 'error\\n' >&2\nexit 7");
-        let start = Instant::now();
         let mut stream = transport
             .exec_stream(vec!["true".into()], ExecOptions::new())
             .unwrap();
         assert_eq!(stream.next(), Some(ExecEvent::Stdout(b"first\0".to_vec())));
-        assert!(start.elapsed() < Duration::from_millis(800));
+        // Delivered before the script's one-second sleep, not buffered until it
+        // exits. Measured from the first chunk, so a slow spawn under a loaded
+        // test run cannot fail it.
+        let first = Instant::now();
         let events: Vec<_> = stream.collect();
+        assert!(first.elapsed() >= Duration::from_millis(800));
         assert_eq!(events.last(), Some(&ExecEvent::Exit(7)));
         let mut out = Vec::new();
         let mut err = Vec::new();

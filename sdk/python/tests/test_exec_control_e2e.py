@@ -67,6 +67,22 @@ def suite(label: str, m: Machine) -> None:
     check("breaking out of the loop kills the command", not beating(m, "hb-break"))
 
     started = time.monotonic()
+    bg = m.exec(heartbeat("hb-bg"), ExecOptions(background=True))
+    took = time.monotonic() - started
+    check(
+        "a background exec returns at once with its pid",
+        took < 5 and bg.pid is not None and bg.pid > 0 and bg.stdout == f"pid={bg.pid}\n",
+        f"{took:.2f}s pid {bg.pid} stdout {bg.stdout!r}",
+    )
+    time.sleep(1)
+    check("the background command keeps running after exec returns", beating(m, "hb-bg"))
+    try:
+        m.exec(["true"], ExecOptions(background=True, stdin="x"))
+        check("a background exec refuses stdin", False, "no error")
+    except SmolError as e:
+        check("a background exec refuses stdin", True, str(e)[:60])
+
+    started = time.monotonic()
     timed = m.exec(["sleep", "10"], ExecOptions(timeout=1.5))
     took = time.monotonic() - started
     check("a 1.5 s timeout ends the command", took < 6, f"{took:.2f}s exit {timed.exit_code}")
