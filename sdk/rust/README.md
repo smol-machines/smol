@@ -261,6 +261,24 @@ println!("{} CPUs, {} MiB", resources.cpus, resources.memory_mib);
 # }
 ```
 
+## Stats
+
+Sample a running local machine's CPU and memory. CPU is measured over about
+half a second, where 100.0 is one busy CPU; memory is the guest's own figure.
+
+```rust,no_run
+# fn main() -> smolmachines::Result<()> {
+use smolmachines::Machine;
+
+let machine = Machine::attach("agent")?;
+let stats = machine.stats()?;
+if let (Some(cpu), Some(memory)) = (stats.cpu_percent, stats.memory) {
+    println!("{cpu:.0}% CPU, {} of {} bytes used", memory.used_bytes, memory.total_bytes);
+}
+# Ok(())
+# }
+```
+
 ## Checkpoints
 
 For a managed save under the same machine identity, use `machine.pause()?` and

@@ -263,6 +263,38 @@ pub struct MachineResources {
     pub overlay_gib: Option<u64>,
 }
 
+/// A running machine's CPU and memory, sampled by the engine.
+#[derive(Debug, Clone, PartialEq)]
+pub struct MachineStats {
+    /// vCPUs the machine has.
+    pub cpus: u8,
+    /// CPU the machine used over a short window, where 100.0 is one busy CPU.
+    /// `None` when the engine could not sample its process.
+    pub cpu_percent: Option<f64>,
+    /// Memory as the guest sees it. `None` when the guest agent is too old to
+    /// report it.
+    pub memory: Option<GuestMemory>,
+}
+
+/// Guest memory in bytes, from the guest's `/proc/meminfo`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GuestMemory {
+    /// RAM the guest kernel manages.
+    pub total_bytes: u64,
+    /// Memory the guest cannot hand back on demand: total minus available.
+    pub used_bytes: u64,
+    /// Memory available for new allocations without swapping.
+    pub available_bytes: u64,
+    /// Memory never allocated, or released and not reused.
+    pub free_bytes: u64,
+    /// Page cache, counted inside `available_bytes`.
+    pub cached_bytes: u64,
+    /// Swap configured in the guest.
+    pub swap_total_bytes: u64,
+    /// Swap in use.
+    pub swap_used_bytes: u64,
+}
+
 /// What a local capture cost and produced.
 #[derive(Debug, Clone)]
 pub struct CheckpointResult {
@@ -1027,6 +1059,12 @@ impl Machine {
     /// Copy guest-local staged mounts back to their host sources. Local only.
     pub fn sync(&self) -> Result<()> {
         self.transport.sync()
+    }
+
+    /// CPU and memory of this running machine, sampled over about half a
+    /// second. Local only.
+    pub fn stats(&self) -> Result<MachineStats> {
+        self.transport.stats()
     }
 
     /// Metered usage and cost so far. Cloud only.
