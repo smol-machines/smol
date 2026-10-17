@@ -87,6 +87,14 @@ pub enum MachineSubcommand {
     #[command(name = "checkpoint-prune")]
     CheckpointPrune(crate::commands::checkpoint::CheckpointPruneCmd),
 
+    /// Show the history a local checkpoint carries, or every checkpoint in a store
+    #[command(name = "checkpoint-log")]
+    CheckpointLog(smolvm::cli::pack::CheckpointLogCmd),
+
+    /// Prepare a local incremental checkpoint for fast restores without starting a machine
+    #[command(name = "checkpoint-warm")]
+    CheckpointWarm(smolvm::cli::pack::WarmCheckpointCmd),
+
     /// Restore a portable rollback point as a running fork source
     Restore(crate::commands::restore::RestoreCmd),
 
@@ -151,6 +159,8 @@ impl MachineCmd {
             MachineSubcommand::Checkpoint(cmd) => cmd.run(),
             MachineSubcommand::Move(cmd) => cmd.run(),
             MachineSubcommand::CheckpointPrune(cmd) => cmd.run(),
+            MachineSubcommand::CheckpointLog(cmd) => Ok(cmd.run()?),
+            MachineSubcommand::CheckpointWarm(cmd) => Ok(cmd.run()?),
             MachineSubcommand::Restore(cmd) => cmd.run(),
             // maintenance
             MachineSubcommand::Images(cmd) => cmd.run(),
