@@ -26,7 +26,8 @@
   ],
   "type": "module",
   "bin": {
-    "smolmachines-mcp": "dist/index.js"
+    "smolmachines-mcp": "dist/index.js",
+    "smolmachines-mcp-http": "dist/http.js"
   },
   "files": [
     "dist",
@@ -39,7 +40,8 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "start": "node dist/index.js",
-    "test:e2e": "npm run build && tsx test/e2e.ts"
+    "test:e2e": "npm run build && tsx test/e2e.ts",
+    "test:http": "npm run build && tsx test/http.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.32.1",
