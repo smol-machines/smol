@@ -55,6 +55,9 @@ enum Commands {
     /// Manage framework-aware fused rollout executors and policy versions
     Rollout(commands::rollout::RolloutCmd),
 
+    /// Local journal of machine use: summary, show, export, share
+    Usage(commands::usage::UsageCmd),
+
     /// Internal: boot a VM subprocess (not for direct use)
     #[command(name = "_boot-vm", hide = true)]
     BootVm {
@@ -136,6 +139,9 @@ fn main() {
             init_logging(0);
             if let Some(config_path) = args.get(2) {
                 let result = boot_vm(std::path::PathBuf::from(config_path));
+                // Best-effort, hourly, only when the operator turned sharing on.
+                smolvm::usage::share_if_due();
+
                 if let Err(e) = result {
                     eprintln!("Error: {}", e);
                     std::process::exit(1);
@@ -164,6 +170,7 @@ fn main() {
         Commands::Cloud(cmd) => cmd.run(),
         Commands::Config(cmd) => cmd.run(),
         Commands::Rollout(cmd) => cmd.run(),
+        Commands::Usage(cmd) => cmd.run(),
         Commands::BootVm { config } => boot_vm(config).map_err(|e| anyhow::anyhow!("{}", e)),
         #[cfg(unix)]
         Commands::CudaDaemon { socket } => {
