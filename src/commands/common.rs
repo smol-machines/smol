@@ -770,6 +770,14 @@ pub fn tenant_namespace(
 /// known paired API; `SMOL_CLOUD_API` overrides the base for self-hosted
 /// control planes. Returns the bare tenant id (without the `tenants/` prefix).
 fn me_tenant_namespace(registry: &str, jwt: &str) -> Option<String> {
+    let v = me_lookup(registry, jwt)?;
+    let ns = v.get("registryNamespace")?.as_str()?;
+    ns.strip_prefix("tenants/").map(str::to_string)
+}
+
+/// `GET /v1/me` as JSON. Only the smolmachines registry has a known paired
+/// API; `SMOL_CLOUD_API` overrides the base for self-hosted control planes.
+fn me_lookup(registry: &str, jwt: &str) -> Option<serde_json::Value> {
     let base = match std::env::var("SMOL_CLOUD_API") {
         Ok(v) if !v.is_empty() => v,
         _ if registry == smolvm::registry::SMOLMACHINES_REGISTRY => {
@@ -790,9 +798,7 @@ fn me_tenant_namespace(registry: &str, jwt: &str) -> Option<String> {
             tracing::debug!(status = %resp.status(), "/v1/me lookup failed; falling back to JWT-derived namespace");
             return None;
         }
-        let v: serde_json::Value = resp.json().await.ok()?;
-        let ns = v.get("registryNamespace")?.as_str()?;
-        ns.strip_prefix("tenants/").map(str::to_string)
+        resp.json().await.ok()
     })
 }
 
@@ -812,10 +818,48 @@ pub fn namespaced_repo(
     if repo == "library" || repo.starts_with("library/") || repo.starts_with("tenants/") {
         return repo.to_string();
     }
-    match tenant_namespace(registry, config) {
+    let me = me_identity(registry, config);
+    // `<handle>/<name>` is the caller's public namespace: leave it where it is.
+    if let Some(handle) = me.as_ref().and_then(|m| m.handle.as_deref()) {
+        if repo
+            .strip_prefix(handle)
+            .is_some_and(|rest| rest.starts_with('/') && rest.len() > 1)
+        {
+            return repo.to_string();
+        }
+    }
+    match me
+        .and_then(|m| m.tenant)
+        .or_else(|| tenant_namespace(registry, config))
+    {
         Some(t) => format!("tenants/{t}/{repo}"),
         None => repo.to_string(),
     }
+}
+
+/// Who the control plane says we are: the tenant namespace and, once
+/// claimed, the handle. `None` when there is no identity token or the
+/// control plane cannot be reached.
+struct MeIdentity {
+    tenant: Option<String>,
+    handle: Option<String>,
+}
+
+fn me_identity(registry: &str, config: &smolvm::registry::RegistryConfig) -> Option<MeIdentity> {
+    let jwt = config.registries.get(registry)?.identity_token.as_ref()?;
+    let v = me_lookup(registry, jwt)?;
+    Some(MeIdentity {
+        tenant: v
+            .get("registryNamespace")
+            .and_then(|n| n.as_str())
+            .and_then(|ns| ns.strip_prefix("tenants/"))
+            .map(str::to_string),
+        handle: v
+            .get("handle")
+            .and_then(|h| h.as_str())
+            .filter(|h| !h.is_empty())
+            .map(str::to_string),
+    })
 }
 
 /// Resolve an artifact reference supplied either positionally (`smol pull
