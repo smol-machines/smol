@@ -28,6 +28,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import weakref
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Callable, Iterable, Iterator, Optional, Protocol
 from urllib.parse import quote
 
@@ -1746,10 +1747,14 @@ class CloudTransport:
             CloudTransport(self._base, self._key, c["id"], c.get("name") or c["id"])
             for c in clones
         ]
-        # Clones come back already forked/started; wait for each so every returned
-        # handle is usable.
-        for t in transports:
-            _wait_for_ready(self._base, self._key, t._id)
+        # Clones come back already forked/started; wait for them in parallel, as the
+        # Node and Go SDKs do, so a batch costs one readiness wait rather than one
+        # round trip per child.
+        if transports:
+            with ThreadPoolExecutor(max_workers=min(32, len(transports))) as pool:
+                waits = [pool.submit(_wait_for_ready, self._base, self._key, t._id) for t in transports]
+                for wait in waits:
+                    wait.result()
         return transports
 
     def assign(
