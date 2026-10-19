@@ -51,7 +51,7 @@ impl StatusCmd {
                 "pid": manager.child_pid(),
                 "cpus": record.as_ref().map(|r| r.cpus),
                 "memory_mib": record.as_ref().map(|r| r.mem),
-                "image": record.as_ref().and_then(|r| r.image.clone()),
+                "image": record.as_ref().and_then(|r| r.display_image()),
                 "network": record.as_ref().map(|r| r.network),
                 "mounts": record.as_ref().map(|r| r.mounts.len() + r.staged_mounts.len()),
             });

@@ -136,7 +136,7 @@ fn list_local() -> Result<Vec<MachineRef>> {
             name: Some(name.clone()),
             id: name.clone(),
             state: record.actual_state().to_string(),
-            source: record.image.clone(),
+            source: record.display_image().map(str::to_owned),
             cpus: Some(record.cpus as u32),
             memory_mib: Some(record.mem),
             labels: record.labels.clone(),
