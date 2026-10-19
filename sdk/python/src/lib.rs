@@ -893,7 +893,7 @@ impl Machine {
                                 .collect(),
                             branchable: record.forkable_on_start(),
                             persistent: !record.ephemeral,
-                            image: record.image,
+                            image: record.display_image().map(str::to_owned),
                             created_at: record.created_at,
                             name: record.name,
                         }

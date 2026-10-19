@@ -731,7 +731,7 @@ fn list() -> CallResult {
             json!({
                 "name": record.name,
                 "state": state,
-                "image": record.image,
+                "image": record.display_image(),
                 "labels": record.labels,
                 "pid": pid,
                 "persistent": !record.ephemeral,
