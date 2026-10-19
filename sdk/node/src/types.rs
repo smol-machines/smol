@@ -117,7 +117,7 @@ impl MachineSummary {
         MachineSummary {
             state,
             pid,
-            image: record.image.clone(),
+            image: record.display_image().map(str::to_owned),
             labels: record
                 .labels
                 .iter()
