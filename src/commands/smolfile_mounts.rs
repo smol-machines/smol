@@ -110,7 +110,7 @@ pub fn confirm(smolfile: &Path, mounts: &[VettedMount], assume_yes: bool) -> any
         for m in mounts {
             let note = match m.mode {
                 "rw" => "  (writable: code in the machine can change these files)",
-                "staged" => "  (copied in)",
+                "staged" => "  (writable: changes are copied back to these files in batches)",
                 _ => "",
             };
             writeln!(
