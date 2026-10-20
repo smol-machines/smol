@@ -57,7 +57,7 @@ Global behavior:
 | Command | Description |
 |---------|-------------|
 | `smol file init` | Scaffold a `Smolfile` in the current directory. |
-| `smol file up` / `smol file down` | Bring the `Smolfile`-defined machine up / down. |
+| `smol file up` / `smol file down` | Bring the `Smolfile`-defined machine up / down. A Smolfile's `volumes` are read-only unless marked `:rw`, must sit inside the Smolfile's directory (share another with `--allow-mount PATH`), and are shown for approval the first time and whenever they change (`--yes` approves without asking). |
 
 ## Fused policy rollouts — `smol rollout …`
 
