@@ -45,16 +45,17 @@ impl StatusCmd {
             .and_then(|db| db.get_vm(&name).ok().flatten());
 
         if self.json {
-            let obj = serde_json::json!({
-                "name": name,
-                "running": is_running,
-                "pid": manager.child_pid(),
-                "cpus": record.as_ref().map(|r| r.cpus),
-                "memory_mib": record.as_ref().map(|r| r.mem),
-                "image": record.as_ref().and_then(|r| r.display_image()),
-                "network": record.as_ref().map(|r| r.network),
-                "mounts": record.as_ref().map(|r| r.mounts.len() + r.staged_mounts.len()),
-            });
+            // The engine's object, so `smol` and `smolvm` report a machine with
+            // the same fields (state, labels, network, ...). `running` is
+            // smol's own: whether the guest agent answered just now.
+            let mut obj = match record.as_ref() {
+                Some(record) => smolvm::cli::vm_common::machine_status_json(&name, record),
+                None => serde_json::json!({ "name": name }),
+            };
+            if let Some(fields) = obj.as_object_mut() {
+                fields.insert("running".into(), serde_json::json!(is_running));
+                fields.insert("pid".into(), serde_json::json!(manager.child_pid()));
+            }
             println!("{}", serde_json::to_string_pretty(&obj)?);
         } else if is_running {
             println!("Machine '{}': running", name);
