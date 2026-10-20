@@ -73,7 +73,7 @@ impl StartCmd {
                     return self.start_default();
                 }
                 anyhow::bail!(
-                    "machine '{}' not found. Create it first with: smol machine create {}",
+                    "machine '{}' not found. Create it first with: smol machine create --name {}",
                     name,
                     name
                 );
