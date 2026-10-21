@@ -15,12 +15,15 @@ from __future__ import annotations
 
 import atexit
 import base64
+import http.client
 import json
 import math
 import os
 import platform
 import re
+import select
 import socket
+import ssl
 import sys
 import threading
 import time
@@ -28,6 +31,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import weakref
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Callable, Iterable, Iterator, Optional, Protocol
 from urllib.parse import quote
 
@@ -754,6 +758,8 @@ class LocalTransport:
         """Run a command and wait. ``cancel`` (from :meth:`canceller`) lets
         another thread kill it."""
         options = _native_exec_options(opts)
+        if opts is not None and opts.background:
+            return self._exec_background(command, options, cancel)
         try:
             if cancel is None:
                 r = self._inner.exec(command, options)
@@ -768,6 +774,18 @@ class LocalTransport:
             stdout_bytes=r.stdout.encode("utf-8", "replace"),
             stderr_bytes=r.stderr.encode("utf-8", "replace"),
         )
+
+    def _exec_background(self, command: list[str], options: Optional[dict], cancel: Any) -> ExecResult:
+        """Start a command and return at once, as the cloud does: its pid in
+        ``pid`` and as ``pid=<n>`` on stdout."""
+        if cancel is not None:
+            raise InvalidConfigError("a background command cannot be cancelled; kill its pid instead")
+        try:
+            pid = self._inner.exec_background(command, options)
+        except Exception as e:  # noqa: BLE001 - re-typed below
+            raise wrap_native_error(e) from e
+        stdout = f"pid={pid}\n"
+        return ExecResult(exit_code=0, stdout=stdout, stderr="", stdout_bytes=stdout.encode(), pid=pid)
 
     def canceller(self) -> Any:
         """A token that kills an :meth:`exec` from another thread."""
@@ -1732,10 +1750,14 @@ class CloudTransport:
             CloudTransport(self._base, self._key, c["id"], c.get("name") or c["id"])
             for c in clones
         ]
-        # Clones come back already forked/started; wait for each so every returned
-        # handle is usable.
-        for t in transports:
-            _wait_for_ready(self._base, self._key, t._id)
+        # Clones come back already forked/started; wait for them in parallel, as the
+        # Node and Go SDKs do, so a batch costs one readiness wait rather than one
+        # round trip per child.
+        if transports:
+            with ThreadPoolExecutor(max_workers=min(32, len(transports))) as pool:
+                waits = [pool.submit(_wait_for_ready, self._base, self._key, t._id) for t in transports]
+                for wait in waits:
+                    wait.result()
         return transports
 
     def assign(
@@ -2017,7 +2039,24 @@ def _cloud_fetch_once(
         headers["content-type"] = "application/octet-stream"
         data = raw_body
 
-    req = urllib.request.Request(f"{base_url}{path}", data=data, headers=headers, method=method)
+    url = f"{base_url}{path}"
+    if _CLOUD_POOL.can_pool(url):
+        return _cloud_fetch_pooled(url, method, path, data, headers, accept, timeout)
+    return _cloud_fetch_urllib(url, method, path, data, headers, accept, timeout)
+
+
+def _cloud_fetch_urllib(
+    url: str,
+    method: str,
+    path: str,
+    data: Optional[bytes],
+    headers: dict[str, str],
+    accept: str,
+    timeout: float,
+) -> Any:
+    """``_cloud_fetch_once`` over a new urllib connection: for proxies and
+    redirects, which the pooled path leaves to urllib."""
+    req = urllib.request.Request(url, data=data, headers=headers, method=method)
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             payload = resp.read()
@@ -2041,6 +2080,148 @@ def _cloud_fetch_once(
         raise SmolError("CONNECTION", f"cloud request failed: {reason}") from e
     except TimeoutError as e:
         raise SmolError("TIMEOUT", f"cloud {method} {path} timed out after {timeout}s") from e
+
+
+# How long a pooled connection may sit idle before it is dropped instead of
+# reused. Well inside the keep-alive windows of the load balancer and proxy in
+# front of the API, so a reused connection is rarely one the server has closed.
+_POOL_IDLE_S = 30.0
+# Idle connections kept per host; more open as needed and close when done.
+_POOL_MAX_IDLE = 64
+# Methods the server treats as idempotent: safe to send again when a reused
+# connection turns out to have been closed by the server.
+_IDEMPOTENT_METHODS = frozenset({"GET", "HEAD", "PUT", "DELETE"})
+
+
+class _CloudConnectionPool:
+    """Keep-alive connections to the cloud API, reused across calls.
+
+    A new connection costs a TCP and a TLS handshake, three round trips before
+    the request is sent: from a laptop, 193 ms per call against 64 ms on a kept
+    connection. Each connection serves one call at a time and returns to the
+    pool only after its response is read in full."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._idle: dict[tuple[str, str, int], list[tuple[http.client.HTTPConnection, float]]] = {}
+        self._tls = ssl.create_default_context()
+
+    def can_pool(self, url: str) -> bool:
+        """Whether ``url`` can go over a pooled connection. Requests urllib
+        would send through a proxy keep using urllib."""
+        parts = urllib.parse.urlsplit(url)
+        if parts.scheme not in ("http", "https") or not parts.hostname:
+            return False
+        proxies = urllib.request.getproxies()
+        return parts.scheme not in proxies or bool(urllib.request.proxy_bypass(parts.hostname))
+
+    def take(self, scheme: str, host: str, port: int, timeout: float) -> tuple[http.client.HTTPConnection, bool]:
+        """An idle connection to the host, or a new one. Returns whether it was
+        reused."""
+        key = (scheme, host, port)
+        now = time.monotonic()
+        with self._lock:
+            idle = self._idle.get(key, [])
+            while idle:
+                conn, since = idle.pop()
+                if now - since < _POOL_IDLE_S and not _server_closed(conn):
+                    conn.timeout = timeout
+                    if conn.sock is not None:
+                        conn.sock.settimeout(timeout)
+                    return conn, True
+                conn.close()
+        if scheme == "https":
+            return http.client.HTTPSConnection(host, port, timeout=timeout, context=self._tls), False
+        return http.client.HTTPConnection(host, port, timeout=timeout), False
+
+    def give_back(self, scheme: str, host: str, port: int, conn: http.client.HTTPConnection) -> None:
+        with self._lock:
+            idle = self._idle.setdefault((scheme, host, port), [])
+            if len(idle) < _POOL_MAX_IDLE:
+                idle.append((conn, time.monotonic()))
+                return
+        conn.close()
+
+    def clear(self) -> None:
+        """Forget every idle connection without closing it: after a fork the
+        parent still owns those sockets."""
+        with self._lock:
+            self._idle = {}
+
+
+def _server_closed(conn: http.client.HTTPConnection) -> bool:
+    """Whether the server has closed an idle connection. An idle keep-alive
+    connection has nothing to read until the next request, so a readable socket
+    means the server has closed it (or is closing it)."""
+    if conn.sock is None:
+        return True
+    try:
+        readable, _, _ = select.select([conn.sock], [], [], 0)
+    except (OSError, ValueError):
+        return True
+    return bool(readable)
+
+
+_CLOUD_POOL = _CloudConnectionPool()
+if hasattr(os, "register_at_fork"):
+    os.register_at_fork(after_in_child=_CLOUD_POOL.clear)
+
+
+def _cloud_fetch_pooled(
+    url: str,
+    method: str,
+    path: str,
+    data: Optional[bytes],
+    headers: dict[str, str],
+    accept: str,
+    timeout: float,
+) -> Any:
+    """``_cloud_fetch_once`` over a pooled keep-alive connection, with the same
+    results and errors as the urllib path."""
+    parts = urllib.parse.urlsplit(url)
+    scheme, host = parts.scheme, parts.hostname or ""
+    port = parts.port or (443 if scheme == "https" else 80)
+    target = urllib.parse.urlunsplit(("", "", parts.path or "/", parts.query, ""))
+    headers = {"user-agent": _URLLIB_USER_AGENT, **headers}
+    while True:
+        conn, reused = _CLOUD_POOL.take(scheme, host, port, timeout)
+        try:
+            conn.request(method, target, body=data, headers=headers)
+            resp = conn.getresponse()
+            payload = resp.read()
+        except (TimeoutError, socket.timeout) as e:
+            conn.close()
+            raise SmolError("TIMEOUT", f"cloud {method} {path} timed out after {timeout}s") from e
+        except (http.client.HTTPException, OSError) as e:
+            conn.close()
+            # The server closes idle keep-alive connections on its own. Sending
+            # on one fails before the server reads the request, so a fresh
+            # connection is safe for requests that may be repeated anyway.
+            if reused and method in _IDEMPOTENT_METHODS:
+                continue
+            raise SmolError("CONNECTION", f"cloud request failed: {e}") from e
+        if resp.will_close:
+            conn.close()
+        else:
+            _CLOUD_POOL.give_back(scheme, host, port, conn)
+        if 300 <= resp.status < 400:
+            # urllib follows redirects; let it, so a redirect behaves as before.
+            return _cloud_fetch_urllib(url, method, path, data, headers, accept, timeout)
+        if resp.status >= 400:
+            raise _cloud_error(resp.status, payload.decode(errors="replace"), resp.headers, f"cloud {method} {path}")
+        if accept == "bytes":
+            return payload
+        if accept == "text":
+            return payload.decode(errors="replace")
+        ct = resp.headers.get("content-type", "")
+        if resp.status == 204 or not payload:
+            return None
+        return json.loads(payload) if "application/json" in ct else None
+
+
+# urllib's default user agent, kept so the pooled path looks the same to the
+# server as the urllib path it replaces.
+_URLLIB_USER_AGENT = f"Python-urllib/{sys.version_info.major}.{sys.version_info.minor}"
 
 
 def _cli_config_api_key() -> Optional[str]:

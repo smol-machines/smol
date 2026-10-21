@@ -12,10 +12,12 @@ pub struct DeployCmd {
     #[arg(value_name = "REFERENCE")]
     pub reference: Option<String>,
 
-    /// Deprecated alias — pass the reference positionally instead.
+    /// Deprecated alias — pass the reference positionally instead. `--image`
+    /// is accepted too: it is what `smol run -I` and most docs and agents use.
     #[arg(
         short = 'r',
         long = "ref",
+        alias = "image",
         value_name = "REFERENCE",
         conflicts_with = "reference",
         hide = true
@@ -435,5 +437,32 @@ impl DeployCmd {
             }
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use clap::Parser;
+
+    #[derive(Parser)]
+    struct Cli {
+        #[command(flatten)]
+        deploy: super::DeployCmd,
+    }
+
+    // The console quickstart and most docs wrote `--image`; it must keep working
+    // alongside the positional reference.
+    #[test]
+    fn deploy_accepts_image_ref_and_positional_forms() {
+        for argv in [
+            &["smol", "--image", "library/alpine"][..],
+            &["smol", "--ref", "library/alpine"],
+            &["smol", "library/alpine"],
+        ] {
+            let cli = Cli::try_parse_from(argv).unwrap();
+            let reference = cli.deploy.reference.or(cli.deploy.ref_flag);
+            assert_eq!(reference.as_deref(), Some("library/alpine"), "{argv:?}");
+        }
+        assert!(Cli::try_parse_from(["smol", "--image", "a", "b"]).is_err());
     }
 }

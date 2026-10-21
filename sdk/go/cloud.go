@@ -385,6 +385,8 @@ type commandRequest struct {
 	Cwd            *string           `json:"cwd"`
 	TimeoutSeconds *int64            `json:"timeoutSeconds"`
 	User           *string           `json:"user,omitempty"`
+	Background     bool              `json:"background,omitempty"`
+	Stdin          *string           `json:"stdin,omitempty"`
 }
 
 func timeoutSeconds(d time.Duration) int64 {
@@ -408,6 +410,10 @@ func newCommandRequest(command []string, opts *ExecOptions) commandRequest {
 	}
 	if opts.User != "" {
 		r.User = &opts.User
+	}
+	r.Background = opts.Background
+	if opts.Stdin != "" {
+		r.Stdin = &opts.Stdin
 	}
 	return r
 }
@@ -599,7 +605,23 @@ func (t *cloudTransport) exec(ctx context.Context, command []string, opts *ExecO
 	}
 	res.StdoutBytes = decodeExecBytes(r.StdoutB64, res.Stdout)
 	res.StderrBytes = decodeExecBytes(r.StderrB64, res.Stderr)
+	// A detached command reports its pid as `pid=<n>` on stdout.
+	if opts != nil && opts.Background {
+		res.Pid = backgroundPid(res.Stdout)
+	}
 	return res, nil
+}
+
+// backgroundPid reads the `pid=<n>` line a background exec prints; 0 without one.
+func backgroundPid(stdout string) int {
+	for _, line := range strings.Split(stdout, "\n") {
+		if rest, ok := strings.CutPrefix(line, "pid="); ok {
+			if pid, err := strconv.Atoi(strings.TrimSpace(rest)); err == nil {
+				return pid
+			}
+		}
+	}
+	return 0
 }
 
 func (t *cloudTransport) run(context.Context, string, []string, *ExecOptions) (*ExecResult, error) {

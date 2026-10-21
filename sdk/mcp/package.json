@@ -1,6 +1,6 @@
 {
   "name": "smolmachines-mcp",
-  "version": "1.28.1",
+  "version": "1.29.0",
   "description": "MCP server that gives any agent its own branchable microVM: create a machine of your environment, run commands, branch before risky steps, keep or discard, checkpoint and restore. Local by default, same tools on smol cloud.",
   "license": "Apache-2.0",
   "author": "smol-machines",
@@ -26,7 +26,8 @@
   ],
   "type": "module",
   "bin": {
-    "smolmachines-mcp": "dist/index.js"
+    "smolmachines-mcp": "dist/index.js",
+    "smolmachines-mcp-http": "dist/http.js"
   },
   "files": [
     "dist",
@@ -39,7 +40,8 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "start": "node dist/index.js",
-    "test:e2e": "npm run build && tsx test/e2e.ts"
+    "test:e2e": "npm run build && tsx test/e2e.ts",
+    "test:http": "npm run build && tsx test/http.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.32.1",

@@ -428,6 +428,11 @@ export declare class NapiMachine {
   /** Execute a command directly in the VM (not in a container). */
   exec(command: Array<string>, options?: ExecOptions | undefined | null): Promise<ExecResult>
   /**
+   * Start a command without waiting for it and return its guest pid. It
+   * keeps running after this returns; it takes no stdin and no timeout.
+   */
+  execBackground(command: Array<string>, options?: ExecOptions | undefined | null): Promise<number>
+  /**
    * Pull an OCI image and run a command inside it.
    *
    * This pulls the image (if not already cached), creates an overlay rootfs,

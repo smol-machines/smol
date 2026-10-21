@@ -71,6 +71,33 @@ func TestE2ELifecycle(t *testing.T) {
 		t.Fatalf("Exec with env/workdir = %q, %v", env.Stdout, err)
 	}
 
+	piped, err := m.Exec(ctx, []string{"cat"}, &ExecOptions{Stdin: "from stdin\n"})
+	if err != nil || piped.Stdout != "from stdin\n" {
+		t.Fatalf("Exec with Stdin = %q, %v", piped.Stdout, err)
+	}
+
+	// A background exec returns at once with its pid; the command keeps
+	// running and writes its file only after the call has returned.
+	bgStart := time.Now()
+	bg, err := m.Exec(ctx, []string{"sh", "-c", "sleep 3; echo done > /tmp/bg-done"}, &ExecOptions{Background: true})
+	if err != nil || bg.Pid <= 0 || bg.Stdout != fmt.Sprintf("pid=%d\n", bg.Pid) || time.Since(bgStart) >= 3*time.Second {
+		t.Fatalf("background Exec = pid %d stdout %q after %s, %v", bg.Pid, bg.Stdout, time.Since(bgStart), err)
+	}
+	deadline := time.Now().Add(60 * time.Second)
+	for {
+		done, err := m.Exec(ctx, []string{"sh", "-c", "cat /tmp/bg-done 2>/dev/null"}, nil)
+		if err == nil && done.Stdout == "done\n" {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the background command never finished: %q, %v", done.Stdout, err)
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+	if _, err := m.Exec(ctx, []string{"true"}, &ExecOptions{Background: true, Timeout: time.Second}); err == nil {
+		t.Fatal("a background exec with a timeout was not refused")
+	}
+
 	// Binary-safe file round trip, including a NUL and invalid UTF-8.
 	payload := []byte(fmt.Sprintf("roundtrip-%d\x00\xff\xfe", time.Now().UnixNano()))
 	if err := m.WriteFile(ctx, "/tmp/smol-e2e.bin", payload, 0o600); err != nil {

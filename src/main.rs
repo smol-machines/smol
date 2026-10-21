@@ -5,10 +5,25 @@ use tracing_subscriber::EnvFilter;
 
 mod commands;
 
+/// `smol --version` names the bundled engine too: the CLI and engine versions
+/// can differ, and the engine's is the one that matters when debugging.
+fn version_line() -> &'static str {
+    static LINE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    LINE.get_or_init(|| {
+        format!(
+            "{} (engine smolvm {})",
+            env!("CARGO_PKG_VERSION"),
+            smolvm::VERSION
+        )
+    })
+}
+
 #[derive(Parser)]
-#[command(name = "smol")]
+// The release wrapper runs this binary as `smol-bin`; name usage lines after
+// the command users type.
+#[command(name = "smol", bin_name = "smol")]
 #[command(about = "Ship and run software with isolation by default")]
-#[command(version)]
+#[command(version = version_line())]
 struct Cli {
     /// Increase log verbosity (repeatable): -v info, -vv debug, -vvv trace.
     /// Logs go to stderr. Overridden by SMOL_LOG / RUST_LOG when either is set.

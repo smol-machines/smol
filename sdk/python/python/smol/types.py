@@ -236,8 +236,9 @@ class ExecOptions:
     lossy text re-encoded; with ``"b64"``, :attr:`ExecResult.stdout` is empty.
     Ignored (both families, as before) on older control planes and locally."""
     background: bool = False
-    """Cloud only: start the command detached and return at once with its
-    :attr:`ExecResult.pid`, leaving it running (a dev server, an agent)."""
+    """Start the command detached and return at once with its
+    :attr:`ExecResult.pid`, leaving it running (a dev server, an agent). It
+    takes no stdin and no timeout."""
 
 
 @dataclass

@@ -9,8 +9,15 @@
 //! machines never touch any of this.
 
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Mutex;
 
 use crate::error::{Error, ErrorKind, Result};
+
+/// Serializes fetches within this process, so threads that ask for a local
+/// machine at the same time wait for one download instead of each starting
+/// their own.
+static FETCH: Mutex<()> = Mutex::new(());
 
 /// Where releases come from.
 const RELEASES: &str = "https://github.com/smol-machines/smolvm/releases/download";
@@ -106,6 +113,14 @@ pub fn ensure_engine() -> Result<PathBuf> {
         return Ok(binary);
     }
 
+    let _fetching = FETCH
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    // Another thread may have fetched it while this one waited.
+    if binary.is_file() {
+        return Ok(binary);
+    }
+
     if std::env::var("SMOLMACHINES_NO_DOWNLOAD").is_ok_and(|v| v != "0") {
         return Err(Error::new(
             ErrorKind::NotFound,
@@ -190,7 +205,14 @@ fn extract(bytes: &[u8], root: &Path) -> Result<()> {
             format!("create {}: {e}", root.display()),
         )
     })?;
-    let staging = root.join(format!(".unpack-{}", std::process::id()));
+    // Unique per call, not just per process: two threads sharing one staging
+    // directory would delete each other's half-unpacked tree.
+    static NEXT_STAGING: AtomicU64 = AtomicU64::new(0);
+    let staging = root.join(format!(
+        ".unpack-{}-{}",
+        std::process::id(),
+        NEXT_STAGING.fetch_add(1, Ordering::Relaxed)
+    ));
     let _ = std::fs::remove_dir_all(&staging);
     std::fs::create_dir_all(&staging)
         .map_err(|e| Error::new(ErrorKind::Storage, format!("stage the engine: {e}")))?;
@@ -259,5 +281,47 @@ mod tests {
             .find(|(_, name)| name.trim() == "x.tar.gz")
             .map(|(digest, _)| digest.to_string());
         assert_eq!(expected.as_deref(), Some("0".repeat(64).as_str()));
+    }
+
+    #[test]
+    fn concurrent_extracts_into_one_cache_all_succeed() {
+        let mut archive = tar::Builder::new(flate2::write::GzEncoder::new(
+            Vec::new(),
+            flate2::Compression::fast(),
+        ));
+        for i in 0..200 {
+            let body = format!("file {i}");
+            let mut header = tar::Header::new_gnu();
+            header.set_size(body.len() as u64);
+            header.set_mode(0o644);
+            header.set_cksum();
+            archive
+                .append_data(
+                    &mut header,
+                    format!("smolvm-0.0.0-test/agent-rootfs/etc/f{i}"),
+                    body.as_bytes(),
+                )
+                .unwrap();
+        }
+        let bytes = archive.into_inner().unwrap().finish().unwrap();
+
+        let root = tempfile::tempdir().unwrap();
+        std::thread::scope(|scope| {
+            let handles: Vec<_> = (0..8)
+                .map(|_| scope.spawn(|| extract(&bytes, root.path())))
+                .collect();
+            for handle in handles {
+                handle.join().unwrap().unwrap();
+            }
+        });
+
+        let unpacked = root.path().join("smolvm-0.0.0-test/agent-rootfs/etc");
+        assert_eq!(std::fs::read_dir(&unpacked).unwrap().count(), 200);
+        let leftovers: Vec<_> = std::fs::read_dir(root.path())
+            .unwrap()
+            .flatten()
+            .filter(|entry| entry.file_name().to_string_lossy().starts_with(".unpack-"))
+            .collect();
+        assert!(leftovers.is_empty(), "staging directories left behind");
     }
 }
