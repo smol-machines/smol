@@ -5,7 +5,8 @@
  * the branch-try-keep flow an agent would:
  *   create (with workspace) → exec → branch → change in the branch →
  *   source untouched → export branch results → delete branch →
- *   checkpoint → restore → list → delete.
+ *   checkpoint → restore → list → delete; then a machine created with
+ *   `persistent: false` is gone once the client disconnects.
  *
  *   cd smol/sdk/mcp && npm install && npm run test:e2e
  *
@@ -34,14 +35,19 @@ type ToolResult = { content: Array<{ type: string; text?: string }>; isError?: b
 
 async function main(): Promise<void> {
   console.log("smolmachines-mcp e2e\n");
-  const client = new Client({ name: "e2e", version: "0" });
-  const transport = new StdioClientTransport({
-    command: process.execPath,
-    args: [path.resolve("dist/index.js")],
-    env: { ...process.env, SMOL_TARGET: "local" } as Record<string, string>,
-    stderr: "inherit",
-  });
-  await client.connect(transport);
+  const connect = async () => {
+    const client = new Client({ name: "e2e", version: "0" });
+    await client.connect(
+      new StdioClientTransport({
+        command: process.execPath,
+        args: [path.resolve("dist/index.js")],
+        env: { ...process.env, SMOL_TARGET: "local" } as Record<string, string>,
+        stderr: "inherit",
+      }),
+    );
+    return client;
+  };
+  let client = await connect();
 
   const call = async (name: string, args: Record<string, unknown> = {}) => {
     const result = (await client.callTool({ name, arguments: args })) as ToolResult;
@@ -156,6 +162,9 @@ async function main(): Promise<void> {
 
     const list = await call("smol_list");
     check("list includes our machines", Array.isArray(list.json) && list.json.some((m: any) => m.machine === src), list.body.slice(0, 200));
+
+    await call("smol_create", { name: `${src}-eph`, persistent: false, memoryMb: 512 });
+    await call("smol_branch", { source: `${src}-eph`, name: `${src}-eph-b` });
   } finally {
     for (const name of [...created].reverse()) {
       await call("smol_delete", { machine: name }).catch(() => undefined);
@@ -164,6 +173,13 @@ async function main(): Promise<void> {
     await rm(out, { recursive: true, force: true });
     await client.close();
   }
+
+  // A client that goes away must not leave behind what it did not ask to keep.
+  client = await connect();
+  const left = (await call("smol_list")).json?.filter((m: any) => m.machine.startsWith(`${src}-eph`)) ?? [];
+  check("disconnect deletes non-persistent machines and their branches", left.length === 0, JSON.stringify(left));
+  for (const m of left.reverse()) await call("smol_delete", { machine: m.machine });
+  await client.close();
 
   console.log(`\n${passed} passed, ${failed} failed`);
   process.exit(failed === 0 ? 0 : 1);

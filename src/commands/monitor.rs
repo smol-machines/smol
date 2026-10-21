@@ -12,6 +12,11 @@ use std::time::Duration;
 
 #[derive(Args, Debug)]
 pub struct MonitorCmd {
+    /// Accepted so scripts can pass `--local` to every machine command; this
+    /// command only manages local machines.
+    #[arg(long = "local")]
+    pub _local: bool,
+
     /// Machine to monitor (default: "default")
     #[arg(short = 'n', long, value_name = "NAME")]
     pub name: Option<String>,

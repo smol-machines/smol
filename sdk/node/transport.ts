@@ -613,12 +613,28 @@ class LocalTransport implements Transport {
   }
 
   async exec(command: string[], opts?: ExecOptions): Promise<RawExec> {
+    if (opts?.background) return this.execBackground(command, opts);
     if (opts?.signal) return collectExec(this.execStream(command, opts), opts.signal);
     try {
       return await this.inner.exec(command, toNativeExecOptions(opts));
     } catch (e) {
       throw wrapNativeError(e);
     }
+  }
+
+  /** Start a command and return at once, as the cloud does: its pid in `pid`
+   *  and as `pid=<n>` on stdout. */
+  private async execBackground(command: string[], opts: ExecOptions): Promise<RawExec> {
+    if (opts.signal) {
+      throw new InvalidConfigError("a background command cannot be cancelled; kill its pid instead");
+    }
+    let pid: number;
+    try {
+      pid = await this.inner.execBackground(command, toNativeExecOptions(opts));
+    } catch (e) {
+      throw wrapNativeError(e);
+    }
+    return { pid, exitCode: 0, stdout: `pid=${pid}\n`, stderr: "" };
   }
 
   async run(

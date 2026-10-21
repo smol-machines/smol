@@ -58,6 +58,7 @@ impl CloudTransport {
                 .map(|t| t.as_nanos().div_ceil(1_000_000_000) as u64),
             user: options.user.clone(),
             background: options.background,
+            stdin: options.stdin_text.clone(),
         }
     }
 

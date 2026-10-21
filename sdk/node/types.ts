@@ -417,8 +417,9 @@ export interface ExecOptions {
    *  Ignored (both families, as before) on older control planes and on the
    *  local target. */
   output?: "text" | "b64" | "both";
-  /** Cloud only: start the command detached and return at once with its
-   *  `pid`, leaving it running (a dev server, an agent) after the call ends. */
+  /** Start the command detached and return at once with its `pid`, leaving
+   *  it running (a dev server, an agent) after the call ends. It takes no
+   *  stdin and no timeout. */
   background?: boolean;
 }
 

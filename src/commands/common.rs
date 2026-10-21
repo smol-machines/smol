@@ -470,9 +470,10 @@ pub fn ensure_connected(name: &str) -> anyhow::Result<(AgentManager, AgentClient
     let manager = get_manager(name)?;
 
     if manager.try_connect_existing().is_none() {
+        // `machine start` runs in its own process, so a start can be in flight
+        // while this one finds no agent yet.
         anyhow::bail!(
-            "machine '{}' is not running. Use 'smol machine start' first.",
-            name
+            "machine '{name}' is not running. Start it with 'smol machine start --name {name}'; if a start is already in progress, retry once it finishes."
         );
     }
 

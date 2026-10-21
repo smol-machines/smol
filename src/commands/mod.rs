@@ -40,6 +40,7 @@ pub mod rollout;
 pub mod run;
 pub mod saved_execution;
 pub mod scale;
+pub mod smolfile_mounts;
 pub mod start;
 pub mod status;
 pub mod stop;

@@ -57,7 +57,7 @@ Global behavior:
 | Command | Description |
 |---------|-------------|
 | `smol file init` | Scaffold a `Smolfile` in the current directory. |
-| `smol file up` / `smol file down` | Bring the `Smolfile`-defined machine up / down. |
+| `smol file up` / `smol file down` | Bring the `Smolfile`-defined machine up / down. A Smolfile's `volumes` are read-only unless marked `:rw`, must sit inside the Smolfile's directory (share another with `--allow-mount PATH`), and are shown for approval the first time and whenever they change (`--yes` approves without asking). |
 
 ## Fused policy rollouts — `smol rollout …`
 
@@ -109,7 +109,7 @@ permission to exec, connect, or expect the workload to respond.
 
 | Command | Description |
 |---------|-------------|
-| `smol cloud deploy --image <ref>` | Create + start a machine on the cloud cluster. Scope egress with `--allow-host`/`--allow-cidr`. |
+| `smol cloud deploy <ref>` | Create + start a machine on the cloud cluster. Scope egress with `--allow-host`/`--allow-cidr`. |
 | `smol cloud ls` | List cloud machines. |
 | `smol cloud rm <id>` | Delete a cloud machine. |
 | `smol cloud scale …` | Scale a cloud deployment. |

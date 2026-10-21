@@ -265,6 +265,10 @@ jobs:
         run: python tests/test_cloud_start_timeout.py
       - name: Cloud no-port readiness probe (mock /v1 server; pure Python)
         run: python tests/test_cloud_ready_no_ports.py
+      - name: Cloud batch branch readiness in parallel (mock /v1 server; pure Python)
+        run: python tests/test_cloud_batch_ready_parallel.py
+      - name: Cloud calls reuse keep-alive connections
+        run: python tests/test_cloud_keepalive.py
       - name: Async-transport tests (AsyncMachine vs mock /v1; pure Python)
         run: python tests/test_async_mock.py
       - name: verifiers runtime adapter (pure mapping; skips runtime checks without verifiers)
