@@ -189,6 +189,26 @@ pub enum NetworkPolicy {
     AllowHosts(Vec<String>),
 }
 
+/// How a local machine's network is provided, like the CLI's `--net-backend`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NetworkBackend {
+    /// libkrun TSI: outbound only, the engine's default for plain networking.
+    Tsi,
+    /// virtio-net with the host-side network stack: published ports, egress
+    /// policy and interception. The engine's default once any of them is set.
+    VirtioNet,
+}
+
+impl NetworkBackend {
+    /// The CLI's name for this backend.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Tsi => "tsi",
+            Self::VirtioNet => "virtio-net",
+        }
+    }
+}
+
 /// What the VM is given. Every field falls back to the engine's default.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Resources {
@@ -208,6 +228,8 @@ pub struct Resources {
     pub gpu_vram_mib: Option<u32>,
     /// Expose CUDA via API remoting.
     pub cuda: Option<bool>,
+    /// Networking backend. Local only.
+    pub network_backend: Option<NetworkBackend>,
 }
 
 /// Everything needed to create a machine.
@@ -259,6 +281,10 @@ pub struct MachineConfig {
     pub branchable: bool,
     /// CIDRs the machine may reach, on the local and cloud targets alike.
     pub allowed_cidrs: Vec<String>,
+    /// Resolver the guest uses instead of the host's. Local only.
+    pub dns: Option<std::net::Ipv4Addr>,
+    /// Forward the host's SSH agent into the guest. Local only.
+    pub ssh_agent: bool,
     /// Idle seconds before the machine stops on its own. Cloud only.
     pub auto_stop_seconds: Option<u64>,
     /// Hard lifetime, after which the machine is deleted. Cloud only.
@@ -342,6 +368,17 @@ impl MachineConfig {
         }
         if self.resources.network.unwrap_or(false) {
             args.push("--net".into());
+        }
+        if let Some(backend) = self.resources.network_backend {
+            args.push("--net-backend".into());
+            args.push(backend.as_str().into());
+        }
+        if let Some(dns) = self.dns {
+            args.push("--dns".into());
+            args.push(dns.to_string());
+        }
+        if self.ssh_agent {
+            args.push("--ssh-agent".into());
         }
         if let Some(storage) = self.resources.storage_gib {
             args.push("--storage".into());
@@ -497,6 +534,24 @@ impl MachineConfig {
             return Err(Error::new(
                 ErrorKind::NotSupported,
                 "allow_host_pattern() is local only; the cloud takes allow_host()",
+            ));
+        }
+        if self.resources.network_backend.is_some() {
+            return Err(Error::new(
+                ErrorKind::NotSupported,
+                "network_backend() is local only; the cloud picks the backend",
+            ));
+        }
+        if self.dns.is_some() {
+            return Err(Error::new(
+                ErrorKind::NotSupported,
+                "dns() is local only; a cloud machine uses the node's resolver",
+            ));
+        }
+        if self.ssh_agent {
+            return Err(Error::new(
+                ErrorKind::NotSupported,
+                "ssh_agent() is local only; a cloud machine has no host agent to forward",
             ));
         }
         use smol_cloud::types as wire;
@@ -751,6 +806,26 @@ impl MachineBuilder {
     /// has not cached.
     pub fn network(mut self, network: bool) -> Self {
         self.config.resources.network = Some(network);
+        self
+    }
+
+    /// Provide the network through this backend. Local only.
+    pub fn network_backend(mut self, backend: NetworkBackend) -> Self {
+        self.config.resources.network_backend = Some(backend);
+        self
+    }
+
+    /// Give the guest this resolver instead of the host's. Implies networking.
+    /// Local only.
+    pub fn dns(mut self, resolver: std::net::Ipv4Addr) -> Self {
+        self.config.dns = Some(resolver);
+        self
+    }
+
+    /// Forward the host's SSH agent into the guest, so git and ssh work there
+    /// without the keys. Local only.
+    pub fn ssh_agent(mut self, forward: bool) -> Self {
+        self.config.ssh_agent = forward;
         self
     }
 
@@ -1080,6 +1155,50 @@ mod tests {
         );
         let error = config.into_cloud_request().unwrap_err();
         assert_eq!(error.kind(), ErrorKind::NotSupported);
+    }
+
+    #[test]
+    fn backend_resolver_and_ssh_agent_become_create_flags_locally() {
+        let config = crate::Machine::builder("m")
+            .image("alpine")
+            .network_backend(NetworkBackend::VirtioNet)
+            .dns("10.0.0.53".parse().unwrap())
+            .ssh_agent(true)
+            .build();
+        let (args, _) = config.into_local_args().unwrap();
+        let joined = args.join(" ");
+        assert!(joined.contains("--net-backend virtio-net"), "{joined}");
+        assert!(joined.contains("--dns 10.0.0.53"), "{joined}");
+        assert!(joined.contains("--ssh-agent"), "{joined}");
+
+        let (args, _) = crate::Machine::builder("m")
+            .network_backend(NetworkBackend::Tsi)
+            .build()
+            .into_local_args()
+            .unwrap();
+        assert!(args.join(" ").contains("--net-backend tsi"));
+
+        let (args, _) = crate::Machine::builder("m")
+            .build()
+            .into_local_args()
+            .unwrap();
+        let joined = args.join(" ");
+        assert!(!joined.contains("--net-backend"), "{joined}");
+        assert!(!joined.contains("--dns"), "{joined}");
+        assert!(!joined.contains("--ssh-agent"), "{joined}");
+    }
+
+    #[test]
+    fn backend_resolver_and_ssh_agent_are_refused_on_cloud() {
+        let cloud = |builder: MachineBuilder| builder.image("alpine").build().into_cloud_request();
+        for builder in [
+            crate::Machine::builder("m").network_backend(NetworkBackend::VirtioNet),
+            crate::Machine::builder("m").dns("10.0.0.53".parse().unwrap()),
+            crate::Machine::builder("m").ssh_agent(true),
+        ] {
+            assert_eq!(cloud(builder).unwrap_err().kind(), ErrorKind::NotSupported);
+        }
+        assert!(cloud(crate::Machine::builder("m").ssh_agent(false)).is_ok());
     }
 
     fn built_config() -> MachineConfig {

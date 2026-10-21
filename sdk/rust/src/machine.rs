@@ -44,7 +44,7 @@ pub enum MachineState {
 impl MachineState {
     pub(crate) fn parse(state: &str) -> Self {
         match state {
-            "stopped" => Self::Stopped,
+            "created" | "stopped" => Self::Stopped,
             "paused" => Self::Paused,
             "pausing" => Self::Pausing,
             "creating" | "starting" => Self::Starting,
@@ -1378,6 +1378,11 @@ mod tests {
         // Guessing "stopped" for an unrecognised state would read as a verdict
         // the target never gave.
         assert_eq!(MachineState::parse("who knows"), MachineState::Unknown);
+    }
+
+    #[test]
+    fn a_machine_created_but_never_started_reads_as_stopped() {
+        assert_eq!(MachineState::parse("created"), MachineState::Stopped);
     }
 
     #[test]
