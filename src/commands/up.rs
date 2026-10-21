@@ -40,6 +40,15 @@ pub struct UpCmd {
     /// Smolfile path (default: ./Smolfile)
     #[arg(short = 's', long, value_name = "PATH")]
     pub smolfile: Option<PathBuf>,
+
+    /// Let the Smolfile share a host directory outside its own project
+    /// directory (repeatable). Without it, such a volume is refused.
+    #[arg(long = "allow-mount", value_name = "PATH")]
+    pub allow_mount: Vec<PathBuf>,
+
+    /// Approve the Smolfile's host mounts without asking
+    #[arg(short = 'y', long)]
+    pub yes: bool,
 }
 
 impl UpCmd {
@@ -92,7 +101,21 @@ impl UpCmd {
         // them off before the host-directory parse, which would reject an
         // `s3://` source as a missing directory.
         let (host_volume_specs, remote_volumes) = smolvm::remote_volume::split_specs(mounts_strs)?;
-        let mounts = HostMount::parse(&host_volume_specs)?;
+        // The Smolfile ships with the code the machine contains, so its host
+        // mounts are vetted and approved before anything is shared.
+        let project_dir = match smolfile_path.parent() {
+            Some(dir) if !dir.as_os_str().is_empty() => dir.to_path_buf(),
+            _ => PathBuf::from("."),
+        };
+        let vetted =
+            super::smolfile_mounts::vet(&host_volume_specs, &project_dir, &self.allow_mount)?;
+        super::smolfile_mounts::confirm(&smolfile_path, &vetted, self.yes)?;
+        let mounts = HostMount::parse(
+            &vetted
+                .iter()
+                .map(super::smolfile_mounts::VettedMount::spec)
+                .collect::<Vec<_>>(),
+        )?;
         let ports: Vec<PortMapping> = port_strs
             .iter()
             .map(|s| PortMapping::parse(s).map_err(|e| anyhow::anyhow!("{}", e)))

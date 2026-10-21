@@ -11,6 +11,11 @@ use smolvm::db::SmolvmDb;
 
 #[derive(Args, Debug)]
 pub struct ImagesCmd {
+    /// Accepted so scripts can pass `--local` to every machine command; this
+    /// command only manages local machines.
+    #[arg(long = "local")]
+    pub _local: bool,
+
     /// Machine to query
     #[arg(short = 'n', long, value_name = "NAME")]
     pub name: String,

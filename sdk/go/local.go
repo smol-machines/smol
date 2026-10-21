@@ -167,13 +167,14 @@ type nativeExecOptions struct {
 	Workdir   string      `json:"workdir,omitempty"`
 	TimeoutMS int64       `json:"timeout_ms,omitempty"`
 	User      string      `json:"user,omitempty"`
+	Stdin     string      `json:"stdin,omitempty"`
 }
 
 func toNativeExec(o *ExecOptions) nativeExecOptions {
 	if o == nil {
 		return nativeExecOptions{}
 	}
-	n := nativeExecOptions{Env: envList(o.Env), Workdir: o.Workdir, User: o.User}
+	n := nativeExecOptions{Env: envList(o.Env), Workdir: o.Workdir, User: o.User, Stdin: o.Stdin}
 	if o.Timeout > 0 {
 		n.TimeoutMS = max(1, o.Timeout.Milliseconds())
 	}
@@ -207,6 +208,15 @@ func (t *localTransport) exec(ctx context.Context, command []string, opts *ExecO
 		return nil, err
 	}
 	args := map[string]any{"name": t.n, "command": command, "options": toNativeExec(opts)}
+	if opts != nil && opts.Background {
+		// Started, not awaited: ctx bounds only the start.
+		var pid int
+		if err := callInto("exec_background", args, &pid); err != nil {
+			return nil, err
+		}
+		stdout := fmt.Sprintf("pid=%d\n", pid)
+		return &ExecResult{Stdout: stdout, StdoutBytes: []byte(stdout), Pid: pid}, nil
+	}
 	var r nativeExecResult
 	if ctx.Done() == nil {
 		if err := callInto("exec", args, &r); err != nil {

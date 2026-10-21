@@ -28,24 +28,54 @@ impl LsCmd {
         let listing = resolve::list_all(target)?;
 
         if self.json {
+            // A local row is the engine's own object, so `smol` and `smolvm`
+            // report a local machine with the same fields; smol adds where the
+            // machine lives and, for compatibility, `source`.
+            let config = listing
+                .machines
+                .iter()
+                .any(|m| m.location == Location::Local)
+                .then(smolvm::config::SmolvmConfig::load)
+                .transpose()?;
             let rows: Vec<_> = listing
                 .machines
                 .iter()
                 .map(|m| {
-                    serde_json::json!({
-                        "location": m.location.as_str(),
-                        "name": m.name,
-                        "id": m.id,
-                        "state": m.state,
-                        "cpus": m.cpus,
-                        "memory_mib": m.memory_mib,
-                        "source": m.source,
-                        // Without this labels are write-only: a caller could set
-                        // them and never read them back.
-                        "labels": m.labels,
-                        "movedTo": super::moved::from_labels(&m.labels)
-                            .map(|moved| serde_json::json!({ "name": moved.name, "id": moved.id })),
-                    })
+                    let record = config
+                        .as_ref()
+                        .filter(|_| m.location == Location::Local)
+                        .and_then(|config| {
+                            config
+                                .list_vms()
+                                .find(|(name, _)| **name == m.id)
+                                .map(|(_, r)| r)
+                        });
+                    let mut row = match record {
+                        Some(record) => smolvm::cli::vm_common::machine_status_json(&m.id, record),
+                        None => serde_json::json!({
+                            "name": m.name,
+                            "state": m.state,
+                            "cpus": m.cpus,
+                            "memory_mib": m.memory_mib,
+                            "image": m.source,
+                            // Without this labels are write-only: a caller could
+                            // set them and never read them back.
+                            "labels": m.labels,
+                        }),
+                    };
+                    if let Some(fields) = row.as_object_mut() {
+                        fields.insert("location".into(), serde_json::json!(m.location.as_str()));
+                        fields.insert("name".into(), serde_json::json!(m.name));
+                        fields.insert("id".into(), serde_json::json!(m.id));
+                        fields.insert("source".into(), serde_json::json!(m.source));
+                        fields.insert(
+                            "movedTo".into(),
+                            serde_json::json!(super::moved::from_labels(&m.labels).map(
+                                |moved| serde_json::json!({ "name": moved.name, "id": moved.id })
+                            )),
+                        );
+                    }
+                    row
                 })
                 .collect();
             println!("{}", serde_json::to_string_pretty(&rows)?);

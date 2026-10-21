@@ -35,6 +35,11 @@ pub struct CheckpointCmd {
     /// Capture locally.
     #[arg(long, conflicts_with = "cloud")]
     pub local: bool,
+
+    /// Keep the machine's host directory mounts in a local checkpoint. It then
+    /// restores only on a host where the same paths exist.
+    #[arg(long = "host-mounts", conflicts_with_all = ["cloud", "export_from"])]
+    pub host_mounts: bool,
 }
 
 impl CheckpointCmd {
@@ -65,6 +70,9 @@ impl CheckpointCmd {
             Location::Cloud if self.store.is_some() => {
                 anyhow::bail!("--store is available only for local checkpoints")
             }
+            Location::Cloud if self.host_mounts => {
+                anyhow::bail!("--host-mounts is available only for local checkpoints")
+            }
             Location::Cloud => self.run_cloud(),
         }
     }
@@ -74,6 +82,7 @@ impl CheckpointCmd {
         let runtime = smolvm::embedded::EmbeddedRuntime::new()?;
         let options = smolvm::portable_checkpoint::CaptureOptions {
             store_dir: self.store.clone(),
+            host_mounts: self.host_mounts,
             rootfs_dir: Some(smolvm::agent::AgentManager::default_rootfs_path()?),
             ..Default::default()
         };
