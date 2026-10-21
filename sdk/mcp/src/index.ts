@@ -31,6 +31,8 @@ const { version: VERSION } = createRequire(import.meta.url)("../package.json") a
 const OUTPUT_CAP = 64 * 1024;
 /** Largest workspace or export we will move through the agent channel. */
 const TRANSFER_CAP = 512 * 1024 * 1024;
+/** Cloud lifetime of a machine created with `persistent: false`, should this server die before deleting it. */
+const EPHEMERAL_TTL_SECONDS = 3600;
 
 const target: "local" | "cloud" =
   process.env.SMOL_TARGET === "cloud" || process.env.SMOL_TARGET === "local"
@@ -43,6 +45,8 @@ const conn: ConnectOptions = { target, handleSignals: false };
 
 const machines = new Map<string, Machine>();
 let branchCounter = 0;
+/** Machines created with `persistent: false`, and their branches, in creation order. */
+const ephemeral = new Set<string>();
 
 async function machine(name: string): Promise<Machine> {
   const known = machines.get(name);
@@ -186,6 +190,8 @@ server.registerTool(
         image: args.image,
         branchable: true,
         persistent: args.persistent,
+        // Cloud only; locally the engine reaps a dead server's VMs itself.
+        ...(args.persistent ? {} : { ttlSeconds: EPHEMERAL_TTL_SECONDS }),
         resources: {
           cpus: args.cpus,
           memoryMb: args.memoryMb,
@@ -196,6 +202,7 @@ server.registerTool(
       const started = Date.now();
       const m = await Machine.create(config, conn);
       machines.set(m.name, m);
+      if (!args.persistent) ephemeral.add(m.name);
       let copied: number | undefined;
       if (args.workspace) copied = await copyIn(m, args.workspace, args.workspaceTarget, args.exclude);
       if (args.env) {
@@ -288,6 +295,7 @@ server.registerTool(
       const started = Date.now();
       const child = await source.branch(name, { branchable: true });
       machines.set(child.name, child);
+      if (ephemeral.has(args.source)) ephemeral.add(child.name);
       return text({ machine: child.name, source: args.source, ms: Date.now() - started });
     } catch (error) {
       return failure(error);
@@ -458,12 +466,32 @@ server.registerTool(
       const m = await machine(args.machine);
       await m.delete();
       machines.delete(args.machine);
+      ephemeral.delete(args.machine);
       return text({ deleted: args.machine });
     } catch (error) {
       return failure(error);
     }
   },
 );
+
+// The client closing stdin ends the session: delete the machines it did not
+// ask to keep, branches before their source, then exit.
+let closing = false;
+async function shutdown(code: number): Promise<void> {
+  if (closing) return;
+  closing = true;
+  for (const name of [...ephemeral].reverse()) {
+    try {
+      await (await machine(name)).delete();
+    } catch (error) {
+      process.stderr.write(`smolmachines-mcp: could not delete ${name}: ${error instanceof Error ? error.message : String(error)}\n`);
+    }
+  }
+  process.exit(code);
+}
+process.stdin.on("end", () => void shutdown(0));
+process.on("SIGINT", () => void shutdown(130));
+process.on("SIGTERM", () => void shutdown(143));
 
 const transport = new StdioServerTransport();
 await server.connect(transport);

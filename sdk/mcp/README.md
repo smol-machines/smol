@@ -59,12 +59,46 @@ no local virtualization is needed.
 Branches and checkpoints cost only what changed, at any depth, so an agent can
 afford to try several approaches and keep one.
 
+## Serve it over HTTP
+
+When the agent does not run where the machines do, a second bin serves the
+same tools over Streamable HTTP. The usual shape is the server inside a smol
+machine and the agent outside it: publish port 8080 when you create the
+machine, set `SMOL_CLOUD_TOKEN` in it so the server's machines run on smol
+cloud, start the server there on `0.0.0.0`, and point the agent at the
+machine's ingress URL with `/mcp` on the end.
+
+```bash
+SMOL_MCP_AUTH_TOKEN=$(openssl rand -hex 32) \
+  npx -y -p smolmachines-mcp smolmachines-mcp-http --host 0.0.0.0
+```
+
+| Flag | Default |
+|---|---|
+| `--host` | `127.0.0.1` |
+| `--port` | `8080`, what a smol machine publishes by default |
+| `--path` | `/mcp`; any other path is a 404 |
+
+- **It will not start without `SMOL_MCP_AUTH_TOKEN`**, and every request must
+  carry it. The tools run commands, so an open listener is a remote shell.
+- Send the token as `authorization: Bearer <token>` or in `x-smol-mcp-token`.
+  Behind the cloud ingress use the second: the ingress spends `authorization`
+  on your account key and passes it to the machine unchanged.
+- It binds `127.0.0.1` unless you pass `--host`, so exposing it is a choice.
+- Replies are plain JSON, not SSE: no tool streams, and the reply may cross a
+  proxy whose buffering is not yours.
+- Each session runs its own server. Ending it (the client's HTTP DELETE)
+  deletes the machines it created with `persistent: false`, as closing a stdio
+  server does. On the cloud target those machines are also created with a
+  one hour TTL, so they go away even if the server is killed.
+
 ## Environment
 
 | Variable | Effect |
 |---|---|
 | `SMOL_TARGET` | `local` (default) or `cloud`. |
 | `SMOL_CLOUD_TOKEN` | Cloud API key; selects the cloud target when `SMOL_TARGET` is unset. |
+| `SMOL_MCP_AUTH_TOKEN` | Token every HTTP request must carry; required by `smolmachines-mcp-http`. |
 
 ## Develop
 
@@ -72,4 +106,5 @@ afford to try several approaches and keep one.
 cd sdk/mcp
 npm install
 npm run test:e2e     # builds, then drives the server over stdio against the local engine
+npm run test:http    # the same for the HTTP bin
 ```
