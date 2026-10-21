@@ -39,6 +39,20 @@ pub struct DeployCmd {
     #[arg(long)]
     pub port: Option<u16>,
 
+    /// Put the machine to sleep after this long with no traffic to its URL,
+    /// and wake it on the next request (about a second, so a webhook or a
+    /// browser waits for it rather than failing). `30s`, `15m`, `2h`, or seconds.
+    ///
+    /// Without it, a machine that publishes a port sleeps after the platform's
+    /// idle timeout and wakes the same way; a plan with always-on keeps it up.
+    /// A machine with no published port never sleeps on its own.
+    #[arg(
+        long = "sleep-after",
+        visible_alias = "auto-stop",
+        value_name = "DURATION"
+    )]
+    pub sleep_after: Option<String>,
+
     /// Number of vCPUs
     #[arg(long, default_value = "1")]
     pub cpus: u8,
@@ -269,6 +283,13 @@ impl DeployCmd {
         if self.branchable {
             body["branchable"] = serde_json::json!(true);
         }
+        // Auto-sleep: stop after this long idle; the next request to the URL wakes it.
+        if let Some(secs) = sleep_after_secs(self.sleep_after.as_deref())? {
+            if self.port.is_none() {
+                eprintln!("note: --sleep-after only takes effect with --port: traffic to the published port is what wakes the machine");
+            }
+            body["autoStopSeconds"] = serde_json::json!(secs);
+        }
         // Optional command override, shell-split into argv. Omitted when unset so
         // the machine runs the source image's/artifact's own entrypoint (default).
         if let Some(cmd) = &self.command {
@@ -440,6 +461,18 @@ impl DeployCmd {
     }
 }
 
+/// `--sleep-after` as seconds: `30s`, `15m`, `2h` or a bare number of seconds; zero and
+/// anything unparsable are refused rather than silently meaning "never".
+fn sleep_after_secs(value: Option<&str>) -> anyhow::Result<Option<u64>> {
+    let Some(v) = value else { return Ok(None) };
+    match smolvm::smolfile::parse_duration_secs(v) {
+        Some(0) | None => {
+            anyhow::bail!("--sleep-after needs a duration such as 30s, 15m or 2h (got '{v}')")
+        }
+        Some(secs) => Ok(Some(secs)),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use clap::Parser;
@@ -464,5 +497,16 @@ mod tests {
             assert_eq!(reference.as_deref(), Some("library/alpine"), "{argv:?}");
         }
         assert!(Cli::try_parse_from(["smol", "--image", "a", "b"]).is_err());
+    }
+
+    #[test]
+    fn sleep_after_takes_human_durations_and_refuses_zero() {
+        assert_eq!(super::sleep_after_secs(None).unwrap(), None);
+        assert_eq!(super::sleep_after_secs(Some("15m")).unwrap(), Some(900));
+        assert_eq!(super::sleep_after_secs(Some("30s")).unwrap(), Some(30));
+        assert_eq!(super::sleep_after_secs(Some("2h")).unwrap(), Some(7200));
+        assert_eq!(super::sleep_after_secs(Some("600")).unwrap(), Some(600));
+        assert!(super::sleep_after_secs(Some("0")).is_err());
+        assert!(super::sleep_after_secs(Some("soon")).is_err());
     }
 }
