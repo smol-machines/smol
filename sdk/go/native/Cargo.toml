@@ -6,7 +6,7 @@
 
 [package]
 name = "smol-go"
-version = "1.31.0"
+version = "1.31.1"
 edition = "2021"
 description = "Native C-ABI core for the smol Go SDK — embed microVMs directly in Go"
 license = "Apache-2.0"
