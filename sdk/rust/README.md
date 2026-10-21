@@ -69,6 +69,10 @@ grant never lingers beside the new one. Local only; a cloud machine's network is
 set when it is created. Needs an engine whose `machine update` has
 `--reset-allow-list`.
 
+At create time, `.network_backend(NetworkBackend::VirtioNet)` picks the backend
+(`--net-backend`), `.dns(ip)` gives the guest a resolver other than the host's,
+and `.ssh_agent(true)` forwards the host's SSH agent. All three are local only.
+
 Programs that embed the engine's interactive exec in their own terminal while
 this SDK manages the machine (an editor spawning `smolvm machine exec -t …` in a
 pty) get the engine binary from `smolmachines::engine_cli()`, which resolves it
