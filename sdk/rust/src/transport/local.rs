@@ -913,6 +913,21 @@ impl Transport for LocalTransport {
         self.run(&args).map(|_| ())
     }
 
+    fn copy_out(&self, guest_path: &str, host_path: &Path) -> Result<()> {
+        self.run(&[
+            "machine",
+            "cp",
+            &format!("{}:{guest_path}", self.name),
+            &host_path.to_string_lossy(),
+        ])
+        .map(|_| ())
+    }
+
+    fn data_dir(&self) -> Result<PathBuf> {
+        let out = self.run(&["machine", "data-dir", "--name", &self.name])?;
+        Ok(PathBuf::from(String::from_utf8_lossy(&out).trim()))
+    }
+
     fn pull_image(&self, _image: &str) -> Result<ImageInfo> {
         Err(unsupported(
             "pull_image()",
@@ -1677,6 +1692,43 @@ mod io_tests {
         assert_eq!(transport.state(), MachineState::Deleted);
         std::fs::write(&rows, "not json").unwrap();
         assert_eq!(transport.state(), MachineState::Unknown);
+    }
+
+    #[test]
+    fn copy_out_hands_the_host_path_to_machine_cp() {
+        let dir = tempfile::tempdir().unwrap();
+        let log = dir.path().join("args");
+        let transport = cli(dir.path(), &format!("echo \"$*\" > {}", log.display()));
+        let host = dir.path().join("rootfs.tar");
+        transport.copy_out("/storage/rootfs.tar", &host).unwrap();
+        let args = std::fs::read_to_string(&log).unwrap();
+        assert_eq!(
+            args.trim(),
+            format!("machine cp test:/storage/rootfs.tar {}", host.display())
+        );
+
+        let failing = cli(dir.path(), "echo 'vm not found: test' >&2\nexit 1");
+        let error = failing.copy_out("/x", &host).unwrap_err();
+        assert_eq!(error.kind(), ErrorKind::NotFound);
+    }
+
+    #[test]
+    fn data_dir_is_the_path_the_engine_prints() {
+        let dir = tempfile::tempdir().unwrap();
+        let log = dir.path().join("args");
+        let transport = cli(
+            dir.path(),
+            &format!("echo \"$*\" > {}\necho '/data/vms/ab12cd'", log.display()),
+        );
+        assert_eq!(
+            transport.data_dir().unwrap(),
+            PathBuf::from("/data/vms/ab12cd")
+        );
+        let args = std::fs::read_to_string(&log).unwrap();
+        assert_eq!(args.trim(), "machine data-dir --name test");
+
+        let missing = cli(dir.path(), "echo 'vm not found: test' >&2\nexit 1");
+        assert_eq!(missing.data_dir().unwrap_err().kind(), ErrorKind::NotFound);
     }
 
     #[test]

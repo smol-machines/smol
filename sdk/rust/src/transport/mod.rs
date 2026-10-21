@@ -104,6 +104,22 @@ pub(crate) trait Transport: Send + Sync + std::fmt::Debug {
     fn read_file(&self, path: &str) -> Result<Vec<u8>>;
     fn write_file(&self, path: &str, data: Vec<u8>, mode: Option<u32>) -> Result<()>;
 
+    /// Copy a guest file straight to a host path. Local only.
+    fn copy_out(&self, _guest_path: &str, _host_path: &Path) -> Result<()> {
+        Err(unsupported(
+            "copy_out()",
+            "a cloud machine has no host path to copy to; use read_file()",
+        ))
+    }
+
+    /// The machine's directory on the host. Local only.
+    fn data_dir(&self) -> Result<PathBuf> {
+        Err(unsupported(
+            "data_dir()",
+            "a cloud machine keeps no files on this host",
+        ))
+    }
+
     fn pull_image(&self, image: &str) -> Result<ImageInfo>;
     fn list_images(&self) -> Result<Vec<ImageInfo>>;
     fn sync(&self) -> Result<()>;

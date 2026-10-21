@@ -966,6 +966,18 @@ impl Machine {
         self.transport.read_file(path)
     }
 
+    /// Copy a file out of the running guest to `host_path`, without holding
+    /// it in memory. Local only; on the cloud use [`Machine::read_file`].
+    pub fn copy_out(&self, guest_path: &str, host_path: impl AsRef<Path>) -> Result<()> {
+        self.transport.copy_out(guest_path, host_path.as_ref())
+    }
+
+    /// The host directory the engine keeps this machine's disks, sockets and
+    /// logs in, such as `egress-denials.log`. Local only.
+    pub fn data_dir(&self) -> Result<PathBuf> {
+        self.transport.data_dir()
+    }
+
     /// Capture this running machine.
     ///
     /// Locally this writes to `output`. On the cloud, pass `None`: the control

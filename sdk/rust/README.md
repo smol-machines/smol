@@ -339,6 +339,10 @@ writes a stopped machine's disks as a `.smolmachine`, and
 patterns through the egress filter, and `BranchOptions::new().label("k", "v")`
 sets a label on a branch over the ones it inherits.
 
+`machine.copy_out("/storage/out.tar", "out.tar")` copies a guest file straight
+to a host path without holding it in memory, and `machine.data_dir()` returns
+the host directory the engine keeps the machine's files in. Both are local only.
+
 `stream.kill()` (or a `KillHandle` from `stream.kill_handle()`, usable from
 another thread) kills the command and ends the stream. Dropping the stream
 without killing it leaves the command running in the guest, like dropping a
