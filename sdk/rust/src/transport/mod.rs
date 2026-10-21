@@ -19,7 +19,7 @@ use crate::error::Result;
 use crate::exec::{ExecOptions, ExecResult, ExecStream};
 use crate::machine::{
     BranchOptions, Checkpoint, CheckpointOptions, ImageInfo, MachineResources, MachineState,
-    PackOptions, PortEndpoint, Resize, ShareLink, UsageReport,
+    MachineStats, PackOptions, PortEndpoint, Resize, ShareLink, UsageReport,
 };
 
 /// How long to wait for a machine to become ready, and how often to look.
@@ -151,6 +151,14 @@ pub(crate) trait Transport: Send + Sync + std::fmt::Debug {
         names: &[String],
         options: &BranchOptions,
     ) -> Result<Vec<Box<dyn Transport>>>;
+
+    /// CPU and memory of the running machine.
+    fn stats(&self) -> Result<MachineStats> {
+        Err(unsupported(
+            "stats()",
+            "live CPU and memory are a local target operation; use usage() on the cloud",
+        ))
+    }
 
     /// Metered usage and cost so far.
     fn usage(&self) -> Result<UsageReport>;

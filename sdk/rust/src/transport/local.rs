@@ -22,8 +22,9 @@ use crate::connect::Target;
 use crate::error::{Error, ErrorKind, Result};
 use crate::exec::{ExecEvent, ExecOptions, ExecResult, ExecStream, KillHandle};
 use crate::machine::{
-    BranchOptions, Checkpoint, CheckpointOptions, CheckpointResult, CloudCheckpoint, ImageInfo,
-    MachineResources, MachineState, PackOptions, PortEndpoint, Resize, ShareLink, UsageReport,
+    BranchOptions, Checkpoint, CheckpointOptions, CheckpointResult, CloudCheckpoint, GuestMemory,
+    ImageInfo, MachineResources, MachineState, MachineStats, PackOptions, PortEndpoint, Resize,
+    ShareLink, UsageReport,
 };
 
 /// How many branches boot at once when a batch does not say.
@@ -1150,6 +1151,11 @@ impl Transport for LocalTransport {
         Ok(made)
     }
 
+    fn stats(&self) -> Result<MachineStats> {
+        let out = self.run(&["machine", "stats", "--name", &self.name, "--json"])?;
+        parse_stats(&out)
+    }
+
     fn usage(&self) -> Result<UsageReport> {
         Err(unsupported(
             "usage()",
@@ -1189,6 +1195,37 @@ impl Transport for LocalTransport {
 }
 
 /// Create a machine on this host and return a handle to it.
+fn parse_stats(out: &[u8]) -> Result<MachineStats> {
+    let row: serde_json::Value = serde_json::from_slice(out)
+        .map_err(|e| Error::new(ErrorKind::Other, format!("read the machine stats: {e}")))?;
+    let memory = row.get("memory").filter(|m| m.is_object()).map(|memory| {
+        let bytes = |key: &str| {
+            memory
+                .get(key)
+                .and_then(serde_json::Value::as_u64)
+                .unwrap_or_default()
+        };
+        GuestMemory {
+            total_bytes: bytes("total_bytes"),
+            used_bytes: bytes("used_bytes"),
+            available_bytes: bytes("available_bytes"),
+            free_bytes: bytes("free_bytes"),
+            cached_bytes: bytes("cached_bytes"),
+            swap_total_bytes: bytes("swap_total_bytes"),
+            swap_used_bytes: bytes("swap_used_bytes"),
+        }
+    });
+    Ok(MachineStats {
+        cpus: row
+            .get("cpus")
+            .and_then(serde_json::Value::as_u64)
+            .and_then(|n| u8::try_from(n).ok())
+            .unwrap_or_default(),
+        cpu_percent: row.get("cpu_percent").and_then(serde_json::Value::as_f64),
+        memory,
+    })
+}
+
 pub(crate) fn create(
     cli: &Path,
     args: Vec<String>,
@@ -1711,6 +1748,70 @@ mod io_tests {
 
         let error = transport.resize(&Resize::new()).unwrap_err();
         assert_eq!(error.kind(), ErrorKind::Config);
+    }
+
+    #[test]
+    fn stats_reads_the_engine_sample() {
+        let dir = tempfile::tempdir().unwrap();
+        let log = dir.path().join("calls");
+        let transport = cli(
+            dir.path(),
+            &format!(
+                "echo \"$*\" >> {log}\n\
+                 printf '%s' '{{\"name\":\"test\",\"cpus\":2,\"cpu_percent\":99.9,\"memory\":{{\"total_bytes\":8000,\"used_bytes\":3000,\"available_bytes\":5000,\"free_bytes\":4000,\"cached_bytes\":600,\"swap_total_bytes\":0,\"swap_used_bytes\":0}}}}'",
+                log = log.display()
+            ),
+        );
+        let stats = transport.stats().unwrap();
+        assert_eq!(
+            stats,
+            MachineStats {
+                cpus: 2,
+                cpu_percent: Some(99.9),
+                memory: Some(GuestMemory {
+                    total_bytes: 8000,
+                    used_bytes: 3000,
+                    available_bytes: 5000,
+                    free_bytes: 4000,
+                    cached_bytes: 600,
+                    swap_total_bytes: 0,
+                    swap_used_bytes: 0,
+                }),
+            }
+        );
+        let calls = std::fs::read_to_string(&log).unwrap();
+        let calls: Vec<_> = calls
+            .lines()
+            .filter(|line| !line.starts_with("--version"))
+            .collect();
+        assert_eq!(calls, ["machine stats --name test --json"]);
+    }
+
+    #[test]
+    fn stats_keeps_a_figure_the_engine_could_not_read_empty() {
+        let dir = tempfile::tempdir().unwrap();
+        let transport = cli(
+            dir.path(),
+            "printf '%s' '{\"name\":\"test\",\"cpus\":1,\"cpu_percent\":null,\"memory\":null}'",
+        );
+        assert_eq!(
+            transport.stats().unwrap(),
+            MachineStats {
+                cpus: 1,
+                cpu_percent: None,
+                memory: None,
+            }
+        );
+    }
+
+    #[test]
+    fn stats_of_a_stopped_machine_is_an_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let transport = cli(
+            dir.path(),
+            "echo \"Error: machine 'test' is not running\" >&2\nexit 1",
+        );
+        assert!(transport.stats().is_err());
     }
 
     #[test]
