@@ -109,11 +109,21 @@ permission to exec, connect, or expect the workload to respond.
 
 | Command | Description |
 |---------|-------------|
-| `smol cloud deploy <ref>` | Create + start a machine on the cloud cluster. Scope egress with `--allow-host`/`--allow-cidr`. |
+| `smol cloud deploy <ref>` | Create + start a machine on the cloud cluster. Scope egress with `--allow-host`/`--allow-cidr`; set when it sleeps with `--sleep-after`. |
 | `smol cloud ls` | List cloud machines. |
 | `smol cloud rm <id>` | Delete a cloud machine. |
 | `smol cloud scale …` | Scale a cloud deployment. |
 | `smol cloud shell --name <name>` | Interactive shell into a cloud machine. Alias: `sh`. |
+
+> **Auto-sleep and auto-wake.** A cloud machine that publishes a port sleeps
+> when nothing has reached its URL for a while, and the next request wakes it:
+> the request waits about a second while the machine starts, then is served, so
+> a browser, an API client or a webhook sees a slow first response, not an
+> error. You pay for the time it runs, not the time it sleeps. Choose the idle
+> time with `--sleep-after` (`30s`, `15m`, `2h`); without it the platform's
+> default applies, and a plan with always-on keeps the machine up. A machine
+> that publishes no port (a worker that only makes outbound connections) never
+> sleeps on its own.
 
 > **Scoped egress and image pulls.** A cloud machine pulls its base image the
 > first time it runs a command, so a `--allow-host` scope automatically also
