@@ -734,3 +734,33 @@ func TestCloudCLISession(t *testing.T) {
 		t.Fatalf("env conn = %+v, %v", c, err)
 	}
 }
+
+func TestDiskDurabilityReachesTheCloudRequestAndTheEngine(t *testing.T) {
+	isolateCloudEnv(t)
+	mock := newMockCloud()
+	srv := httptest.NewServer(mock)
+	defer srv.Close()
+	conn := &ConnectOptions{Target: TargetCloud, BaseURL: srv.URL, APIKey: "smk_test123"}
+	cfg := MachineConfig{Image: "alpine", Resources: ResourceSpec{DiskDurability: DiskDurabilityDeferred}}
+	if _, err := Create(context.Background(), cfg, conn); err != nil {
+		t.Fatal(err)
+	}
+	mock.mu.Lock()
+	resources, _ := mock.bodies["create"]["resources"].(map[string]any)
+	mock.mu.Unlock()
+	if resources["diskDurability"] != "deferred" {
+		t.Fatalf("cloud resources = %v; want diskDurability deferred", resources)
+	}
+
+	native, err := json.Marshal(toNativeConfig("m", cfg))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(native), `"disk_durability":"deferred"`) {
+		t.Fatalf("native config = %s; want disk_durability deferred", native)
+	}
+	plain, _ := json.Marshal(toNativeConfig("m", MachineConfig{Image: "alpine"}))
+	if strings.Contains(string(plain), "disk_durability") {
+		t.Fatalf("unset durability reached the engine: %s", plain)
+	}
+}

@@ -305,6 +305,7 @@ struct ResourcesConfig {
     gpu_vram_mib: Option<u32>,
     cuda: Option<bool>,
     network_backend: Option<String>,
+    disk_durability: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -478,8 +479,18 @@ fn vm_resources(r: &ResourcesConfig) -> Result<VmResources, CallError> {
             )))
         }
     };
+    let disk_durability = match r.disk_durability.as_deref() {
+        None | Some("full") => smolvm::data::resources::DiskDurability::Full,
+        Some("deferred") => smolvm::data::resources::DiskDurability::Deferred,
+        Some(other) => {
+            return Err(CallError::config(format!(
+                "disk_durability must be \"full\" or \"deferred\", not {other:?}"
+            )))
+        }
+    };
     Ok(VmResources {
         network_backend,
+        disk_durability,
         cpus: r.cpus.unwrap_or(DEFAULT_MICROVM_CPU_COUNT),
         memory_mib: r.memory_mib.unwrap_or(DEFAULT_MICROVM_MEMORY_MIB),
         network: r.network.unwrap_or(false),

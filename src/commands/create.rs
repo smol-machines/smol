@@ -96,6 +96,13 @@ pub struct CreateCmd {
     #[arg(long = "net-backend", value_enum, value_name = "BACKEND")]
     pub net_backend: Option<NetworkBackend>,
 
+    /// Disk durability: `full` (default), a guest fsync waits for the host's
+    /// disk; `deferred`, guest writes reach the host's disk on the host's
+    /// schedule, so database commits and other fsync-heavy work run far faster
+    /// and a host crash can lose the most recent writes.
+    #[arg(long = "disk-durability", value_enum, value_name = "MODE")]
+    pub disk_durability: Option<smolvm::data::resources::DiskDurability>,
+
     /// Forward the host SSH agent into the machine
     #[arg(long)]
     pub ssh_agent: bool,
@@ -217,6 +224,9 @@ impl CreateCmd {
         record.network_backend = self.net_backend;
         record.storage_gb = self.storage;
         record.overlay_gb = self.overlay;
+        if let Some(durability) = self.disk_durability {
+            record.disk_durability = durability;
+        }
         // Match the engine: store gpu only when enabled (None == off), and
         // reject a zero VRAM value rather than silently accepting it.
         record.gpu = if self.gpu { Some(true) } else { None };
@@ -330,6 +340,9 @@ impl CreateCmd {
         record.network_backend = self.net_backend;
         record.storage_gb = self.storage;
         record.overlay_gb = self.overlay;
+        if let Some(durability) = self.disk_durability {
+            record.disk_durability = durability;
+        }
         record.gpu = if manifest.gpu { Some(true) } else { None };
         record.source_smolmachine = Some(canonical);
 

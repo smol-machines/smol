@@ -586,6 +586,19 @@ impl Machine {
                         resources.gpu_vram_mib = Some(v.extract()?);
                     }
                 }
+                if let Some(v) = rd.get_item("disk_durability")? {
+                    if !v.is_none() {
+                        resources.disk_durability = match v.extract::<String>()?.as_str() {
+                            "full" => smolvm::data::resources::DiskDurability::Full,
+                            "deferred" => smolvm::data::resources::DiskDurability::Deferred,
+                            other => {
+                                return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                                    "disk_durability must be \"full\" or \"deferred\", not {other:?}"
+                                )))
+                            }
+                        };
+                    }
+                }
                 if let Some(v) = rd.get_item("cuda")? {
                     if !v.is_none() {
                         resources.cuda = v.extract()?;

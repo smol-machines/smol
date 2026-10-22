@@ -67,6 +67,13 @@ pub struct RunCmd {
     #[arg(long, value_name = "MiB")]
     pub gpu_vram: Option<u32>,
 
+    /// Disk durability: `full` (default), a guest fsync waits for the host's
+    /// disk; `deferred`, guest writes reach the host's disk on the host's
+    /// schedule, so database commits and other fsync-heavy work run far faster
+    /// and a host crash can lose the most recent writes.
+    #[arg(long = "disk-durability", value_enum, value_name = "MODE")]
+    pub disk_durability: Option<smolvm::data::resources::DiskDurability>,
+
     /// Run unmodified CUDA/PyTorch code on the host's NVIDIA GPU by remoting the
     /// guest's CUDA calls to the host over vsock (distinct from --gpu, which is
     /// Vulkan). No CUDA toolkit needed in the image.
@@ -145,6 +152,7 @@ impl RunCmd {
             gpu: self.gpu,
             gpu_vram_mib: self.gpu_vram,
             cuda: self.cuda,
+            disk_durability: self.disk_durability.unwrap_or_default(),
             ..Default::default()
         };
 

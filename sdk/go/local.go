@@ -717,6 +717,7 @@ type nativeResources struct {
 	GPUVRAMMiB     int      `json:"gpu_vram_mib,omitempty"`
 	CUDA           bool     `json:"cuda,omitempty"`
 	NetworkBackend string   `json:"network_backend,omitempty"`
+	DiskDurability string   `json:"disk_durability,omitempty"`
 }
 
 type nativeMachineConfig struct {
@@ -762,6 +763,7 @@ func toNativeConfig(name string, cfg MachineConfig) nativeMachineConfig {
 			GPUVRAMMiB:     r.GPUVRAMMiB,
 			CUDA:           r.CUDA,
 			NetworkBackend: string(r.NetworkBackend),
+			DiskDurability: string(r.DiskDurability),
 		},
 		// A machine meant to outlive this process has to outlive its record too.
 		Persistent: cfg.Persistent || cfg.Detach,

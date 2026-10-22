@@ -209,6 +209,28 @@ impl NetworkBackend {
     }
 }
 
+/// Whether a guest flush waits for the host's disk, like the CLI's
+/// `--disk-durability`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DiskDurability {
+    /// A guest `fsync` waits for the host's disk. The engine's default.
+    Full,
+    /// Guest writes reach the host's disk on the host's schedule: fsync-heavy
+    /// work such as database commits runs far faster, and a crash of the host,
+    /// not of the machine, can lose the most recent writes.
+    Deferred,
+}
+
+impl DiskDurability {
+    /// The CLI's and API's name for this mode.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Full => "full",
+            Self::Deferred => "deferred",
+        }
+    }
+}
+
 /// What the VM is given. Every field falls back to the engine's default.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Resources {
@@ -230,6 +252,8 @@ pub struct Resources {
     pub cuda: Option<bool>,
     /// Networking backend. Local only.
     pub network_backend: Option<NetworkBackend>,
+    /// Whether a guest flush waits for the host's disk.
+    pub disk_durability: Option<DiskDurability>,
 }
 
 /// Everything needed to create a machine.
@@ -383,6 +407,10 @@ impl MachineConfig {
         if let Some(storage) = self.resources.storage_gib {
             args.push("--storage".into());
             args.push(storage.to_string());
+        }
+        if let Some(durability) = self.resources.disk_durability {
+            args.push("--disk-durability".into());
+            args.push(durability.as_str().into());
         }
         if self.resources.gpu.unwrap_or(false) {
             args.push("--gpu".into());
@@ -635,6 +663,10 @@ impl MachineConfig {
                 cpus: self.resources.cpus.map(u32::from),
                 memory_mb: self.resources.memory_mib,
                 disk_gb: self.resources.storage_gib.map(|gib| gib as u32),
+                disk_durability: self
+                    .resources
+                    .disk_durability
+                    .map(|d| d.as_str().to_string()),
             }),
             network,
             // Supply only the guest port: the control plane allocates the node
@@ -812,6 +844,12 @@ impl MachineBuilder {
     /// Provide the network through this backend. Local only.
     pub fn network_backend(mut self, backend: NetworkBackend) -> Self {
         self.config.resources.network_backend = Some(backend);
+        self
+    }
+
+    /// Choose whether a guest flush waits for the host's disk. Local and cloud.
+    pub fn disk_durability(mut self, durability: DiskDurability) -> Self {
+        self.config.resources.disk_durability = Some(durability);
         self
     }
 
@@ -1186,6 +1224,29 @@ mod tests {
         assert!(!joined.contains("--net-backend"), "{joined}");
         assert!(!joined.contains("--dns"), "{joined}");
         assert!(!joined.contains("--ssh-agent"), "{joined}");
+    }
+
+    #[test]
+    fn disk_durability_reaches_the_engine_flag_and_the_cloud_request() {
+        let deferred = || {
+            crate::Machine::builder("m")
+                .image("alpine")
+                .disk_durability(DiskDurability::Deferred)
+                .build()
+        };
+        let (args, _) = deferred().into_local_args().unwrap();
+        let joined = args.join(" ");
+        assert!(joined.contains("--disk-durability deferred"), "{joined}");
+        let request = deferred().into_cloud_request().unwrap();
+        let body = serde_json::to_value(&request).unwrap();
+        assert_eq!(body["resources"]["diskDurability"], "deferred", "{body}");
+
+        // Unset leaves the engine's and the control plane's default alone.
+        let plain = || crate::Machine::builder("m").image("alpine").build();
+        let (args, _) = plain().into_local_args().unwrap();
+        assert!(!args.join(" ").contains("--disk-durability"));
+        let body = serde_json::to_value(plain().into_cloud_request().unwrap()).unwrap();
+        assert!(body["resources"].get("diskDurability").is_none(), "{body}");
     }
 
     #[test]

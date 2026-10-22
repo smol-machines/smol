@@ -545,6 +545,8 @@ def _native_config(name: str, config: MachineConfig) -> dict:
                 res["gpu"] = r.gpu
             if r.gpu_vram_mib is not None:
                 res["gpu_vram_mib"] = r.gpu_vram_mib
+            if r.disk_durability is not None:
+                res["disk_durability"] = r.disk_durability
             if r.cuda is not None:
                 res["cuda"] = r.cuda
         cfg["resources"] = res
@@ -2493,6 +2495,8 @@ def make_transport(config: MachineConfig, conn: Optional[ConnectOptions] = None)
             resources["cpus"] = r.cpus
         if r and r.memory_mb is not None:
             resources["memoryMb"] = r.memory_mb
+        if r and r.disk_durability is not None:
+            resources["diskDurability"] = r.disk_durability
         body: dict[str, Any] = {
             "name": config.name,
             "source": {"type": "image", "reference": config.image},

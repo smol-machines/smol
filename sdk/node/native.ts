@@ -48,6 +48,7 @@ export interface NativeResources {
   overlayGib?: number | undefined;
   gpu?: boolean | undefined;
   gpuVramMib?: number | undefined;
+  diskDurability?: "full" | "deferred" | undefined;
   cuda?: boolean | undefined;
   networkBackend?: string | undefined;
 }

@@ -55,6 +55,12 @@ class ResourceSpec:
     """Enable GPU acceleration (virtio-gpu/venus). Local target only. Default: False."""
     gpu_vram_mib: Optional[int] = None
     """GPU VRAM in MiB (default: engine default when GPU is enabled). Local target only."""
+    disk_durability: Optional[str] = None
+    """``"full"`` (default): a guest ``fsync`` waits for the host's disk.
+    ``"deferred"``: guest writes reach the host's disk on the host's schedule, so
+    fsync-heavy work such as database commits runs far faster (Postgres commits
+    about 19x on Linux), and a crash of the host, not of the machine, can lose
+    the most recent writes. Local and cloud targets."""
     cuda: Optional[bool] = None
     """Run the guest's unmodified CUDA/PyTorch code on the host's NVIDIA GPU by
     remoting CUDA Driver-API calls to the host over vsock (distinct from ``gpu``,

@@ -50,6 +50,10 @@ pub struct Resources {
     /// Data disk in GB.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub disk_gb: Option<u32>,
+    /// `full` (a guest flush waits for the host's disk) or `deferred` (guest
+    /// writes reach it on the host's schedule).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub disk_durability: Option<String>,
 }
 
 /// A machine's egress policy.

@@ -51,6 +51,13 @@ pub struct DeployCmd {
     #[arg(long)]
     pub network: bool,
 
+    /// Disk durability: `full` (default), a guest fsync waits for the host's
+    /// disk; `deferred`, guest writes reach the host's disk on the host's
+    /// schedule, so database commits and other fsync-heavy work run far faster
+    /// and a host crash can lose the most recent writes.
+    #[arg(long = "disk-durability", value_enum, value_name = "MODE")]
+    pub disk_durability: Option<smolvm::data::resources::DiskDurability>,
+
     /// Make the machine branchable (copy-on-write memory and disks) so
     /// `smol machine branch --cloud` can fork it. Branchability is decided
     /// when the machine is created and cannot be turned on later.
@@ -268,6 +275,9 @@ impl DeployCmd {
         // need. Same field name the fork request uses.
         if self.branchable {
             body["branchable"] = serde_json::json!(true);
+        }
+        if let Some(durability) = self.disk_durability {
+            body["resources"]["diskDurability"] = serde_json::json!(durability);
         }
         // Optional command override, shell-split into argv. Omitted when unset so
         // the machine runs the source image's/artifact's own entrypoint (default).

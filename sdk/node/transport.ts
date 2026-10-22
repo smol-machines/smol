@@ -489,6 +489,7 @@ export function toNativeConfig(
             overlayGib: config.resources?.overlayGb,
             gpu: config.resources?.gpu,
             gpuVramMib: config.resources?.gpuVramMib,
+            diskDurability: config.resources?.diskDurability,
             cuda: config.resources?.cuda,
             networkBackend: config.resources?.networkBackend,
           }
@@ -2345,6 +2346,9 @@ export async function makeTransport(
           ? { memoryMb: config.resources.memoryMb }
           : {}),
         diskGb: config.resources?.storageGb ?? null,
+        ...(config.resources?.diskDurability !== undefined
+          ? { diskDurability: config.resources.diskDurability }
+          : {}),
       },
       ...(config.resources?.allowCidrs?.length ||
       config.resources?.allowHosts?.length
