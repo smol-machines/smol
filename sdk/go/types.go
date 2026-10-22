@@ -79,7 +79,23 @@ type ResourceSpec struct {
 	// virtio-net for a machine you will checkpoint and restore with a
 	// different network policy. Local only.
 	NetworkBackend NetworkBackend
+	// DiskDurability is DiskDurabilityFull (the default when empty) or
+	// DiskDurabilityDeferred. Local and cloud.
+	DiskDurability DiskDurability
 }
+
+// DiskDurability picks whether a guest flush waits for the host's disk.
+type DiskDurability string
+
+const (
+	// DiskDurabilityFull makes a guest fsync wait for the host's disk.
+	DiskDurabilityFull DiskDurability = "full"
+	// DiskDurabilityDeferred lets guest writes reach the host's disk on the
+	// host's schedule: fsync-heavy work such as database commits runs far
+	// faster, and a crash of the host, not of the machine, can lose the most
+	// recent writes.
+	DiskDurabilityDeferred DiskDurability = "deferred"
+)
 
 // NetworkBackend picks how a local machine's network is provided.
 type NetworkBackend string

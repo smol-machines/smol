@@ -183,6 +183,13 @@ export interface VmResourcesConfig {
   /** GPU VRAM in MiB (default: engine default when GPU is enabled). */
   gpuVramMib?: number
   /**
+   * Disk durability: `"full"` (default), a guest flush waits for the host's
+   * disk; or `"deferred"`, guest writes reach the host's disk on the host's
+   * schedule, so fsync-heavy work (database commits) runs much faster and a
+   * host crash can lose recent writes.
+   */
+  diskDurability?: string
+  /**
    * Run the guest's unmodified CUDA/PyTorch code on the host's NVIDIA GPU by
    * remoting CUDA calls over vsock (distinct from `gpu`, which is Vulkan; no
    * CUDA toolkit needed in the image). Local target only (default: false).

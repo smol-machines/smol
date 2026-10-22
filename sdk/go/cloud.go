@@ -1435,6 +1435,9 @@ func createCloud(ctx context.Context, cfg MachineConfig, c ConnectOptions) (tran
 	if cfg.Resources.StorageGB > 0 {
 		resources["diskGb"] = cfg.Resources.StorageGB
 	}
+	if cfg.Resources.DiskDurability != "" {
+		resources["diskDurability"] = string(cfg.Resources.DiskDurability)
+	}
 	body := map[string]any{
 		"name":            nil,
 		"source":          map[string]any{"type": "image", "reference": cfg.Image},

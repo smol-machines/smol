@@ -253,6 +253,11 @@ pub struct VmResourcesConfig {
     pub gpu: Option<bool>,
     /// GPU VRAM in MiB (default: engine default when GPU is enabled).
     pub gpu_vram_mib: Option<u32>,
+    /// Disk durability: `"full"` (default), a guest flush waits for the host's
+    /// disk; or `"deferred"`, guest writes reach the host's disk on the host's
+    /// schedule, so fsync-heavy work (database commits) runs much faster and a
+    /// host crash can lose recent writes.
+    pub disk_durability: Option<String>,
     /// Run the guest's unmodified CUDA/PyTorch code on the host's NVIDIA GPU by
     /// remoting CUDA calls over vsock (distinct from `gpu`, which is Vulkan; no
     /// CUDA toolkit needed in the image). Local target only (default: false).
@@ -465,7 +470,17 @@ impl VmResourcesConfig {
                 )))
             }
         };
+        let disk_durability = match self.disk_durability.as_deref() {
+            None | Some("full") => smolvm::data::resources::DiskDurability::Full,
+            Some("deferred") => smolvm::data::resources::DiskDurability::Deferred,
+            Some(other) => {
+                return Err(napi::Error::from_reason(format!(
+                    "[CONFIG_ERROR] diskDurability must be \"full\" or \"deferred\", not {other:?}"
+                )))
+            }
+        };
         Ok(VmResources {
+            disk_durability,
             network_backend,
             cpus: self.cpus.unwrap_or(DEFAULT_MICROVM_CPU_COUNT),
             memory_mib: self.memory_mib.unwrap_or(DEFAULT_MICROVM_MEMORY_MIB),

@@ -150,10 +150,20 @@ impl UpCmd {
             Some(network_config.allow_hosts)
         };
 
+        let disk_durability = match sf.disk_durability.as_deref() {
+            None | Some("full") => smolvm::data::resources::DiskDurability::Full,
+            Some("deferred") => smolvm::data::resources::DiskDurability::Deferred,
+            Some(other) => {
+                anyhow::bail!(
+                    "Smolfile disk_durability must be \"full\" or \"deferred\", not {other:?}"
+                )
+            }
+        };
         let resources = VmResources {
             cpus,
             memory_mib: mem,
             network: net,
+            disk_durability,
             storage_gib: sf.storage,
             overlay_gib: sf.overlay,
             allowed_cidrs: if allowed_cidrs.is_empty() {
@@ -227,6 +237,7 @@ impl UpCmd {
             record.cmd = sf.cmd.clone();
             record.storage_gb = sf.storage;
             record.overlay_gb = sf.overlay;
+            record.disk_durability = disk_durability;
             record.ssh_agent = ssh_agent;
             record.dns_filter_hosts = dns_filter_hosts.clone();
             // The engine mounts these itself on every start, so persisting them
