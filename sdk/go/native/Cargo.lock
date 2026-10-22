@@ -2517,7 +2517,7 @@ checksum = "5b3dc8af474f516a851ff4bd12db780f948b9250ad37211e4eec0bccea54e01b"
 
 [[package]]
 name = "smol-go"
-version = "1.31.1"
+version = "1.31.2"
 dependencies = [
  "base64 0.22.1",
  "serde",
