@@ -89,6 +89,7 @@ Pin a release with `SMOL_VERSION=v1.3.7`; override locations with `PREFIX` /
 | `sdk/go` | Go SDK — C-ABI native core loaded without cgo, runtime downloaded on first local use. Same API. |
 | `src/` | The `smol` CLI (Rust): create / run / exec / files / logs, plus cloud deploy + a container registry. |
 | `docs/cli.md` | CLI command reference. |
+| [`examples/sandcastle`](examples/sandcastle/README.md) | Run Sandcastle agents in local or cloud Smol microVMs with Git worktree sync. |
 
 ## Branching
 
