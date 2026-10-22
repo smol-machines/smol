@@ -363,6 +363,45 @@ const base = await Machine.create({ image: "node:22", cacheDisk: { cache: "slot-
 const { id } = await base.checkpoint();
 const a = await Machine.restoreCheckpoint(id, "project-a", undefined, { cacheDisk: { cache: "project-a" } });
 ```
+### Use as an OpenAI Agents SDK sandbox (local)
+
+`smolmachines/openai-agents` is a sandbox client for the
+[OpenAI Agents SDK](https://github.com/openai/openai-agents-js), so a
+`SandboxAgent`'s shell and file tools run in a microVM with its own kernel:
+
+```ts
+import { run } from '@openai/agents';
+import { Manifest, SandboxAgent, filesystem, shell } from '@openai/agents/sandbox';
+import { SmolmachinesSandboxClient } from 'smolmachines/openai-agents';
+
+const client = new SmolmachinesSandboxClient({
+  image: 'python:3.12-slim',
+  allowHosts: ['pypi.org', 'files.pythonhosted.org'],
+});
+const agent = new SandboxAgent({
+  name: 'Coder',
+  model: 'gpt-5.4-mini',
+  defaultManifest: new Manifest({ entries: { project: { type: 'local_dir', src: './my-project' } } }),
+  capabilities: [shell(), filesystem()],
+});
+const result = await run(agent, 'Run the tests and fix what fails.', { sandbox: { client } });
+```
+
+- Each session gets its own machine, deleted when the session ends. With
+  `preserveOnExit: true`, a session the runner preserves keeps its machine and
+  resumes from serialized state, even in another process.
+- The manifest's `file`, `dir`, `local_file` and `local_dir` entries are written
+  into `/workspace` (the manifest root). Local sources must stay inside
+  `localSourceBaseDir` (the current directory by default) or a manifest path
+  grant, and symlinks are refused.
+- `allowHosts` / `allowCidrs` limit egress outside the machine;
+  `commandTimeoutMs` (default 10 minutes) ends a command and everything it
+  started.
+- `git_repo` entries, mounts, entry permissions, PTY sessions and core snapshots
+  are refused with `SandboxUnsupportedFeatureError` rather than ignored.
+- Needs `@openai/agents-core` 0.18–0.20 (installed with `@openai/agents`). The entry
+  ships as both ESM and CommonJS, so it uses the same copy of the SDK as your
+  app.
 
 ## Jobs: long commands that survive a dropped connection (cloud)
 
