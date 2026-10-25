@@ -20,7 +20,7 @@ import (
 
 // Version is this SDK's release. The local runtime bundle it downloads is the
 // one released with it, so the Go code and the native engine cannot drift.
-const Version = "1.32.0"
+const Version = "1.32.2"
 
 // releases is where the per-platform runtime bundles are published, as assets
 // of the smol release with the same version. Tests point it at a local server.
