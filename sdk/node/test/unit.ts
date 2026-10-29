@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { wrapNativeError, SmolError } from '../errors';
 import { adapterSha256, RolloutClient } from '../rollout';
-import { checkCloudFileSize, cliConfigApiKey, CLOUD_MAX_FILE_BYTES, egressPolicy, encodePath, errorSentence, resolveNetwork, selectsCloud, toNativeConfig, transferTimeoutMs } from '../transport';
+import { checkCloudFileSize, cliConfigApiKey, CLOUD_MAX_FILE_BYTES, egressPolicy, encodePath, errorSentence, packEgressOverride, resolveNetwork, selectsCloud, toNativeConfig, transferTimeoutMs } from '../transport';
 import { wireDefaultHardening } from '../assets';
 import { Machine } from '../machine';
 
@@ -574,6 +574,44 @@ check('the canonical resources.network is unchanged', () => {
 check('asking for neither leaves network unset', () => {
   assert.strictEqual(resolveNetwork({ image: 'alpine' }), undefined);
   assert.strictEqual(toNativeConfig('m', { image: 'alpine' }).resources, undefined);
+});
+
+// --- packEgressOverride: a .smolmachine create honours the caller's egress (#1989) ---
+check('a pack create without caller egress keeps the pack policy', () => {
+  assert.strictEqual(packEgressOverride({ image: 'app.smolmachine' }), undefined);
+});
+
+check('a pack create forwards the caller allow list', () => {
+  assert.deepStrictEqual(
+    packEgressOverride({
+      image: 'app.smolmachine',
+      resources: { allowHosts: ['api.github.com'], allowCidrs: ['10.0.0.0/8'] },
+    }),
+    { network: true, cidrs: ['10.0.0.0/8'], hosts: ['api.github.com'] },
+  );
+});
+
+check('a pack create honours network: false over an allow list', () => {
+  const off = { network: false, cidrs: [], hosts: [] };
+  assert.deepStrictEqual(packEgressOverride({ image: 'app.smolmachine', network: false }), off);
+  assert.deepStrictEqual(
+    packEgressOverride({ image: 'app.smolmachine', resources: { network: false, allowHosts: ['a.example'] } }),
+    off,
+  );
+});
+
+check('a pack create with an empty allow list allows nothing', () => {
+  assert.deepStrictEqual(
+    packEgressOverride({ image: 'app.smolmachine', resources: { allowHosts: [] } }),
+    egressPolicy('deny-all'),
+  );
+});
+
+check('a pack create with network: true alone opens egress', () => {
+  assert.deepStrictEqual(
+    packEgressOverride({ image: 'app.smolmachine', network: true }),
+    egressPolicy('allow-all'),
+  );
 });
 
 // --- bundlers: nothing they can trace may lead into the native addon ---

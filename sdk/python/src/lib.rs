@@ -827,11 +827,33 @@ impl Machine {
     }
 
     /// Create the stopped machine `name` from a `.smolmachine` artifact.
+    ///
+    /// `egress` is the caller's `(network, cidrs, hosts)` outbound policy.
+    /// When given it replaces the policy the pack carries before the machine
+    /// can start; when `None` the machine keeps the pack's own policy.
     #[staticmethod]
-    fn create_from_pack(py: Python<'_>, name: String, pack: String) -> PyResult<Self> {
+    #[pyo3(signature = (name, pack, egress=None))]
+    fn create_from_pack(
+        py: Python<'_>,
+        name: String,
+        pack: String,
+        egress: Option<(bool, Vec<String>, Vec<String>)>,
+    ) -> PyResult<Self> {
+        use smolvm::data::network::EgressPolicy;
         let runtime = runtime().map_err(err)?;
-        py.allow_threads(|| runtime.create_machine_from_pack(&name, std::path::Path::new(&pack)))
-            .map_err(err)?;
+        let policy = egress.map(|(network, cidrs, hosts)| EgressPolicy {
+            network,
+            cidrs,
+            hosts,
+        });
+        py.allow_threads(|| {
+            runtime.create_machine_from_pack_with_egress(
+                &name,
+                std::path::Path::new(&pack),
+                policy.as_ref(),
+            )
+        })
+        .map_err(err)?;
         Ok(Self { name })
     }
 

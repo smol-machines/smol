@@ -24,6 +24,7 @@ from smol.transport import (  # noqa: E402
     _cli_config_api_key,
     _encode_path,
     _native_config,
+    pack_egress_override,
     resolve_network,
 )
 from smol.types import (  # noqa: E402
@@ -832,6 +833,63 @@ def test_rollout_automatic_cohorts_partition_large_batches():
     assert cohorts[2] == cohorts[3]
     assert cohorts[2]["size"] == 44
     assert cohorts[0]["id"] != cohorts[2]["id"]
+
+
+# --- pack_egress_override: a .smolmachine create honours the caller's egress (#1989) ---
+def test_pack_without_caller_egress_keeps_the_packs_own_policy():
+    assert pack_egress_override(MachineConfig(image="app.smolmachine")) is None
+
+
+def test_pack_create_forwards_the_callers_allow_list():
+    cfg = MachineConfig(
+        image="app.smolmachine",
+        resources=ResourceSpec(allow_hosts=["api.github.com"], allow_cidrs=["10.0.0.0/8"]),
+    )
+    assert pack_egress_override(cfg) == (True, ["10.0.0.0/8"], ["api.github.com"])
+
+
+def test_pack_create_honours_network_false_over_an_allow_list():
+    assert pack_egress_override(MachineConfig(image="app.smolmachine", network=False)) == (
+        False, [], [],
+    )
+    cfg = MachineConfig(
+        image="app.smolmachine",
+        resources=ResourceSpec(network=False, allow_hosts=["api.github.com"]),
+    )
+    assert pack_egress_override(cfg) == (False, [], [])
+
+
+def test_pack_create_empty_allow_list_allows_nothing():
+    cfg = MachineConfig(image="app.smolmachine", resources=ResourceSpec(allow_hosts=[]))
+    assert pack_egress_override(cfg) == (True, ["127.0.0.0/8", "::1/128"], [])
+
+
+def test_pack_create_network_true_alone_opens_egress():
+    assert pack_egress_override(MachineConfig(image="app.smolmachine", network=True)) == (
+        True, [], [],
+    )
+
+
+def test_pack_create_passes_the_override_to_the_native_engine():
+    calls = []
+
+    class FakeNativeMachine:
+        @staticmethod
+        def create_from_pack(*args):
+            calls.append(args)
+            raise RuntimeError("[INVALID_CONFIG] stop here")
+
+    fake = SimpleNamespace(Machine=FakeNativeMachine)
+    cfg = MachineConfig(
+        name="p", image="/tmp/app.smolmachine",
+        resources=ResourceSpec(allow_hosts=["api.github.com"]),
+    )
+    with mock.patch.object(transport_module, "_load_native", return_value=fake):
+        try:
+            transport_module.make_transport(cfg, ConnectOptions())
+        except SmolError:
+            pass
+    assert calls == [("p", "/tmp/app.smolmachine", (True, [], ["api.github.com"]))]
 
 
 # --- resolve_network: a top-level `network` must not be dropped (Node parity) ---

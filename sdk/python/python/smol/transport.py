@@ -2422,6 +2422,36 @@ def resolve_network(config: MachineConfig) -> Optional[bool]:
     return canonical if canonical is not None else config.network
 
 
+def pack_egress_override(
+    config: MachineConfig,
+) -> Optional[tuple[bool, list[str], list[str]]]:
+    """The caller's `(network, cidrs, hosts)` egress for a `.smolmachine`
+    create, or `None` to keep the policy the pack carries.
+
+    A pack records its own outbound policy, which applies when the caller says
+    nothing about networking. Anything the caller does say replaces it:
+    `network=False` turns egress off (and wins over an allow list), an allow
+    list restricts egress to what it names (an empty one allows nothing), and
+    `network=True` alone opens egress. Mirrors `packEgressOverride` in the Node
+    SDK.
+    """
+    r = config.resources
+    network = resolve_network(config)
+    cidrs = r.allow_cidrs if r is not None else None
+    hosts = r.allow_hosts if r is not None else None
+    if network is False:
+        return (False, [], [])
+    if cidrs is not None or hosts is not None:
+        cidrs, hosts = list(cidrs or []), list(hosts or [])
+        if not cidrs and not hosts:
+            # Loopback only: empty lists alone would read as unrestricted.
+            return (True, ["127.0.0.0/8", "::1/128"], [])
+        return (True, cidrs, hosts)
+    if network is True:
+        return (True, [], [])
+    return None
+
+
 def _cli_session() -> tuple[Optional[str], Optional[str]]:
     """`(api_key, endpoint)` from the CLI's login session, or `(None, None)`.
     An expired access token is treated as absent so the caller surfaces an
@@ -2604,7 +2634,9 @@ def make_transport(config: MachineConfig, conn: Optional[ConnectOptions] = None)
         # A packed machine: create from it (as `smolvm machine create --from`),
         # then start it.
         try:
-            inner = native.Machine.create_from_pack(name, os.path.abspath(config.image))
+            inner = native.Machine.create_from_pack(
+                name, os.path.abspath(config.image), pack_egress_override(config)
+            )
             transport = LocalTransport(inner, cleanup_on_exit=not config.detach, interceptor=binding)
             transport.start(binding, config.wait_for_ports)
             if not config.wait_for_ports:
