@@ -599,6 +599,8 @@ def main() -> int:
               and "mach-stopped" in terminal_message
               and "stopped before becoming ready" in terminal_message,
               terminal_message)
+        check("waiting on a stopped machine says to start it",
+              "call start() first" in terminal_message, terminal_message)
 
         # --- connect bridge: authed endpoint URL + request to a published port ---
         ep = m.endpoint(80)

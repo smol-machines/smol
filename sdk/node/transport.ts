@@ -1336,6 +1336,10 @@ async function agentReachable(conn: CloudConn, id: string): Promise<boolean> {
  *  `started`/`running` state so this never hangs against them.
  *  With `waitForPorts: false`, probe the agent even if ports are published:
  *  the caller must be able to exec the service before any port can open. */
+/** Why waiting on a stopped cloud machine fails, and what to do instead. */
+const STOPPED_HINT =
+  "a stopped machine never becomes ready by waiting, so call start() first (a machine created with POST /v1/machines stays stopped until started)";
+
 async function waitForReady(
   conn: CloudConn,
   id: string,
@@ -1371,7 +1375,8 @@ async function waitForReady(
     if (state === "stopped" || state === "deleted") {
       throw new SmolError(
         "SMOLVM_ERROR",
-        `machine ${id} entered ${state} before becoming ready`,
+        `machine ${id} entered ${state} before becoming ready` +
+          (state === "stopped" ? `; ${STOPPED_HINT}` : ""),
       );
     }
     // With deferred ports, even `started` and legacy servers' absent `ready`

@@ -143,6 +143,9 @@ export class Machine {
    *    This does not wait for readiness by default. With `waitForPorts: false`,
    *    it waits for the guest agent so `exec()` can start a published service.
    *    Call `waitUntilReady()` before expecting the published service to respond.
+   *    It does not start a stopped machine, and a machine created through the
+   *    REST API (`POST /v1/machines`) or the console is stopped until started:
+   *    call `start()`, which waits for readiness, instead.
    *
    * @param id    local machine name, or cloud machine id (`mach-…`)
    * @param conn  backend selection (local by default; cloud via `{ target: 'cloud', apiKey }` or `SMOL_CLOUD_TOKEN`)

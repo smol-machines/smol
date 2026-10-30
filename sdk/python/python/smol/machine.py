@@ -114,7 +114,10 @@ class Machine:
 
           This does not wait for readiness; call :meth:`wait_until_ready`
           before ``exec``, using a connect endpoint, or expecting the workload
-          to respond.
+          to respond. It does not start a stopped machine either, and a machine
+          created through the REST API (``POST /v1/machines``) or the console
+          is stopped until started: call :meth:`start`, which waits for
+          readiness, instead.
 
         :param machine_id: local machine name, or cloud machine id (``mach-…``).
         :param conn: backend selection (local by default; cloud via

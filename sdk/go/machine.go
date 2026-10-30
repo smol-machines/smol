@@ -37,7 +37,9 @@ func Create(ctx context.Context, cfg MachineConfig, conn *ConnectOptions) (*Mach
 // Connect attaches to an existing machine without creating one. Locally it
 // re-opens a persisted machine by name, starting it if stopped. On the cloud
 // it looks the machine up by id or name; it does not wait for readiness, so
-// call WaitUntilReady before Exec.
+// call WaitUntilReady before Exec. It does not start a stopped machine either,
+// and a machine created through the REST API (POST /v1/machines) or the
+// console is stopped until started: call Start, which waits for readiness.
 func Connect(ctx context.Context, id string, conn *ConnectOptions) (*Machine, error) {
 	t, err := connectTransport(ctx, id, connOrZero(conn))
 	if err != nil {

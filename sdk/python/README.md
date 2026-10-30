@@ -389,9 +389,14 @@ try:
 finally:
     m.delete()
 
-# Machine.connect() intentionally does not wait for readiness:
+# Machine.connect() intentionally does not wait for readiness, and does not
+# start a stopped machine (one made with POST /v1/machines is stopped until
+# started), so start it if it is stopped:
 existing = Machine.connect(machine_id, ConnectOptions(target="cloud"))
-existing.wait_until_ready()
+if existing.info().get("state") == "stopped":
+    existing.start()  # waits for readiness
+else:
+    existing.wait_until_ready()
 ```
 
 ## API
@@ -406,7 +411,7 @@ connections may need to reconnect. Both methods are awaitable on `AsyncMachine`.
 - `Machine.create(config=None, conn=None)` — create and start a machine; cloud
   waits for `ready is True` before returning.
 - `Machine.connect(machine_id, conn=None)` — attach without waiting; call
-  `wait_until_ready()` before use.
+  `wait_until_ready()` before use, or `start()` if the machine is stopped.
 - `machine.exec(command, opts=None)` / `machine.run(image, command, opts=None)` → `ExecResult`.
   `ExecOptions(env=..., workdir=..., timeout=1.5, user="nobody")`: `user` runs
   the command as that user on an image machine (a bare VM refuses it rather than
