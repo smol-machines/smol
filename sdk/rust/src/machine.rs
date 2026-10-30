@@ -529,7 +529,10 @@ impl Machine {
     /// Attach to an existing machine on the target these options select.
     ///
     /// Locally this re-opens a persisted machine by name, starting it if
-    /// stopped. On the cloud it looks the machine up by id, or by name.
+    /// stopped. On the cloud it looks the machine up by id, or by name, and
+    /// does not start it: a machine created through the REST API
+    /// (`POST /v1/machines`) or the console is stopped until started, so call
+    /// [`Machine::start`] rather than waiting for readiness.
     pub fn connect_with(name: impl Into<String>, connect: &ConnectOptions) -> Result<Self> {
         let name = name.into();
         match connect.target() {

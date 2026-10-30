@@ -2286,6 +2286,13 @@ def _agent_reachable(base_url: str, api_key: str, machine_id: str) -> bool:
         return False
 
 
+# Why waiting on a stopped cloud machine fails, and what to do instead.
+_STOPPED_HINT = (
+    "a stopped machine never becomes ready by waiting, so call start() first "
+    "(a machine created with POST /v1/machines stays stopped until started)"
+)
+
+
 def _wait_for_ready(
     base_url: str,
     api_key: str,
@@ -2320,9 +2327,10 @@ def _wait_for_ready(
         if state == "error":
             raise SmolError("SMOLVM_ERROR", f"machine {machine_id} entered error state while starting")
         if state in ("stopped", "deleted"):
-            raise SmolError(
-                "SMOLVM_ERROR", f"machine {machine_id} entered {state} before becoming ready"
-            )
+            message = f"machine {machine_id} entered {state} before becoming ready"
+            if state == "stopped":
+                message += "; " + _STOPPED_HINT
+            raise SmolError("SMOLVM_ERROR", message)
         # Back-compat: `ready` absent entirely → old server, gate on state.
         if "ready" not in m and state in ("started", "running"):
             return

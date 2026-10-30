@@ -309,7 +309,8 @@ impl Client {
         )
     }
 
-    /// Create a machine. It is not started.
+    /// Create a machine. It is not started: follow with [`Self::start_ready`],
+    /// or [`Self::start`] and [`Self::wait_until_ready`], before using it.
     pub fn create_machine(&self, request: &CreateMachine) -> Result<Machine> {
         self.json(
             reqwest::Method::POST,
@@ -474,10 +475,17 @@ impl Client {
                     return Ok(());
                 }
                 if machine.is_terminal() {
+                    let hint = if machine.state == "stopped" {
+                        "; a stopped machine never becomes ready by waiting, so call start() \
+                         first (a machine created with POST /v1/machines stays stopped until \
+                         started)"
+                    } else {
+                        ""
+                    };
                     return Err(Error::new(
                         ErrorKind::Other,
                         format!(
-                            "machine {id} entered {} before becoming ready",
+                            "machine {id} entered {} before becoming ready{hint}",
                             machine.state
                         ),
                     ));
@@ -1744,6 +1752,25 @@ mod tests {
             )
             .unwrap_err();
         assert_eq!(error.kind(), ErrorKind::Timeout);
+    }
+
+    #[test]
+    fn waiting_on_a_stopped_machine_says_to_start_it() {
+        let (url, seen) = scripted_server(vec![(
+            "200 OK",
+            "",
+            r#"{"id":"mach-x","state":"stopped","ready":false}"#,
+        )]);
+        let client = Client::new(Credentials::new(&url, "smk_test")).unwrap();
+        let error = client
+            .wait_until_ready("mach-x", Duration::from_secs(5), Duration::from_millis(1))
+            .unwrap_err();
+        assert!(
+            error.message().contains("call start() first"),
+            "{}",
+            error.message()
+        );
+        assert_eq!(seen.load(std::sync::atomic::Ordering::SeqCst), 1);
     }
 
     #[test]

@@ -628,6 +628,11 @@ async function main(): Promise<void> {
       terminalError.message.includes("stopped before becoming ready"),
     String(terminalError),
   );
+  check(
+    "waiting on a stopped machine says to start it",
+    terminalError instanceof SmolError && terminalError.message.includes("call start() first"),
+    String(terminalError),
+  );
 
   // --- connect bridge: authed endpoint URL + fetch to a published guest port ---
   const ep = m.endpoint(80);

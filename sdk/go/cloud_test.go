@@ -375,6 +375,8 @@ func TestCloudMock(t *testing.T) {
 	err = stopped.WaitUntilReady(ctx, WaitReadyOptions{Timeout: 100 * time.Millisecond, Interval: 5 * time.Millisecond})
 	check("terminal state fails readiness with a useful error",
 		errors.As(err, &se) && strings.Contains(se.Message, "m-stopped") && strings.Contains(se.Message, "stopped before becoming ready"), err)
+	check("waiting on a stopped machine says to start it",
+		errors.As(err, &se) && strings.Contains(se.Message, "call Start first"), err)
 
 	// Connect bridge.
 	ep, err := m.Endpoint(80, "")

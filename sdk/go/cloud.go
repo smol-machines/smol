@@ -333,7 +333,12 @@ func waitForReady(ctx context.Context, c cloudConn, id string, opts WaitReadyOpt
 		}
 		// A definitively terminal, non-ready state won't become ready by waiting.
 		if state == "stopped" || state == "deleted" {
-			return &Error{Code: CodeSmolvm, Message: fmt.Sprintf("machine %s entered %s before becoming ready", id, state)}
+			msg := fmt.Sprintf("machine %s entered %s before becoming ready", id, state)
+			if state == "stopped" {
+				msg += "; a stopped machine never becomes ready by waiting, so call Start first " +
+					"(a machine created with POST /v1/machines stays stopped until started)"
+			}
+			return &Error{Code: CodeSmolvm, Message: msg}
 		}
 		running := state == "started" || state == "running"
 		// Back-compat: `ready` absent entirely means an old server; gate on state.

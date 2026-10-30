@@ -137,7 +137,10 @@ attaches after the agent is ready, without waiting for the listener. Cloud
 `connect()` normally attaches without waiting; with `waitForPorts: false`, it
 waits for a successful guest-agent command without requiring the port to be
 open. Connect without that flag to inspect or delete a stopped or paused cloud
-machine.
+machine. Connecting never starts a stopped cloud machine, and one created
+through the REST API (`POST /v1/machines`) or the console is stopped until
+started: call `start()`, which waits for readiness, rather than
+`waitUntilReady()`, which fails at once on a stopped machine.
 
 To reach a service **inside** the VM, use the authenticated connect bridge —
 **no Cloudflare/localhost.run tunnel, no public exposure, no egress allow-list.**
