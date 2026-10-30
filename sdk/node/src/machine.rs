@@ -985,12 +985,27 @@ impl NapiMachine {
     }
 
     /// Create the stopped machine `name` from a `.smolmachine` artifact.
+    /// `egress`, when given, replaces the outbound policy the pack carries
+    /// before the machine can start; without it the pack's own policy applies.
     #[napi]
-    pub async fn create_from_pack(name: String, pack: String) -> napi::Result<NapiMachine> {
+    pub async fn create_from_pack(
+        name: String,
+        pack: String,
+        egress: Option<EgressPolicyConfig>,
+    ) -> napi::Result<NapiMachine> {
         let runtime = runtime().into_napi()?;
         let created = name.clone();
+        let policy = egress.map(|policy| smolvm::data::network::EgressPolicy {
+            network: policy.network,
+            cidrs: policy.cidrs.unwrap_or_default(),
+            hosts: policy.hosts.unwrap_or_default(),
+        });
         tokio::task::spawn_blocking(move || {
-            runtime.create_machine_from_pack(&created, std::path::Path::new(&pack))
+            runtime.create_machine_from_pack_with_egress(
+                &created,
+                std::path::Path::new(&pack),
+                policy.as_ref(),
+            )
         })
         .await
         .map_err(join_error)?
