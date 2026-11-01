@@ -601,6 +601,7 @@ class Machine:
         branchable: bool = False,
         checkpointable: Optional[bool] = None,
         freeze_source: bool = False,
+        keep_machine_id: bool = False,
     ) -> "Machine":
         """Branch an independent child from this running source. The child
         inherits warm RAM and disk through copy-on-write while the source remains
@@ -611,13 +612,18 @@ class Machine:
         base: later branches start from that same state, and a frozen source no
         longer counts toward the concurrency cap. The source cannot run
         commands again; work in its branches, or stop it.
+
+        ``keep_machine_id=True`` keeps the source's ``/etc/machine-id`` in the
+        child (hostname and SSH host keys are still re-minted), so tools that key
+        a per-machine cache by it, such as Nx, keep seeing the source's cache.
         """
         promote = branchable or bool(checkpointable)
+        extra: dict[str, bool] = {}
         if freeze_source:
-            return Machine(
-                self._t.fork(name, ports, checkpointable=promote, freeze_source=True)
-            )
-        return Machine(self._t.fork(name, ports, checkpointable=promote))
+            extra["freeze_source"] = True
+        if keep_machine_id:
+            extra["keep_machine_id"] = True
+        return Machine(self._t.fork(name, ports, checkpointable=promote, **extra))
 
     def fork_batch(
         self,
@@ -638,6 +644,7 @@ class Machine:
         name_prefix: Optional[str] = None,
         ports: Optional[list[PortSpec]] = None,
         freeze_source: bool = False,
+        keep_machine_id: bool = False,
     ) -> "list[Machine]":
         """Branch this source into many independent children in one call.
 
@@ -648,8 +655,13 @@ class Machine:
         base: later branches start from that same state, and a frozen source no
         longer counts toward the concurrency cap. The source cannot run
         commands again; work in its branches, or stop it.
+        ``keep_machine_id=True`` applies to every child, as for :meth:`branch`.
         """
-        extra = {"freeze_source": True} if freeze_source else {}
+        extra: dict[str, bool] = {}
+        if freeze_source:
+            extra["freeze_source"] = True
+        if keep_machine_id:
+            extra["keep_machine_id"] = True
         return [
             Machine(t)
             for t in self._t.fork_batch(

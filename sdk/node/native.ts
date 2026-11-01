@@ -156,12 +156,14 @@ export interface NapiMachine {
     ports?: NativePortMapping[],
     checkpointable?: boolean,
     freezeSource?: boolean,
+    keepMachineId?: boolean,
   ): Promise<NapiMachine>;
   forkBatch(
     names: string[],
     ports?: NativePortMapping[],
     parallel?: number,
     freezeSource?: boolean,
+    keepMachineId?: boolean,
   ): Promise<NapiMachine[]>;
   exec(
     command: string[],

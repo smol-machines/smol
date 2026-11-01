@@ -37,6 +37,12 @@ pub struct ForkCmd {
     /// copying them. Use only when base weights remain frozen.
     #[arg(long)]
     pub share_weights: bool,
+
+    /// Keep the source's machine-id in the child; hostname and SSH host keys
+    /// are still re-minted. For tools that key a per-machine cache by
+    /// /etc/machine-id (Nx), so a warm source's cache stays visible.
+    #[arg(long)]
+    pub keep_machine_id: bool,
 }
 
 /// A branch pins TCP host ports only; the engine gives each UDP forward
@@ -56,6 +62,7 @@ fn cloud_branch_body(
     ports: &[PortMapping],
     share_weights: bool,
     forkable: bool,
+    keep_machine_id: bool,
 ) -> serde_json::Value {
     let ports: Vec<serde_json::Value> = ports
         .iter()
@@ -66,6 +73,7 @@ fn cloud_branch_body(
         "ports": ports,
         "shareWeights": share_weights,
         "branchable": forkable,
+        "keepMachineId": keep_machine_id,
     })
 }
 
@@ -89,11 +97,18 @@ impl ForkCmd {
         let pinned = tcp_pins(&self.port)?;
         let db = smolvm::db::SmolvmDb::open()?;
         let runtime = smolvm::embedded::EmbeddedRuntime::with_db(db.clone());
-        if self.forkable {
-            runtime.fork_checkpointable_machine_detached(&self.golden, &self.name, &pinned)?;
-        } else {
-            runtime.fork_machine_detached(&self.golden, &self.name, &pinned, self.share_weights)?;
-        }
+        runtime.fork_machine_opts(
+            &self.golden,
+            &self.name,
+            &pinned,
+            smolvm::embedded::ForkOptions {
+                checkpointable: self.forkable,
+                share_weights: self.share_weights,
+                detached: true,
+                keep_machine_id: self.keep_machine_id,
+                ..Default::default()
+            },
+        )?;
 
         let clone = db
             .get_vm(&self.name)?
@@ -116,7 +131,13 @@ impl ForkCmd {
     fn run_cloud(self) -> anyhow::Result<()> {
         tcp_pins(&self.port)?;
         let clone_name = self.name.clone();
-        let body = cloud_branch_body(&clone_name, &self.port, self.share_weights, self.forkable);
+        let body = cloud_branch_body(
+            &clone_name,
+            &self.port,
+            self.share_weights,
+            self.forkable,
+            self.keep_machine_id,
+        );
         super::cloud::run_cloud_command(
             Some(self.golden),
             move |http, endpoint, golden_id| async move {
@@ -172,11 +193,18 @@ mod tests {
 
     #[test]
     fn cloud_branch_preserves_weight_sharing_and_ports() {
-        let body = cloud_branch_body("clone", &[PortMapping::new(49152, 9222)], true, true);
+        let body = cloud_branch_body("clone", &[PortMapping::new(49152, 9222)], true, true, false);
         assert_eq!(body["name"], "clone");
         assert_eq!(body["ports"][0]["hostPort"], 49152);
         assert_eq!(body["ports"][0]["port"], 9222);
         assert_eq!(body["shareWeights"], true);
         assert_eq!(body["branchable"], true);
+        assert_eq!(body["keepMachineId"], false);
+    }
+
+    #[test]
+    fn cloud_branch_forwards_keep_machine_id() {
+        let body = cloud_branch_body("clone", &[], false, false, true);
+        assert_eq!(body["keepMachineId"], true);
     }
 }

@@ -106,6 +106,10 @@ export interface BranchOptions {
    *  counts toward the concurrency cap. The source cannot run commands again;
    *  work in its branches, or stop it. */
   freezeSource?: boolean;
+  /** Keep the source's machine-id in the child; hostname and SSH host keys are
+   *  still re-minted. For tools that key a per-machine cache by
+   *  `/etc/machine-id` (Nx), so a warm source's cache stays visible. */
+  keepMachineId?: boolean;
 }
 
 /** Backwards-compatible name for {@link BranchOptions}. */
@@ -129,6 +133,8 @@ export interface BranchBatchOptions {
    *  counts toward the concurrency cap. The source cannot run commands again;
    *  work in its branches, or stop it. */
   freezeSource?: boolean;
+  /** Keep the source's machine-id in every child, as for a single branch. */
+  keepMachineId?: boolean;
 }
 
 /** Backwards-compatible name for {@link BranchBatchOptions}. */

@@ -38,7 +38,7 @@ Global behavior:
 | `smol machine shell --name <name>` | Interactive shell into a machine. Alias: `sh`. |
 | `smol machine cp <src> <dst>` | Copy files host↔guest (`name:/path` denotes a guest path). |
 | `smol machine logs <name>` | Fetch machine logs (`--tail N`). |
-| `smol machine branch --from <source> --name <child>` | Create an independent child from a running branchable machine (copy-on-write RAM + disks). Use `--branchable` on the child to branch again. `fork`, `--golden`, and `--forkable` remain compatibility aliases. |
+| `smol machine branch --from <source> --name <child>` | Create an independent child from a running branchable machine (copy-on-write RAM + disks). Use `--branchable` on the child to branch again; `--keep-machine-id` keeps the source's `/etc/machine-id` in the child so Nx-style caches keyed by it survive (hostname and SSH host keys are still re-minted). `fork`, `--golden`, and `--forkable` remain compatibility aliases. |
 | `smol machine checkpoint --name <source> --store <store> --output <point.smolcheckpoint>` | Capture a periodic local rollback point as a self-contained directory while reusing unchanged RAM and disk chunks from the store. Omit `--store` to write one portable file. |
 | `smol machine checkpoint --export-from <point> --output <file.smolcheckpoint>` | Export a stored checkpoint directory as one portable file. |
 | `smol machine checkpoint-prune --store <store>` | Reclaim objects that no retained checkpoint in the store references. |

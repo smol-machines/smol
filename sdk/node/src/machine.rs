@@ -342,7 +342,9 @@ impl NapiMachine {
         let runtime = runtime().into_napi()?;
         match runtime.machine_record(&name).into_napi()? {
             Some(_) => Ok(Self { name }),
-            None => Err(crate::error::not_found(format!("machine '{name}' not found"))),
+            None => Err(crate::error::not_found(format!(
+                "machine '{name}' not found"
+            ))),
         }
     }
 
@@ -641,6 +643,7 @@ impl NapiMachine {
         ports: Option<Vec<PortMappingConfig>>,
         checkpointable: Option<bool>,
         freeze_source: Option<bool>,
+        keep_machine_id: Option<bool>,
     ) -> napi::Result<NapiMachine> {
         let runtime = runtime().into_napi()?;
         let golden = self.name.clone();
@@ -651,12 +654,16 @@ impl NapiMachine {
             .map(|p| (p.host, p.guest))
             .collect();
         tokio::task::spawn_blocking(move || {
-            runtime.fork_machine_with(
+            runtime.fork_machine_opts(
                 &golden,
                 &clone,
                 &pinned,
-                checkpointable.unwrap_or(false),
-                source_policy(freeze_source),
+                smolvm::embedded::ForkOptions {
+                    checkpointable: checkpointable.unwrap_or(false),
+                    keep_machine_id: keep_machine_id.unwrap_or(false),
+                    source_policy: source_policy(freeze_source),
+                    ..Default::default()
+                },
             )
         })
         .await
@@ -674,6 +681,7 @@ impl NapiMachine {
         ports: Option<Vec<PortMappingConfig>>,
         parallel: Option<u32>,
         freeze_source: Option<bool>,
+        keep_machine_id: Option<bool>,
     ) -> napi::Result<Vec<NapiMachine>> {
         let runtime = runtime().into_napi()?;
         let golden = self.name.clone();
@@ -685,12 +693,16 @@ impl NapiMachine {
             .collect();
         let width = parallel.unwrap_or(8).max(1) as usize;
         tokio::task::spawn_blocking(move || {
-            runtime.fork_machines_with(
+            runtime.fork_machines_opts(
                 &golden,
                 &clones,
                 &pinned,
                 width,
-                source_policy(freeze_source),
+                smolvm::embedded::ForkOptions {
+                    keep_machine_id: keep_machine_id.unwrap_or(false),
+                    source_policy: source_policy(freeze_source),
+                    ..Default::default()
+                },
             )
         })
         .await
@@ -962,7 +974,9 @@ impl NapiMachine {
                         )))
                     }
                 };
-                Ok(smolvm::data::network::PortMapping::with_protocol(p.host, p.guest, protocol))
+                Ok(smolvm::data::network::PortMapping::with_protocol(
+                    p.host, p.guest, protocol,
+                ))
             })
             .collect::<napi::Result<Vec<_>>>()?;
         tokio::task::spawn_blocking(move || runtime.set_ports(&name, &mappings))
@@ -977,11 +991,13 @@ impl NapiMachine {
     pub async fn pack(&self, output: String) -> napi::Result<String> {
         let runtime = runtime().into_napi()?;
         let name = self.name.clone();
-        tokio::task::spawn_blocking(move || runtime.pack_machine(&name, std::path::Path::new(&output)))
-            .await
-            .map_err(join_error)?
-            .into_napi()
-            .map(|path| path.to_string_lossy().into_owned())
+        tokio::task::spawn_blocking(move || {
+            runtime.pack_machine(&name, std::path::Path::new(&output))
+        })
+        .await
+        .map_err(join_error)?
+        .into_napi()
+        .map(|path| path.to_string_lossy().into_owned())
     }
 
     /// Create the stopped machine `name` from a `.smolmachine` artifact.

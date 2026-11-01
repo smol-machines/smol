@@ -957,6 +957,17 @@ async function main(): Promise<void> {
     seen.forkBody?.freezeSource === undefined,
     JSON.stringify(seen.forkBody),
   );
+  check(
+    "branch omits keepMachineId unless asked",
+    seen.forkBody?.keepMachineId === undefined,
+    JSON.stringify(seen.forkBody),
+  );
+  await m.branch("kept-id", { keepMachineId: true });
+  check(
+    "branch({ keepMachineId: true }) forwards it",
+    seen.forkBody?.name === "kept-id" && seen.forkBody?.keepMachineId === true,
+    JSON.stringify(seen.forkBody),
+  );
   await m.branch("frozen-1", { freezeSource: true });
   check(
     "branch({ freezeSource: true }) asks to keep the source as a branch base",
@@ -1058,6 +1069,12 @@ async function main(): Promise<void> {
   check(
     "branchBatch leaves the source running by default",
     seen.forkBatchBody?.freezeSource === undefined,
+    JSON.stringify(seen.forkBatchBody),
+  );
+  await m.branchBatch({ count: 2, namePrefix: "kept", keepMachineId: true });
+  check(
+    "branchBatch({ keepMachineId: true }) forwards it",
+    seen.forkBatchBody?.keepMachineId === true,
     JSON.stringify(seen.forkBatchBody),
   );
   await m.branchBatch({ count: 2, namePrefix: "frozen", freezeSource: true });

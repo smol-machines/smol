@@ -42,6 +42,12 @@ pub struct ForkBatchCmd {
     /// Force a local batch branch.
     #[arg(long, conflicts_with = "cloud")]
     pub local: bool,
+
+    /// Keep the source's machine-id in every child; hostname and SSH host keys
+    /// are still re-minted. For tools that key a per-machine cache by
+    /// /etc/machine-id (Nx), so a warm source's cache stays visible.
+    #[arg(long)]
+    pub keep_machine_id: bool,
 }
 
 impl ForkBatchCmd {
@@ -61,7 +67,17 @@ impl ForkBatchCmd {
         let pinned = super::fork::tcp_pins(&self.port)?;
         let db = smolvm::db::SmolvmDb::open()?;
         let runtime = smolvm::embedded::EmbeddedRuntime::with_db(db.clone());
-        runtime.fork_machines_detached(&self.golden, &names, &pinned, self.parallel)?;
+        runtime.fork_machines_opts(
+            &self.golden,
+            &names,
+            &pinned,
+            self.parallel,
+            smolvm::embedded::ForkOptions {
+                detached: true,
+                keep_machine_id: self.keep_machine_id,
+                ..Default::default()
+            },
+        )?;
         for name in &names {
             let child = db
                 .get_vm(name)?
@@ -111,6 +127,7 @@ impl ForkBatchCmd {
             "ports": self.port.iter().map(|port| {
                 serde_json::json!({ "port": port.guest, "hostPort": port.host })
             }).collect::<Vec<_>>(),
+            "keepMachineId": self.keep_machine_id,
         });
         super::cloud::run_cloud_command(
             Some(self.golden),
@@ -171,6 +188,7 @@ mod tests {
             port: Vec::new(),
             cloud: false,
             local: true,
+            keep_machine_id: false,
         }
     }
 

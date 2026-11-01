@@ -251,7 +251,9 @@ Existing network connections may need to reconnect.
   the full Cloud download; stopping iteration cancels the response. Local
   machines currently yield one buffered chunk.
 - `machine.pullImage(image)` / `machine.listImages()`.
-- `machine.branch(name, options?)` / `machine.branchBatch(options)`.
+- `machine.branch(name, options?)` / `machine.branchBatch(options)`. Options:
+  `ports`, `branchable` (single branch), `freezeSource`, `keepMachineId` (keep
+  the source's `/etc/machine-id` so Nx-style caches keyed by it survive).
 - `machine.checkpoint(output, { store? })`, `Machine.restoreCheckpoint(...)`,
   `Machine.exportCheckpoint(...)`, and `Machine.pruneCheckpointStore(...)`.
 - `machine.resize({ cpus?, memoryMb?, storageGb?, overlayGb? })` *(local)* —

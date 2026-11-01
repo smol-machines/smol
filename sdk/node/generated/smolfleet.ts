@@ -2923,6 +2923,8 @@ export interface components {
             count?: number;
             /** @description Keep the source paused as a reusable branch base, as for a single branch. */
             freezeSource?: boolean;
+            /** @description Keep the source's machine-id in every child, as for a single branch. */
+            keepMachineId?: boolean;
             /** @description Labels for every child. Omitted = copy the source's labels. */
             labels?: {
                 [key: string]: string;
@@ -2962,6 +2964,13 @@ export interface components {
              *     work in its children.
              */
             freezeSource?: boolean;
+            /**
+             * @description Keep the source's `/etc/machine-id` in the child instead of minting a
+             *     fresh one. Hostname and SSH host keys are still re-minted. For tools that
+             *     key a per-machine cache by machine id (Nx names its cache database after
+             *     it), so a warm source's cache stays visible in every child.
+             */
+            keepMachineId?: boolean;
             /**
              * @description Labels for the child. Omitted = copy the source's labels; supplied
              *     (even empty) = use exactly these.
