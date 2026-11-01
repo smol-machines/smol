@@ -942,6 +942,7 @@ class LocalTransport implements Transport {
           nativePorts,
           opts.branchable ?? opts.checkpointable ?? false,
           opts.freezeSource ?? false,
+          opts.keepMachineId ?? false,
         ),
         this.handleSignals,
         undefined,
@@ -968,6 +969,7 @@ class LocalTransport implements Transport {
         nativePorts,
         Math.min(8, names.length),
         opts.freezeSource ?? false,
+        opts.keepMachineId ?? false,
       );
       branches.push(
         ...inners.map(
@@ -2067,6 +2069,7 @@ class CloudTransport implements Transport {
             ports: portBody,
             ...(branchable ? { branchable: true } : {}),
             ...(opts.freezeSource ? { freezeSource: true } : {}),
+            ...(opts.keepMachineId ? { keepMachineId: true } : {}),
           },
         },
       );
@@ -2108,6 +2111,7 @@ class CloudTransport implements Transport {
     if (opts.count !== undefined) body.count = opts.count;
     if (opts.namePrefix !== undefined) body.namePrefix = opts.namePrefix;
     if (opts.freezeSource) body.freezeSource = true;
+    if (opts.keepMachineId) body.keepMachineId = true;
     let resp: { clones: MachineInfo[] };
     try {
       resp = await cloudFetch<{ clones: MachineInfo[] }>(

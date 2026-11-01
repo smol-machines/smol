@@ -13056,6 +13056,10 @@
             "type": "boolean",
             "description": "Keep the source paused as a reusable branch base, as for a single branch."
           },
+          "keepMachineId": {
+            "type": "boolean",
+            "description": "Keep the source's machine-id in every child, as for a single branch."
+          },
           "labels": {
             "type": [
               "object",
@@ -13121,6 +13125,10 @@
           "freezeSource": {
             "type": "boolean",
             "description": "Keep the source paused as a reusable branch base instead of resuming it.\nLater branches restore the same checkpoint, and a frozen source no longer\ncounts toward the concurrency cap. It cannot execute again; stop it, or\nwork in its children."
+          },
+          "keepMachineId": {
+            "type": "boolean",
+            "description": "Keep the source's `/etc/machine-id` in the child instead of minting a\nfresh one. Hostname and SSH host keys are still re-minted. For tools that\nkey a per-machine cache by machine id (Nx names its cache database after\nit), so a warm source's cache stays visible in every child."
           },
           "labels": {
             "type": [

@@ -683,6 +683,13 @@ def main() -> int:
               f"{clone.name}/{clone.state()}")
         check("branch leaves the source running by default",
               "freezeSource" not in captured["fork_body"], str(captured.get("fork_body")))
+        check("branch omits keepMachineId unless asked",
+              "keepMachineId" not in captured["fork_body"], str(captured.get("fork_body")))
+        m.branch("kept-id", keep_machine_id=True)
+        check("branch(keep_machine_id=True) forwards it",
+              captured["fork_body"].get("name") == "kept-id"
+              and captured["fork_body"].get("keepMachineId") is True,
+              str(captured.get("fork_body")))
         m.branch("frozen-1", freeze_source=True)
         check("branch(freeze_source=True) asks to keep the source as a branch base",
               captured["fork_body"].get("freezeSource") is True, str(captured.get("fork_body")))
@@ -706,6 +713,10 @@ def main() -> int:
               ",".join(c.name for c in batch))
         check("branch_batch leaves the source running by default",
               "freezeSource" not in captured["fork_batch_body"], str(captured.get("fork_batch_body")))
+        m.branch_batch(count=2, name_prefix="kept", keep_machine_id=True)
+        check("branch_batch(keep_machine_id=True) forwards it",
+              captured["fork_batch_body"].get("keepMachineId") is True,
+              str(captured.get("fork_batch_body")))
         m.branch_batch(count=2, name_prefix="frozen", freeze_source=True)
         check("branch_batch(freeze_source=True) asks to keep the source as a branch base",
               captured["fork_batch_body"].get("freezeSource") is True,

@@ -193,12 +193,20 @@ fn record_ports(record: &smolvm::config::VmRecord) -> Vec<(u16, u16, String)> {
         .ports
         .iter()
         .map(|&(h, g)| (h, g, "tcp".to_string()))
-        .chain(record.udp_ports.iter().map(|&(h, g)| (h, g, "udp".to_string())))
+        .chain(
+            record
+                .udp_ports
+                .iter()
+                .map(|&(h, g)| (h, g, "udp".to_string())),
+        )
         .collect()
 }
 
 /// Engine stop options from seconds a caller passed, ignoring negatives.
-fn stop_options(drain_secs: Option<f64>, timeout_secs: Option<f64>) -> smolvm::embedded::StopOptions {
+fn stop_options(
+    drain_secs: Option<f64>,
+    timeout_secs: Option<f64>,
+) -> smolvm::embedded::StopOptions {
     let secs = |s: Option<f64>| {
         s.filter(|s| s.is_finite() && *s >= 0.0)
             .map(std::time::Duration::from_secs_f64)
@@ -591,11 +599,9 @@ impl Machine {
                         resources.disk_durability = match v.extract::<String>()?.as_str() {
                             "full" => smolvm::data::resources::DiskDurability::Full,
                             "deferred" => smolvm::data::resources::DiskDurability::Deferred,
-                            other => {
-                                return Err(pyo3::exceptions::PyValueError::new_err(format!(
-                                    "disk_durability must be \"full\" or \"deferred\", not {other:?}"
-                                )))
-                            }
+                            other => return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                                "disk_durability must be \"full\" or \"deferred\", not {other:?}"
+                            ))),
                         };
                     }
                 }
@@ -811,7 +817,9 @@ impl Machine {
         let runtime = runtime().map_err(err)?;
         match runtime.machine_record(&name).map_err(err)? {
             Some(_) => Ok(Self { name }),
-            None => Err(PyRuntimeError::new_err(format!("[NOT_FOUND] machine '{name}' not found"))),
+            None => Err(PyRuntimeError::new_err(format!(
+                "[NOT_FOUND] machine '{name}' not found"
+            ))),
         }
     }
 
@@ -841,7 +849,9 @@ impl Machine {
         let record = runtime
             .machine_record(&self.name)
             .map_err(err)?
-            .ok_or_else(|| PyRuntimeError::new_err(format!("[NOT_FOUND] machine '{}' not found", self.name)))?;
+            .ok_or_else(|| {
+                PyRuntimeError::new_err(format!("[NOT_FOUND] machine '{}' not found", self.name))
+            })?;
         Ok(record_ports(&record))
     }
 
@@ -860,7 +870,9 @@ impl Machine {
                         )))
                     }
                 };
-                Ok(smolvm::data::network::PortMapping::with_protocol(host, guest, protocol))
+                Ok(smolvm::data::network::PortMapping::with_protocol(
+                    host, guest, protocol,
+                ))
             })
             .collect::<PyResult<Vec<_>>>()?;
         let runtime = runtime().map_err(err)?;
@@ -1094,7 +1106,7 @@ impl Machine {
     /// live RAM + disks (same host). `ports` are `(host, guest)` inbound forwards
     /// for the clone. `freeze_source` keeps this machine paused as a reusable
     /// branch base. Returns a handle to the running clone.
-    #[pyo3(signature = (name, ports=None, checkpointable=false, freeze_source=false))]
+    #[pyo3(signature = (name, ports=None, checkpointable=false, freeze_source=false, keep_machine_id=false))]
     fn fork(
         &self,
         py: Python<'_>,
@@ -1102,16 +1114,21 @@ impl Machine {
         ports: Option<Vec<(u16, u16)>>,
         checkpointable: bool,
         freeze_source: bool,
+        keep_machine_id: bool,
     ) -> PyResult<Self> {
         let pinned = ports.unwrap_or_default();
         let runtime = runtime().map_err(err)?;
         py.allow_threads(|| {
-            runtime.fork_machine_with(
+            runtime.fork_machine_opts(
                 &self.name,
                 &name,
                 &pinned,
-                checkpointable,
-                source_policy(freeze_source),
+                smolvm::embedded::ForkOptions {
+                    checkpointable,
+                    keep_machine_id,
+                    source_policy: source_policy(freeze_source),
+                    ..Default::default()
+                },
             )
         })
         .map_err(err)?;
@@ -1120,7 +1137,7 @@ impl Machine {
 
     /// Fork many clones from one snapshot and boot them in bounded parallel
     /// waves. Transactional: an error removes every clone in this call.
-    #[pyo3(signature = (names, ports=None, parallel=8, freeze_source=false))]
+    #[pyo3(signature = (names, ports=None, parallel=8, freeze_source=false, keep_machine_id=false))]
     fn fork_batch(
         &self,
         py: Python<'_>,
@@ -1128,16 +1145,21 @@ impl Machine {
         ports: Option<Vec<(u16, u16)>>,
         parallel: usize,
         freeze_source: bool,
+        keep_machine_id: bool,
     ) -> PyResult<Vec<Self>> {
         let pinned = ports.unwrap_or_default();
         let runtime = runtime().map_err(err)?;
         py.allow_threads(|| {
-            runtime.fork_machines_with(
+            runtime.fork_machines_opts(
                 &self.name,
                 &names,
                 &pinned,
                 parallel,
-                source_policy(freeze_source),
+                smolvm::embedded::ForkOptions {
+                    keep_machine_id,
+                    source_policy: source_policy(freeze_source),
+                    ..Default::default()
+                },
             )
         })
         .map_err(err)?;
@@ -1312,7 +1334,12 @@ impl Machine {
     }
 
     #[pyo3(signature = (drain_secs=None, timeout_secs=None))]
-    fn stop(&self, py: Python<'_>, drain_secs: Option<f64>, timeout_secs: Option<f64>) -> PyResult<()> {
+    fn stop(
+        &self,
+        py: Python<'_>,
+        drain_secs: Option<f64>,
+        timeout_secs: Option<f64>,
+    ) -> PyResult<()> {
         let runtime = runtime().map_err(err)?;
         let options = stop_options(drain_secs, timeout_secs);
         py.allow_threads(|| runtime.stop_machine_with(&self.name, &options))

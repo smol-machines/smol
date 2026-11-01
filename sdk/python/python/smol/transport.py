@@ -193,6 +193,7 @@ class Transport(Protocol):
         *,
         checkpointable: bool = False,
         freeze_source: bool = False,
+        keep_machine_id: bool = False,
     ) -> "Transport": ...
 
     def fork_batch(
@@ -203,6 +204,7 @@ class Transport(Protocol):
         name_prefix: Optional[str] = None,
         ports: Optional[list[PortSpec]] = None,
         freeze_source: bool = False,
+        keep_machine_id: bool = False,
     ) -> "list[Transport]": ...
 
     def assign(
@@ -1009,12 +1011,15 @@ class LocalTransport:
         *,
         checkpointable: bool = False,
         freeze_source: bool = False,
+        keep_machine_id: bool = False,
     ) -> "Transport":
         # Local live-RAM CoW clone via the embedded engine. The golden must have
         # been started forkable (MachineConfig(forkable=True)).
         pinned = [(p.host, p.guest) for p in (ports or [])]
         try:
-            clone_inner = self._inner.fork(name, pinned, checkpointable, freeze_source)
+            clone_inner = self._inner.fork(
+                name, pinned, checkpointable, freeze_source, keep_machine_id
+            )
         except Exception as e:  # noqa: BLE001
             raise wrap_native_error(e) from e
         # LocalTransport.__init__ registers the clone for atexit cleanup.
@@ -1037,6 +1042,7 @@ class LocalTransport:
         name_prefix: Optional[str] = None,
         ports: Optional[list[PortSpec]] = None,
         freeze_source: bool = False,
+        keep_machine_id: bool = False,
     ) -> "list[Transport]":
         # The embedded engine freezes once, prepares the whole group from that
         # retained snapshot, and boots clones in bounded parallel waves. It is
@@ -1048,7 +1054,11 @@ class LocalTransport:
         try:
             try:
                 inners = self._inner.fork_batch(
-                    resolved, pinned, min(8, len(resolved)), freeze_source
+                    resolved,
+                    pinned,
+                    min(8, len(resolved)),
+                    freeze_source,
+                    keep_machine_id,
                 )
             except Exception as e:  # noqa: BLE001 - normalize native engine errors
                 raise wrap_native_error(e) from e
@@ -1661,6 +1671,7 @@ class CloudTransport:
         *,
         checkpointable: bool = False,
         freeze_source: bool = False,
+        keep_machine_id: bool = False,
     ) -> "CloudTransport":
         # Live-RAM CoW clone on the golden's node. The control plane returns the
         # running clone; wait for its agent so the returned handle is usable.
@@ -1678,6 +1689,7 @@ class CloudTransport:
                     "ports": port_body,
                     **({"branchable": True} if checkpointable else {}),
                     **({"freezeSource": True} if freeze_source else {}),
+                    **({"keepMachineId": True} if keep_machine_id else {}),
                 },
             )
         except SmolError as error:
@@ -1712,6 +1724,7 @@ class CloudTransport:
         name_prefix: Optional[str] = None,
         ports: Optional[list[PortSpec]] = None,
         freeze_source: bool = False,
+        keep_machine_id: bool = False,
     ) -> "list[CloudTransport]":
         # One transactional call: the control plane forks all clones (or none)
         # off the golden. Send the size spec raw so the server resolves names
@@ -1726,6 +1739,8 @@ class CloudTransport:
             body["namePrefix"] = name_prefix
         if freeze_source:
             body["freezeSource"] = True
+        if keep_machine_id:
+            body["keepMachineId"] = True
         try:
             resp = _cloud_fetch(
                 self._base,
