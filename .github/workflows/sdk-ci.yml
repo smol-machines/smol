@@ -302,7 +302,7 @@ jobs:
         with:
           python-version: "3.12"
       - name: Install Harbor contract test dependencies
-        run: python -m pip install 'harbor>=0.22,<0.23' pytest pytest-asyncio
+        run: python -m pip install 'harbor>=0.22,<0.26' pytest pytest-asyncio
       - name: Run Harbor provider tests
         env:
           PYTHONPATH: python
