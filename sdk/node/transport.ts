@@ -400,11 +400,11 @@ export function egressPolicy(policy: NetworkPolicy): { network: boolean; cidrs: 
 
 /** The caller's egress for a `.smolmachine` create, or `undefined` to keep the
  *  policy the pack carries. A pack records its own outbound policy, which
- *  applies when the caller says nothing about networking; anything the caller
- *  does say replaces it: `network: false` turns egress off (and wins over an
- *  allow list), an allow list restricts egress to what it names (an empty one
- *  allows nothing), and `network: true` alone opens egress. Mirrors
- *  `pack_egress_override` in the Python SDK. */
+ *  applies when the caller says nothing about networking or passes a bare
+ *  `network: true`. An explicit `network: false` turns egress off (and wins
+ *  over an allow list), and an explicit allow list restricts egress to what it
+ *  names (an empty one allows nothing). Mirrors `pack_egress_override` in the
+ *  Python SDK. */
 export function packEgressOverride(
   config: MachineConfig,
 ): { network: boolean; cidrs: string[]; hosts: string[] } | undefined {
@@ -415,7 +415,6 @@ export function packEgressOverride(
   if (cidrs !== undefined || hosts !== undefined) {
     return egressPolicy({ allowCidrs: cidrs ?? [], allowHosts: hosts ?? [] });
   }
-  if (network === true) return egressPolicy("allow-all");
   return undefined;
 }
 

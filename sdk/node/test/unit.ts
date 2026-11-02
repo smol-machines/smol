@@ -607,10 +607,11 @@ check('a pack create with an empty allow list allows nothing', () => {
   );
 });
 
-check('a pack create with network: true alone opens egress', () => {
-  assert.deepStrictEqual(
-    packEgressOverride({ image: 'app.smolmachine', network: true }),
-    egressPolicy('allow-all'),
+check('a pack create with network: true alone keeps the pack policy', () => {
+  assert.strictEqual(packEgressOverride({ image: 'app.smolmachine', network: true }), undefined);
+  assert.strictEqual(
+    packEgressOverride({ image: 'app.smolmachine', resources: { network: true } }),
+    undefined,
   );
 });
 

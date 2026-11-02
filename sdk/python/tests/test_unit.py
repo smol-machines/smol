@@ -864,9 +864,13 @@ def test_pack_create_empty_allow_list_allows_nothing():
     assert pack_egress_override(cfg) == (True, ["127.0.0.0/8", "::1/128"], [])
 
 
-def test_pack_create_network_true_alone_opens_egress():
-    assert pack_egress_override(MachineConfig(image="app.smolmachine", network=True)) == (
-        True, [], [],
+def test_pack_create_network_true_alone_keeps_the_packs_own_policy():
+    assert pack_egress_override(MachineConfig(image="app.smolmachine", network=True)) is None
+    assert (
+        pack_egress_override(
+            MachineConfig(image="app.smolmachine", resources=ResourceSpec(network=True))
+        )
+        is None
     )
 
 

@@ -2429,11 +2429,10 @@ def pack_egress_override(
     create, or `None` to keep the policy the pack carries.
 
     A pack records its own outbound policy, which applies when the caller says
-    nothing about networking. Anything the caller does say replaces it:
-    `network=False` turns egress off (and wins over an allow list), an allow
-    list restricts egress to what it names (an empty one allows nothing), and
-    `network=True` alone opens egress. Mirrors `packEgressOverride` in the Node
-    SDK.
+    nothing about networking or passes a bare `network=True`. An explicit
+    `network=False` turns egress off (and wins over an allow list), and an
+    explicit allow list restricts egress to what it names (an empty one allows
+    nothing). Mirrors `packEgressOverride` in the Node SDK.
     """
     r = config.resources
     network = resolve_network(config)
@@ -2447,8 +2446,6 @@ def pack_egress_override(
             # Loopback only: empty lists alone would read as unrestricted.
             return (True, ["127.0.0.0/8", "::1/128"], [])
         return (True, cidrs, hosts)
-    if network is True:
-        return (True, [], [])
     return None
 
 
