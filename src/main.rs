@@ -97,6 +97,48 @@ enum Commands {
     },
 }
 
+/// `smol _engine …`: the bundled engine's own command line, exactly as the
+/// `smolvm` binary of the same release runs it. The Rust SDK drives this when
+/// `smol` is installed, so a machine the CLI started and a branch the SDK asks
+/// for come from one engine install instead of two binaries of the same
+/// version. Parsed on its own, ahead of [`Cli`], because the engine's commands
+/// carry their own `--verbose` and the global one here would clash with it.
+/// `smol _engine --version` prints the engine's version.
+#[derive(Parser)]
+#[command(name = "smol _engine", bin_name = "smol _engine", version = smolvm::VERSION)]
+#[command(about = "The bundled smolvm engine's command line (internal; used by the Rust SDK)")]
+struct EngineCli {
+    #[command(subcommand)]
+    command: EngineCommand,
+}
+
+/// The engine's top-level commands, reused from the engine crate so the
+/// surface here is the engine's own and never a copy that drifts.
+#[derive(Subcommand)]
+enum EngineCommand {
+    /// Manage machines (create, start, stop, exec)
+    #[command(subcommand, visible_alias = "vm")]
+    Machine(Box<smolvm::cli::machine::MachineCmd>),
+
+    /// Package and run self-contained VM executables
+    #[command(subcommand)]
+    Pack(Box<smolvm::cli::pack::PackCmd>),
+
+    /// Manage engine configuration (registries, defaults)
+    #[command(subcommand)]
+    Config(smolvm::cli::config::ConfigCmd),
+}
+
+impl EngineCommand {
+    fn run(self) -> smolvm::Result<()> {
+        match self {
+            Self::Machine(cmd) => (*cmd).run(),
+            Self::Pack(cmd) => (*cmd).run(),
+            Self::Config(cmd) => cmd.run(),
+        }
+    }
+}
+
 /// Build the tracing `EnvFilter` for the CLI.
 ///
 /// Precedence: an explicit `SMOL_LOG` (preferred) or `RUST_LOG` env var always
@@ -161,6 +203,21 @@ fn main() {
                 std::process::exit(1);
             }
         }
+    }
+
+    // `_engine`: the engine's own command line, parsed by its own parser (see
+    // `EngineCli`). Logging is env-only here, as on the engine binary.
+    if std::env::args_os().nth(1).as_deref() == Some(std::ffi::OsStr::new("_engine")) {
+        let engine = EngineCli::parse_from(
+            std::iter::once(std::ffi::OsString::from("smol _engine"))
+                .chain(std::env::args_os().skip(2)),
+        );
+        init_logging(0);
+        if let Err(e) = engine.command.run() {
+            eprintln!("Error: {}", e);
+            std::process::exit(1);
+        }
+        return;
     }
 
     let cli = Cli::parse();

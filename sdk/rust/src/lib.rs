@@ -152,12 +152,16 @@ pub use transport::ReadyOptions;
 pub use tunnel::Tunnel;
 
 /// The engine binary this SDK drives for local machines: the one `SMOLVM`
-/// names, else a compatible install on `PATH`, else the release this crate was
-/// built against, fetched into the cache if needed.
+/// names, else the engine inside an installed `smol` CLI of this crate's
+/// version, else a compatible `smolvm` install, else the release this crate
+/// was built against, fetched into the cache if needed.
 ///
-/// For programs that embed the engine's interactive exec in their own
-/// terminal, such as an editor spawning `smolvm machine exec -t …` in a pty
-/// while this SDK manages the machine's lifecycle.
+/// The result takes the `smolvm` binary's arguments (`machine exec …`),
+/// whichever of those it is: for an installed `smol` it is a small script in
+/// the SDK's cache that runs `smol _engine …`. For programs that embed the
+/// engine's interactive exec in their own terminal, such as an editor
+/// spawning `smolvm machine exec -t …` in a pty while this SDK manages the
+/// machine's lifecycle.
 pub fn engine_cli() -> Result<std::path::PathBuf> {
     transport::local::resolve_cli()
 }

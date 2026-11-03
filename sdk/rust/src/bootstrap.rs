@@ -73,7 +73,7 @@ pub(crate) fn platform_slug() -> Result<&'static str> {
 }
 
 /// Where fetched engines live.
-fn cache_root() -> Result<PathBuf> {
+pub(crate) fn cache_root() -> Result<PathBuf> {
     if let Some(dir) = std::env::var_os("SMOLMACHINES_CACHE_DIR") {
         return Ok(PathBuf::from(dir));
     }
@@ -125,8 +125,8 @@ pub fn ensure_engine() -> Result<PathBuf> {
         return Err(Error::new(
             ErrorKind::NotFound,
             format!(
-                "no engine at {} and downloads are disabled; install the smolvm CLI or set \
-                 SMOLVM to a binary",
+                "no engine at {} and downloads are disabled; install the smol CLI (or smolvm) \
+                 of version {version}, or set SMOLVM to a binary",
                 extracted.display()
             ),
         ));
