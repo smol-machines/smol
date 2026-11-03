@@ -5,9 +5,9 @@
 //! ones included, and the engine is not published. Driving the CLI keeps the
 //! SDK self-contained on crates.io while still running machines on this host.
 //!
-//! [`resolve_cli`] picks the binary: an installed `smolvm` when its version
-//! matches this SDK, otherwise the matching engine release, fetched once and
-//! cached.
+//! [`resolve_cli`] picks the binary: the engine inside an installed `smol`
+//! CLI when its version matches this SDK, else an installed `smolvm` of that
+//! version, otherwise the matching engine release, fetched once and cached.
 
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
@@ -72,43 +72,220 @@ fn forward_output(
     }
 }
 
-/// Find the `smolvm` binary this transport drives.
+/// Find the engine binary this transport drives.
 ///
-/// `SMOLVM` wins so a caller can pin a specific build. Otherwise an installed
-/// CLI (on `PATH`, then the two default install locations) is used only when
-/// its version matches this SDK's engine; an older or newer release would
-/// silently drop or change features, so it is skipped and the matching engine
-/// is fetched instead.
+/// `SMOLVM` wins so a caller can pin a specific build. Otherwise the engine
+/// inside an installed `smol` CLI is used when its version matches this SDK's
+/// engine: the CLI carries the engine (`smol _engine …` runs it as the
+/// `smolvm` binary would), and a machine `smol` started and a branch this SDK
+/// asks for then come from one install. Failing that, an installed `smolvm`
+/// of a matching version is used. An older or newer release would silently
+/// drop or change features, so it is skipped, and when nothing installed
+/// matches, the engine release this SDK was built against is fetched once and
+/// cached. Each choice, and each candidate passed over, is logged at `debug`.
 pub(crate) fn resolve_cli() -> Result<PathBuf> {
     if let Some(explicit) = std::env::var_os("SMOLVM").map(PathBuf::from) {
-        return explicit_cli(explicit);
-    }
-    let wanted = crate::bootstrap::engine_version();
-    let (found, skipped) = first_compatible(installed_candidates(), &wanted, engine_version_of);
-    if let Some(cli) = found {
+        let cli = explicit_cli(explicit)?;
+        log::debug!("engine: {} (SMOLVM is set)", cli.display());
         return Ok(cli);
     }
-    // Nothing usable installed: fetch the engine this SDK was built against.
-    // Only a local machine ever gets here, and only once; it is cached after.
-    crate::bootstrap::ensure_engine().map_err(|e| {
-        if skipped.is_empty() {
-            return e;
+    let wanted = crate::bootstrap::engine_version();
+    let (choice, skipped) = choose_engine(
+        smol_candidates(),
+        installed_candidates(),
+        &wanted,
+        smol_engine_version_of,
+        engine_version_of,
+    );
+    log_skipped(&skipped, &wanted);
+    match choice {
+        EngineChoice::Smol(smol) => {
+            let shim = engine_shim_for(&smol)?;
+            log::debug!(
+                "engine: {} (the engine inside the installed smol CLI {}, version {wanted})",
+                shim.display(),
+                smol.display()
+            );
+            Ok(shim)
         }
-        let found: Vec<String> = skipped
-            .iter()
-            .map(|(path, version)| {
-                let version = version.as_deref().unwrap_or("an unknown version");
-                format!("{} ({version})", path.display())
+        EngineChoice::Smolvm(cli) => {
+            log::debug!(
+                "engine: {} (an installed smolvm of version {wanted}; no smol CLI of that version)",
+                cli.display()
+            );
+            Ok(cli)
+        }
+        EngineChoice::Fetch => {
+            // Nothing usable installed: fetch the engine this SDK was built
+            // against. Only a local machine ever gets here, and only once; it
+            // is cached after.
+            log::debug!(
+                "engine: no installed smol or smolvm of version {wanted}; using the cached release"
+            );
+            crate::bootstrap::ensure_engine().map_err(|e| {
+                if skipped.is_empty() {
+                    return e;
+                }
+                let found: Vec<String> = skipped
+                    .iter()
+                    .map(|(path, version)| {
+                        let version = version.as_deref().unwrap_or("an unknown version");
+                        format!("{} ({version})", path.display())
+                    })
+                    .collect();
+                Error::new(
+                    e.kind(),
+                    format!(
+                        "{e}; installed CLIs skipped because this SDK needs engine {wanted}: {}",
+                        found.join(", ")
+                    ),
+                )
             })
-            .collect();
-        Error::new(
-            e.kind(),
-            format!(
-                "{e}; installed smolvm skipped because this SDK needs engine {wanted}: {}",
-                found.join(", ")
+        }
+    }
+}
+
+/// Which installed engine, if any, serves an SDK wanting `wanted`.
+#[derive(Debug, PartialEq, Eq)]
+enum EngineChoice {
+    /// The engine inside this `smol` CLI.
+    Smol(PathBuf),
+    /// This `smolvm` binary.
+    Smolvm(PathBuf),
+    /// Nothing installed matches; fetch the release.
+    Fetch,
+}
+
+/// The first compatible `smol`, else the first compatible `smolvm`, else a
+/// fetch, with every candidate passed over and the version it reported.
+fn choose_engine(
+    smol: Vec<PathBuf>,
+    smolvm: Vec<PathBuf>,
+    wanted: &str,
+    smol_version_of: impl Fn(&Path) -> Option<String>,
+    smolvm_version_of: impl Fn(&Path) -> Option<String>,
+) -> (EngineChoice, Vec<(PathBuf, Option<String>)>) {
+    let (found, mut skipped) = first_compatible(smol, wanted, smol_version_of);
+    if let Some(smol) = found {
+        return (EngineChoice::Smol(smol), skipped);
+    }
+    let (found, skipped_smolvm) = first_compatible(smolvm, wanted, smolvm_version_of);
+    skipped.extend(skipped_smolvm);
+    match found {
+        Some(cli) => (EngineChoice::Smolvm(cli), skipped),
+        None => (EngineChoice::Fetch, skipped),
+    }
+}
+
+fn log_skipped(skipped: &[(PathBuf, Option<String>)], wanted: &str) {
+    for (path, version) in skipped {
+        match version {
+            Some(version) => log::debug!(
+                "engine: skipped {} (engine {version}; this SDK needs {wanted})",
+                path.display()
             ),
+            None => log::debug!(
+                "engine: skipped {} (no engine version readable; a smol CLI older than \
+                 the engine passthrough, or a binary that does not run)",
+                path.display()
+            ),
+        }
+    }
+}
+
+/// Installed `smol` CLIs, most preferred first: `PATH`, then the installer's
+/// default location, then `~/.local/bin`.
+fn smol_candidates() -> Vec<PathBuf> {
+    let mut candidates = Vec::new();
+    if let Some(path) = std::env::var_os("PATH") {
+        for dir in std::env::split_paths(&path) {
+            let candidate = dir.join("smol");
+            if candidate.is_file() && !candidates.contains(&candidate) {
+                candidates.push(candidate);
+            }
+        }
+    }
+    if let Some(home) = std::env::var_os("HOME").map(PathBuf::from) {
+        for suffix in [".smol/smol", ".local/bin/smol"] {
+            let candidate = home.join(suffix);
+            if candidate.is_file() && !candidates.contains(&candidate) {
+                candidates.push(candidate);
+            }
+        }
+    }
+    candidates
+}
+
+/// The engine version a `smol` CLI carries, from `smol _engine --version`.
+///
+/// `None` for a `smol` that predates the engine passthrough (its `--version`
+/// names an engine, but nothing here could drive it), so such a CLI is passed
+/// over like any other incompatible install.
+pub(crate) fn smol_engine_version_of(smol: &Path) -> Option<String> {
+    let mut command = Command::new(smol);
+    command
+        .args(["_engine", "--version"])
+        .stdin(Stdio::null())
+        .stderr(Stdio::null());
+    retry_text_busy(|| command.output())
+        .ok()
+        .filter(|out| out.status.success())
+        .and_then(|out| parse_version_line(&String::from_utf8_lossy(&out.stdout)))
+}
+
+/// A `smolvm` stand-in that runs the engine inside `smol`.
+///
+/// The SDK, and the programs [`crate::engine_cli`] serves, spawn the engine
+/// as a binary taking `machine …` arguments, so the passthrough is wrapped in
+/// a one-line script under the SDK's cache, one per `smol` path, rewritten
+/// only when its contents would change.
+pub(crate) fn engine_shim_for(smol: &Path) -> Result<PathBuf> {
+    engine_shim_in(&crate::bootstrap::cache_root()?, smol)
+}
+
+fn engine_shim_in(cache_root: &Path, smol: &Path) -> Result<PathBuf> {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    smol.hash(&mut hasher);
+    let dir = cache_root
+        .join("smol-engine")
+        .join(format!("{:016x}", hasher.finish()));
+    let shim = dir.join("smolvm");
+    let wanted = format!(
+        "#!/bin/sh\n\
+         # Written by the smolmachines crate: the engine inside the installed smol CLI.\n\
+         exec {} _engine \"$@\"\n",
+        shell_quote(smol)
+    );
+    if std::fs::read_to_string(&shim).is_ok_and(|current| current == wanted) {
+        return Ok(shim);
+    }
+    let io = |what: &str, e: std::io::Error| {
+        Error::new(
+            ErrorKind::Storage,
+            format!("{what} {}: {e}", shim.display()),
         )
-    })
+    };
+    std::fs::create_dir_all(&dir).map_err(|e| io("create the directory for", e))?;
+    let mut temp = tempfile::Builder::new()
+        .prefix("smolvm.")
+        .tempfile_in(&dir)
+        .map_err(|e| io("stage", e))?;
+    temp.write_all(wanted.as_bytes())
+        .map_err(|e| io("write", e))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(temp.path(), std::fs::Permissions::from_mode(0o755))
+            .map_err(|e| io("mark executable", e))?;
+    }
+    temp.persist(&shim).map_err(|e| io("install", e.error))?;
+    Ok(shim)
+}
+
+/// `path` as one POSIX shell word.
+fn shell_quote(path: &Path) -> String {
+    format!("'{}'", path.to_string_lossy().replace('\'', r"'\''"))
 }
 
 /// Installed `smolvm` binaries, most preferred first.
@@ -1365,6 +1542,87 @@ mod engine_selection_tests {
         );
         assert_eq!(parse_version_line(""), None);
         assert_eq!(parse_version_line("smolvm dev\n"), None);
+    }
+
+    #[test]
+    fn a_smol_cli_is_preferred_then_a_smolvm_then_the_download() {
+        let smol = vec![PathBuf::from("/old/smol"), PathBuf::from("/new/smol")];
+        let smolvm = vec![PathBuf::from("/new/smolvm")];
+        let new_only = |p: &Path| p.starts_with("/new").then(|| "1.18.0".to_string());
+        let too_old = |_: &Path| Some("1.16.1".to_string());
+
+        let (choice, skipped) =
+            choose_engine(smol.clone(), smolvm.clone(), "1.18.0", new_only, new_only);
+        assert_eq!(choice, EngineChoice::Smol(PathBuf::from("/new/smol")));
+        assert_eq!(skipped, vec![(PathBuf::from("/old/smol"), None)]);
+
+        // No smol of this version (one too old to answer, one reporting an
+        // older engine): the installed smolvm serves.
+        let (choice, skipped) = choose_engine(
+            smol.clone(),
+            smolvm.clone(),
+            "1.18.0",
+            |p: &Path| p.starts_with("/new").then(|| "1.17.0".to_string()),
+            new_only,
+        );
+        assert_eq!(choice, EngineChoice::Smolvm(PathBuf::from("/new/smolvm")));
+        assert_eq!(
+            skipped,
+            vec![
+                (PathBuf::from("/old/smol"), None),
+                (PathBuf::from("/new/smol"), Some("1.17.0".to_string())),
+            ]
+        );
+
+        // Nothing matches: fetch, and every candidate is reported.
+        let (choice, skipped) = choose_engine(smol, smolvm, "1.18.0", too_old, too_old);
+        assert_eq!(choice, EngineChoice::Fetch);
+        assert_eq!(skipped.len(), 3);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_smol_cli_is_asked_for_its_engine_and_wrapped_as_a_smolvm() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let fake = |name: &str, body: &str| {
+            let path = dir.path().join(name);
+            std::fs::write(&path, format!("#!/bin/sh\n{body}\n")).unwrap();
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+            path
+        };
+        // A smol with the passthrough answers `_engine --version` with the
+        // engine's version; one without rejects the subcommand.
+        let smol = fake(
+            "it's smol",
+            "[ \"$1\" = _engine ] || exit 2\n[ \"$2\" = --version ] && { echo 'smol-engine 1.18.0'; exit 0; }\necho \"$@\"",
+        );
+        let older = fake("older", "echo 'smol 1.18.0 (engine smolvm 1.18.0)'; exit 2");
+        assert_eq!(smol_engine_version_of(&smol).as_deref(), Some("1.18.0"));
+        assert_eq!(smol_engine_version_of(&older), None);
+
+        let cache = dir.path().join("cache");
+        let shim = engine_shim_in(&cache, &smol).unwrap();
+        assert_eq!(shim.file_name().unwrap(), "smolvm");
+        assert!(shim.starts_with(cache.join("smol-engine")));
+        let out = Command::new(&shim)
+            .args(["machine", "ls", "--json"])
+            .output()
+            .unwrap();
+        assert!(out.status.success());
+        assert_eq!(
+            String::from_utf8_lossy(&out.stdout).trim(),
+            "_engine machine ls --json",
+            "the shim hands the engine's arguments through the passthrough"
+        );
+        // Asking again keeps the same script; another smol gets its own.
+        assert_eq!(engine_shim_in(&cache, &smol).unwrap(), shim);
+        assert_ne!(engine_shim_in(&cache, &older).unwrap(), shim);
+        assert_eq!(
+            std::fs::read_dir(shim.parent().unwrap()).unwrap().count(),
+            1,
+            "no staging file is left behind"
+        );
     }
 
     #[cfg(unix)]

@@ -2,7 +2,8 @@
 
 Run isolated **microVMs** from Rust, either locally or on
 **smol cloud** — one `Machine` API, the target chosen by `ConnectOptions`.
-Locally the SDK drives the installed `smolvm` CLI. Mirrors the [Node SDK](../node) and
+Locally the SDK drives the installed engine: the one inside the `smol` CLI, or a
+`smolvm` binary. Mirrors the [Node SDK](../node) and
 [Python SDK](../python), which wrap the same engine through NAPI and pyo3.
 
 > **Supported platforms** (local target): macOS on Apple Silicon, and Linux
@@ -204,12 +205,20 @@ That is the whole install. The crate links no engine and carries no binaries,
 so it builds anywhere Rust does.
 
 **Cloud machines need nothing else.** For **local** machines the SDK needs an
-engine, and finds one in this order: `SMOLVM`, then `PATH` and the usual
-install locations, and failing those it fetches the matching engine release
-once and caches it (~37 MiB, checksum-verified against the release's published
-`checksums.sha256`). Nothing is downloaded unless you actually ask for a local
-machine, and the engine is pinned to this crate's own version so the two cannot
-drift.
+engine, and finds one in this order: `SMOLVM`; the engine inside an installed
+`smol` CLI (on `PATH`, `~/.smol`, `~/.local/bin`) whose version matches this
+crate; an installed `smolvm` of that version; and failing those it fetches the
+matching engine release once and caches it (~37 MiB, checksum-verified against
+the release's published `checksums.sha256`). Nothing is downloaded unless you
+actually ask for a local machine, and the engine is pinned to this crate's own
+version so the two cannot drift.
+
+An installed `smol` is preferred because it carries the engine: the SDK runs it
+as `smol _engine machine …`, so a machine you started from the CLI and a branch
+the SDK asks for come from one install, not two binaries of the same version.
+A `smol` older than that passthrough, or of another version, is passed over.
+To see which engine was chosen and why, enable the `log` facade at `debug` for
+the `smolmachines` target.
 
 | variable | effect |
 |---|---|
