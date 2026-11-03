@@ -35,6 +35,12 @@ impl std::fmt::Display for Target {
 pub struct ConnectOptions {
     /// Local interceptor binding required to start a stopped protected machine.
     pub egress_interceptor: Option<EgressInterceptor>,
+    /// Let [`Machine::connect_with`](crate::Machine::connect_with) start a
+    /// stopped local machine, or resume a paused one, instead of returning an
+    /// error. Off by default: connecting attaches to a machine someone else
+    /// runs, and starting one takes seconds and can fail for reasons a connect
+    /// should report at once.
+    pub start_if_stopped: bool,
     /// Force a target. `None` decides from the credential.
     pub target: Option<Target>,
     /// Cloud base URL. Falls back to `SMOL_CLOUD_URL`, then the CLI session's
@@ -91,6 +97,14 @@ impl ConnectOptions {
     /// Bind a trusted host egress service when reconnecting to a local machine.
     pub fn egress_interceptor(mut self, binding: EgressInterceptor) -> Self {
         self.egress_interceptor = Some(binding);
+        self
+    }
+
+    /// Start the local machine if it is stopped (resume it if paused) as part
+    /// of connecting, instead of returning an error. Local only; a cloud
+    /// connect never starts anything.
+    pub fn start_if_stopped(mut self) -> Self {
+        self.start_if_stopped = true;
         self
     }
 

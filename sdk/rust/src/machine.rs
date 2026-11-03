@@ -521,16 +521,26 @@ impl Machine {
         }
     }
 
-    /// Attach to an existing local machine, starting it if it is stopped.
+    /// Attach to an existing local machine that is running or starting.
+    ///
+    /// Connecting starts nothing: a stopped machine is an
+    /// [`ErrorKind::InvalidState`] error that says how to start it, returned
+    /// at once rather than after a start that may take seconds or fail. To
+    /// start it as part of connecting, use [`Machine::connect_with`] and
+    /// [`ConnectOptions::start_if_stopped`]; to get a handle without any check,
+    /// use [`Machine::attach`].
     pub fn connect(name: impl Into<String>) -> Result<Self> {
         Self::connect_with(name, &ConnectOptions::local())
     }
 
     /// Attach to an existing machine on the target these options select.
     ///
-    /// Locally this re-opens a persisted machine by name, starting it if
-    /// stopped. On the cloud it looks the machine up by id, or by name, and
-    /// does not start it: a machine created through the REST API
+    /// Locally this re-opens a persisted machine by name. It must be running
+    /// or starting; a stopped or paused one is an [`ErrorKind::InvalidState`]
+    /// error naming the state and the fix, unless
+    /// [`ConnectOptions::start_if_stopped`] is set, in which case it is started
+    /// (or resumed) here. On the cloud it looks the machine up by id, or by
+    /// name, and never starts it: a machine created through the REST API
     /// (`POST /v1/machines`) or the console is stopped until started, so call
     /// [`Machine::start`] rather than waiting for readiness.
     pub fn connect_with(name: impl Into<String>, connect: &ConnectOptions) -> Result<Self> {
@@ -541,10 +551,7 @@ impl Machine {
                 if let Some(binding) = connect.egress_interceptor.clone() {
                     transport.set_interceptor(binding)?;
                 }
-                // Connecting borrows a machine: start it if it is not already up.
-                if !transport.is_running() {
-                    transport.start()?;
-                }
+                transport.require_running(connect.start_if_stopped)?;
                 Ok(Self::from_transport(Box::new(transport)))
             }
             Target::Cloud => {
