@@ -657,6 +657,50 @@ impl LocalTransport {
             .ok_or_else(|| Error::new(ErrorKind::NotFound, format!("VM not found: {}", self.name)))
     }
 
+    /// Check that the machine is running or starting, for a connect that must
+    /// not start anything on its own.
+    ///
+    /// With `start_if_stopped`, a stopped machine is started and a paused one
+    /// resumed here; otherwise either is an [`ErrorKind::InvalidState`] error
+    /// that names the state and the fix. A machine in transition is told to
+    /// be waited for, a missing one is [`ErrorKind::NotFound`].
+    pub(crate) fn require_running(&self, start_if_stopped: bool) -> Result<()> {
+        let row = self.record()?;
+        let raw = row.get("state").and_then(|s| s.as_str()).unwrap_or("");
+        let name = &self.name;
+        let invalid = |message: String| Err(Error::new(ErrorKind::InvalidState, message));
+        match MachineState::parse(raw) {
+            MachineState::Running | MachineState::Started | MachineState::Starting => Ok(()),
+            MachineState::Stopped if start_if_stopped => self.start(),
+            MachineState::Paused if start_if_stopped => self.resume(),
+            MachineState::Stopped => invalid(format!(
+                "machine '{name}' is stopped, and connecting does not start it; start it first \
+                 with `smol machine start --name {name}` (add --branchable if it will be \
+                 branched), or connect with ConnectOptions::start_if_stopped()"
+            )),
+            MachineState::Paused => invalid(format!(
+                "machine '{name}' is paused, and connecting does not resume it; resume it first \
+                 with `smol machine resume --name {name}`, or connect with \
+                 ConnectOptions::start_if_stopped()"
+            )),
+            MachineState::Pausing | MachineState::Stopping => invalid(format!(
+                "machine '{name}' is {raw}; wait for it to finish, then connect again"
+            )),
+            MachineState::Error => invalid(format!(
+                "machine '{name}' is in an error state; see `smol machine status --name {name}`, \
+                 then start it again"
+            )),
+            MachineState::Deleted => Err(Error::new(
+                ErrorKind::NotFound,
+                format!("machine '{name}' has been deleted"),
+            )),
+            MachineState::Unknown => Err(Error::new(
+                ErrorKind::Other,
+                format!("machine '{name}' reports a state this SDK does not know: '{raw}'"),
+            )),
+        }
+    }
+
     /// Start a command and return at once, as the cloud does: its pid in
     /// [`ExecResult::pid`] and as `pid=<n>` on stdout.
     fn exec_background(&self, command: &[String], options: &ExecOptions) -> Result<ExecResult> {
@@ -1950,6 +1994,76 @@ mod io_tests {
         assert_eq!(transport.state(), MachineState::Deleted);
         std::fs::write(&rows, "not json").unwrap();
         assert_eq!(transport.state(), MachineState::Unknown);
+    }
+
+    #[test]
+    fn connecting_refuses_a_stopped_machine_and_starts_it_only_when_asked() {
+        let dir = tempfile::tempdir().unwrap();
+        let rows = dir.path().join("rows");
+        let log = dir.path().join("calls");
+        let transport = cli(
+            dir.path(),
+            &format!(
+                "echo \"$*\" >> {log}\n[ \"$2\" = ls ] && cat {rows}\nexit 0",
+                log = log.display(),
+                rows = rows.display()
+            ),
+        );
+        let calls = || std::fs::read_to_string(&log).unwrap_or_default();
+
+        // A stopped machine: an error that names the state and the fix, and
+        // nothing but the listing was run.
+        std::fs::write(&rows, r#"[{"name":"test","state":"created"}]"#).unwrap();
+        let error = transport.require_running(false).unwrap_err();
+        assert_eq!(error.kind(), ErrorKind::InvalidState);
+        let message = error.to_string();
+        assert!(message.contains("is stopped"), "{message}");
+        assert!(
+            message.contains("smol machine start --name test"),
+            "{message}"
+        );
+        assert!(message.contains("start_if_stopped"), "{message}");
+        assert_eq!(calls().lines().collect::<Vec<_>>(), ["machine ls --json"]);
+
+        // Opted in: the machine is started.
+        transport.require_running(true).unwrap();
+        assert_eq!(calls().lines().last(), Some("machine start --name test"));
+
+        // Paused: resume, not start, and only when asked.
+        std::fs::write(&rows, r#"[{"name":"test","state":"paused"}]"#).unwrap();
+        let error = transport.require_running(false).unwrap_err();
+        assert_eq!(error.kind(), ErrorKind::InvalidState);
+        assert!(error.to_string().contains("is paused"), "{error}");
+        transport.require_running(true).unwrap();
+        assert_eq!(calls().lines().last(), Some("machine resume --name test"));
+
+        // Running, started or starting: nothing to do.
+        for state in ["running", "started", "starting"] {
+            std::fs::write(&rows, format!(r#"[{{"name":"test","state":"{state}"}}]"#)).unwrap();
+            let before = calls().lines().count();
+            transport.require_running(false).unwrap();
+            assert_eq!(
+                calls().lines().count(),
+                before + 1,
+                "{state}: only the listing ran"
+            );
+        }
+
+        // In transition, failed, or gone.
+        std::fs::write(&rows, r#"[{"name":"test","state":"stopping"}]"#).unwrap();
+        let error = transport.require_running(true).unwrap_err();
+        assert_eq!(error.kind(), ErrorKind::InvalidState);
+        assert!(error.to_string().contains("wait"), "{error}");
+        std::fs::write(&rows, r#"[{"name":"test","state":"error"}]"#).unwrap();
+        assert_eq!(
+            transport.require_running(true).unwrap_err().kind(),
+            ErrorKind::InvalidState
+        );
+        std::fs::write(&rows, r#"[{"name":"other","state":"running"}]"#).unwrap();
+        assert_eq!(
+            transport.require_running(true).unwrap_err().kind(),
+            ErrorKind::NotFound
+        );
     }
 
     #[test]
