@@ -8,7 +8,7 @@ server to run, and machines on Smol Cloud.
 import smol "github.com/smol-machines/smol/sdk/go"
 
 m, err := smol.Create(ctx, smol.MachineConfig{
-	Resources: smol.ResourceSpec{CPUs: 2, MemoryMB: 1024, Network: smol.Bool(true)},
+	Resources: smol.ResourceSpec{CPUs: 2, MemoryMB: 1024, Network: new(true)},
 }, nil)
 if err != nil {
 	return err
@@ -32,7 +32,7 @@ m, err := smol.Create(ctx, smol.MachineConfig{Image: "alpine:3.20"},
 go get github.com/smol-machines/smol/sdk/go
 ```
 
-Requires Go 1.25 or newer. Local machines need macOS on Apple Silicon, or
+Requires Go 1.26 or newer. Local machines need macOS on Apple Silicon, or
 Linux x86_64/arm64 with KVM and glibc 2.34 or newer. The cloud target works on
 any platform Go builds for.
 
