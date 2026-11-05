@@ -121,3 +121,5 @@ jobs:
       - uses: actions/checkout@v4
       - name: Assert CLI + SDK manifests share one version
         run: bash scripts/check-versions.sh
+      - name: Assert every published SDK ships the LICENSE
+        run: bash scripts/check-sdk-licenses.sh
