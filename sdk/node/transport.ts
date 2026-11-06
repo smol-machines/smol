@@ -398,6 +398,26 @@ export function egressPolicy(policy: NetworkPolicy): { network: boolean; cidrs: 
   return { network: true, cidrs, hosts };
 }
 
+/** The caller's egress for a `.smolmachine` create, or `undefined` to keep the
+ *  policy the pack carries. A pack records its own outbound policy, which
+ *  applies when the caller says nothing about networking or passes a bare
+ *  `network: true`. An explicit `network: false` turns egress off (and wins
+ *  over an allow list), and an explicit allow list restricts egress to what it
+ *  names (an empty one allows nothing). Mirrors `pack_egress_override` in the
+ *  Python SDK. */
+export function packEgressOverride(
+  config: MachineConfig,
+): { network: boolean; cidrs: string[]; hosts: string[] } | undefined {
+  const network = resolveNetwork(config);
+  const cidrs = config.resources?.allowCidrs;
+  const hosts = config.resources?.allowHosts;
+  if (network === false) return { network: false, cidrs: [], hosts: [] };
+  if (cidrs !== undefined || hosts !== undefined) {
+    return egressPolicy({ allowCidrs: cidrs ?? [], allowHosts: hosts ?? [] });
+  }
+  return undefined;
+}
+
 /** Resolve the primary branch lifecycle name and its compatibility aliases. */
 export function resolveBranchable(config: MachineConfig): boolean | undefined {
   return config.branchable ?? config.forkable ?? config.checkpoint;
@@ -2454,7 +2474,11 @@ export async function makeTransport(
   if (config.image?.endsWith(".smolmachine")) {
     const owned = !config.detach && (conn.handleSignals ?? true);
     try {
-      const inner = await getNapiMachine().createFromPack(name, resolvePath(config.image));
+      const inner = await getNapiMachine().createFromPack(
+        name,
+        resolvePath(config.image),
+        packEgressOverride(config),
+      );
       transport = new LocalTransport(inner, owned, interceptor, owned);
       await transport.start(interceptor, config.waitForPorts !== false);
       return transport;

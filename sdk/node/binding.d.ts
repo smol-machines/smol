@@ -484,7 +484,7 @@ export declare class NapiMachine {
    */
   pack(output: string): Promise<string>
   /** Create the stopped machine `name` from a `.smolmachine` artifact. */
-  static createFromPack(name: string, pack: string): Promise<NapiMachine>
+  static createFromPack(name: string, pack: string, egress?: EgressPolicyConfig | undefined | null): Promise<NapiMachine>
   /**
    * Stop the machine and clean up all storage (disks, config). A command or
    * file transfer still running fails with code `INTERRUPTED` unless
