@@ -1,7 +1,8 @@
 //! smol machine cp — copy files between host and machine.
 //!
-//! Targets a local VM by default (over the agent vsock), or a deployed cloud
-//! machine with `--cloud` (over the smolfleet files API). The environment is
+//! Targets a local VM by default (the engine's own `machine cp`, which copies a
+//! file or a directory recursively), or a deployed cloud machine with `--cloud`
+//! (over the smolfleet files API, one file at a time). The environment is
 //! explicit — matching `smol machine exec/start/stop/status/logs --cloud` — so a
 //! copy never lands in the wrong place by surprise:
 //!   smol machine cp ./index.html devvm:/srv/index.html              # local VM
@@ -9,7 +10,6 @@
 
 use super::{cloud, common};
 use clap::Args;
-use smolvm::agent::RunConfig;
 
 #[derive(Args, Debug)]
 pub struct CpCmd {
@@ -59,52 +59,28 @@ impl CpCmd {
             return cp_cloud(&handle, &guest_path, &local_path, is_upload);
         }
 
-        let (manager, mut client) = common::ensure_connected(&handle)?;
+        // Say "not running" with smol's own start hint before handing over.
+        let (manager, _client) = common::ensure_connected(&handle)?;
         manager.detach();
 
-        // Image machines expose their container rootfs through a persistent
-        // overlay. A fork clone inherits that overlay from its golden, so enter
-        // the inherited owner before file operations instead of addressing a
-        // new, empty overlay under the clone's name. A no-op container run both
-        // mounts the overlay and makes it active for the subsequent file RPCs.
-        if let Some(record) = smolvm::db::SmolvmDb::open()
-            .ok()
-            .and_then(|db| db.get_vm(&handle).ok().flatten())
-        {
-            if let Some(image) = record.image.as_ref() {
-                let owner = smolvm::workload::persistent_overlay_owner_with_lineage(
-                    &handle,
-                    record.golden.as_deref(),
-                    record.fork_overlay_owner.as_deref(),
-                );
-                client.run_non_interactive(
-                    RunConfig::new(image, vec!["/bin/true".to_string()])
-                        .with_persistent_overlay(Some(owner)),
-                )?;
-            }
-        }
-
-        if is_upload {
-            // Stream the file in chunks so large files don't get read entirely
-            // into memory or exceed the protocol frame cap.
-            let file = std::fs::File::open(&local_path)
-                .map_err(|e| anyhow::anyhow!("{}: {}", local_path, e))?;
-            let size = file
-                .metadata()
-                .map_err(|e| anyhow::anyhow!("{}: {}", local_path, e))?
-                .len();
-            client.write_file_from_reader(&guest_path, file, size, None)?;
-            eprintln!("Uploaded {} ({} bytes) -> {}", local_path, size, guest_path);
+        // The engine's own cp does the local copy, so a file, a directory
+        // (recursively, as `cp -r` would) and whatever it learns next are one
+        // code path for both CLIs: the overlay an image machine's commands
+        // run in, chunked transfers, progress.
+        let (src, dst) = if is_upload {
+            (local_path, format!("{handle}:{guest_path}"))
         } else {
-            // Stream chunks straight to disk so large files don't get buffered
-            // entirely in memory.
-            let size =
-                client.read_file_to_path(&guest_path, std::path::Path::new(&local_path), |_| {})?;
-            eprintln!(
-                "Downloaded {} ({} bytes) -> {}",
-                guest_path, size, local_path
-            );
+            (format!("{handle}:{guest_path}"), local_path)
+        };
+        smolvm::cli::machine::CpCmd {
+            src,
+            dst,
+            mode: None,
+            uid: None,
+            gid: None,
         }
+        .run()
+        .map_err(|e| anyhow::anyhow!("{e}"))?;
         Ok(())
     }
 }
