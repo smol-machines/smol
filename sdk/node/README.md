@@ -58,8 +58,9 @@ try {
 }
 ```
 
-Cloud-only gaps (`run`, `execStream`, `pullImage`, `listImages`) throw `NotSupportedError`;
-the common surface (create/exec/files/state/stop/delete) is identical on both.
+`execStream` yields live stdout, stderr, and exit events on both targets.
+`run`, `pullImage`, and `listImages` are local-only and throw `NotSupportedError`
+on cloud; the common surface (create/exec/files/state/stop/delete) is identical.
 
 ### Disposable workers: wait for `ready`, then connect (cloud)
 

@@ -1,0 +1,21 @@
+{
+  "name": "smol-sandcastle-example",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "node --import tsx --test provider.test.ts cloud.test.ts",
+    "test:live": "node --import tsx live.test.ts",
+    "test:cloud-transport:live": "node --import tsx cloud-live.test.ts"
+  },
+  "dependencies": {
+    "@ai-hero/sandcastle": "^0.12.0",
+    "@standard-schema/spec": "^1.1.0",
+    "smolmachines": "^1.25.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "tsx": "^4.21.0",
+    "typescript": "^5.6.0"
+  }
+}
