@@ -108,9 +108,6 @@ const (
 	NetworkBackendVirtioNet NetworkBackend = "virtio-net"
 )
 
-// Bool returns a pointer to b, for the optional booleans in ResourceSpec.
-func Bool(b bool) *bool { return &b }
-
 // MountSpec mounts a host directory into a machine. Local only.
 type MountSpec struct {
 	// Source is an absolute host path, or an s3:// URL mounted in the guest.

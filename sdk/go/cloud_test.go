@@ -431,10 +431,10 @@ func TestCloudMock(t *testing.T) {
 	_, hasWorkdir := cb["workdir"]
 	check("env/workdir omitted from the body when unset", !hasEnv && !hasWorkdir, cb)
 
-	_, err = Create(ctx, MachineConfig{Image: "alpine", Resources: ResourceSpec{Network: Bool(false)}}, conn)
+	_, err = Create(ctx, MachineConfig{Image: "alpine", Resources: ResourceSpec{Network: new(false)}}, conn)
 	must(err)
 	check("Network false is sent as blocked", jsonEq(mock.body("create")["network"], map[string]string{"mode": "blocked"}), mock.body("create"))
-	_, err = Create(ctx, MachineConfig{Image: "alpine", Network: Bool(true)}, conn)
+	_, err = Create(ctx, MachineConfig{Image: "alpine", Network: new(true)}, conn)
 	must(err)
 	check("Network true is sent as open", jsonEq(mock.body("create")["network"], map[string]string{"mode": "open"}), mock.body("create"))
 	_, err = Create(ctx, MachineConfig{Image: "alpine"}, conn)
