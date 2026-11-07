@@ -2624,14 +2624,33 @@ def make_transport(config: MachineConfig, conn: Optional[ConnectOptions] = None)
     name = config.name or _generate_name()
     transport: Optional[LocalTransport] = None
     if config.image is not None and config.image.endswith(".smolmachine"):
-        # A packed machine: create from it (as `smolvm machine create --from`),
-        # then start it.
+        # A packed machine: create from it (as `smolvm machine create --from`), then start it. The pack carries its own
+        # configuration and the engine's create-from-pack takes no options yet: every option set here was silently
+        # dropped, and a branchable pack machine started plain, so branching or checkpointing it failed with "was not
+        # started as branchable" (reported 2026-11-06). Refuse what cannot be applied; honour branchable.
+        unsupported = [
+            f for f in ("command", "mounts", "ports", "resources", "network", "labels", "auto_stop_seconds",
+                        "ttl_seconds", "env", "credentials", "cache_disk", "workdir", "user")
+            if getattr(config, f, None) not in (None, [], {}, ())
+        ]
+        if unsupported:
+            raise InvalidConfigError(
+                f"{', '.join(unsupported)} cannot be set on a .smolmachine image locally: "
+                "the pack carries its own configuration; set them when packing"
+            )
         try:
             inner = native.Machine.create_from_pack(name, os.path.abspath(config.image))
             transport = LocalTransport(inner, cleanup_on_exit=not config.detach, interceptor=binding)
-            transport.start(binding, config.wait_for_ports)
-            if not config.wait_for_ports:
-                _wait_for_execution(transport, config.ready_timeout_seconds)
+            if config.forkable:
+                inner.start_forkable()
+                if config.wait_for_ports:
+                    transport.wait_until_ready(config.ready_timeout_seconds)
+                else:
+                    _wait_for_execution(transport, config.ready_timeout_seconds)
+            else:
+                transport.start(binding, config.wait_for_ports)
+                if not config.wait_for_ports:
+                    _wait_for_execution(transport, config.ready_timeout_seconds)
             return transport
         except BaseException as e:
             if transport is not None:
