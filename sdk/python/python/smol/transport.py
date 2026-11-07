@@ -335,7 +335,7 @@ def _load_native() -> Any:
 # Hosts with a prebuilt local engine: (sys.platform, machine) pairs.
 _SUPPORTED_LOCAL = {("darwin", "arm64"), ("linux", "x86_64"), ("linux", "aarch64")}
 # Oldest glibc the Linux prebuilt engine runs on.
-_MIN_GLIBC = (2, 34)
+_MIN_GLIBC = (2, 31)
 
 
 def local_availability() -> "tuple[bool, Optional[str], Optional[str]]":
