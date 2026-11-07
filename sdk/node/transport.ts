@@ -2452,11 +2452,30 @@ export async function makeTransport(
   // A `.smolmachine` image is a packed machine: create from it (as
   // `smolvm machine create --from`), then start it.
   if (config.image?.endsWith(".smolmachine")) {
+    // A pack carries its own configuration, and the engine's create-from-pack takes no options yet: every option set
+    // here was silently dropped, and a branchable pack machine started plain, so branching or checkpointing it failed
+    // with "was not started as branchable" (reported 2026-11-06). Refuse what cannot be applied; honour branchable.
+    const unsupported = (["mounts", "ports", "resources", "network", "labels", "autoStopSeconds", "ttlSeconds", "env",
+      "credentials", "cacheDisk", "workdir", "user"] as const).filter((k) => {
+      const v = config[k] as unknown;
+      return v !== undefined && v !== null && !(Array.isArray(v) && v.length === 0)
+        && !(typeof v === "object" && !Array.isArray(v) && Object.keys(v as object).length === 0);
+    });
+    if (unsupported.length) {
+      throw new InvalidConfigError(
+        `${unsupported.join(", ")} cannot be set on a .smolmachine image locally: the pack carries its own configuration; set them when packing`,
+      );
+    }
     const owned = !config.detach && (conn.handleSignals ?? true);
     try {
       const inner = await getNapiMachine().createFromPack(name, resolvePath(config.image));
       transport = new LocalTransport(inner, owned, interceptor, owned);
-      await transport.start(interceptor, config.waitForPorts !== false);
+      if (resolveBranchable(config)) {
+        await inner.startForkable();
+        if (config.waitForPorts !== false) await transport.waitUntilReady();
+      } else {
+        await transport.start(interceptor, config.waitForPorts !== false);
+      }
       return transport;
     } catch (e) {
       await transport?.delete().catch(() => {});
