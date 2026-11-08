@@ -11,7 +11,7 @@ use crate::error::IntoNapiResult;
 use crate::exec_stream_utf8::Utf8ExecStream;
 use crate::types::*;
 use smolvm::agent::ExecEvent;
-use smolvm::embedded::{runtime, ForkSourcePolicy, MachineSpec};
+use smolvm::embedded::{runtime, ForkSourcePolicy};
 
 fn join_error(err: tokio::task::JoinError) -> napi::Error {
     napi::Error::from_reason(format!("Task join error: {}", err))
@@ -219,94 +219,10 @@ impl NapiMachine {
     /// Create a new machine. Does not start the VM yet — call `start()`.
     #[napi(constructor)]
     pub fn new(config: MachineConfig) -> napi::Result<Self> {
-        // An `s3://` source is mounted inside the guest by the agent, not
-        // bind-mounted from the host, so route it to the remote-volume list
-        // instead of the host-directory parse (which would reject it as a
-        // missing directory).
-        let (remote_specs, host_specs): (Vec<_>, Vec<_>) = config
-            .mounts
-            .as_ref()
-            .map(|ms| {
-                ms.iter()
-                    .partition(|m| smolvm::remote_volume::is_remote_source(&m.source))
-            })
-            .unwrap_or_default();
-        let mounts: Vec<smolvm::agent::HostMount> = host_specs
-            .into_iter()
-            .map(smolvm::agent::HostMount::try_from)
-            .collect::<smolvm::Result<_>>()
-            .into_napi()?;
-        let remote_volumes: Vec<_> = remote_specs
-            .into_iter()
-            .map(|m| {
-                if m.staged.unwrap_or(false) {
-                    return Err(smolvm::Error::invalid_mount_path(
-                        "staged mode is only supported for local host directories",
-                    ));
-                }
-                smolvm::remote_volume::from_parts(
-                    &m.source,
-                    &m.target,
-                    m.read_only.unwrap_or(false),
-                )
-            })
-            .collect::<smolvm::Result<_>>()
-            .into_napi()?;
-
-        let ports = config
-            .ports
-            .as_ref()
-            .map(|ps| {
-                ps.iter()
-                    .map(smolvm::data::network::PortMapping::from)
-                    .collect()
-            })
-            .unwrap_or_default();
-
-        let resources = config
-            .resources
-            .as_ref()
-            .map(|r| r.to_vm_resources())
-            .transpose()?
-            .unwrap_or_default();
-        // Hostname rules live on the spec, not in VmResources: the engine
-        // persists them separately and its DNS filter enforces them at runtime.
-        let allowed_hosts = config
-            .resources
-            .as_ref()
-            .and_then(|r| r.allowed_hosts.clone())
-            .unwrap_or_default();
-
-        let env = config
-            .env
-            .unwrap_or_default()
-            .into_iter()
-            .map(|item| (item.key, item.value))
-            .collect();
-        let workdir = config.workdir;
-        let user = config.user;
-        let (credentials, credential_values) =
-            credential_policy(config.credentials.unwrap_or_default());
-        let spec = MachineSpec {
-            name: config.name.clone(),
-            mounts,
-            ports,
-            resources,
-            image: config.image.clone(),
-            persistent: config.persistent.unwrap_or(false),
-            forkable: config.forkable.unwrap_or(false),
-            detached: config.detached.unwrap_or(false),
-            labels: config.labels.unwrap_or_default().into_iter().collect(),
-            runtime_managed: false,
-            remote_volumes,
-            allowed_hosts,
-            credentials,
-            ..Default::default()
-        };
-
+        let (spec, credential_values) = create_spec(&config)?;
         let runtime = runtime().into_napi()?;
         runtime
-            .create_machine_with_workload(spec, env, workdir, user)
+            .create_machine_with_spec(&config.name, config.image.as_deref(), &spec)
             .into_napi()?;
         // Held in memory for this machine's starts in this process; a binding
         // without a value is read from this process's environment instead.
@@ -1000,17 +916,33 @@ impl NapiMachine {
         .map(|path| path.to_string_lossy().into_owned())
     }
 
-    /// Create the stopped machine `name` from a `.smolmachine` artifact.
+    /// Create the stopped machine `name` from a `.smolmachine` artifact. The
+    /// pack supplies defaults and `config` overrides them, by the rules the
+    /// engine applies on every creation path; an option a live checkpoint
+    /// cannot take is refused by name. `config.image` names the pack and is
+    /// otherwise ignored.
     #[napi]
-    pub async fn create_from_pack(name: String, pack: String) -> napi::Result<NapiMachine> {
+    pub async fn create_from_pack(
+        name: String,
+        pack: String,
+        config: Option<MachineConfig>,
+    ) -> napi::Result<NapiMachine> {
+        let (spec, credential_values) = match config.as_ref() {
+            Some(config) => create_spec(config)?,
+            None => Default::default(),
+        };
         let runtime = runtime().into_napi()?;
         let created = name.clone();
+        let creating = runtime.clone();
         tokio::task::spawn_blocking(move || {
-            runtime.create_machine_from_pack(&created, std::path::Path::new(&pack))
+            creating.create_machine_from_pack_with(&created, std::path::Path::new(&pack), &spec)
         })
         .await
         .map_err(join_error)?
         .into_napi()?;
+        if !credential_values.is_empty() {
+            runtime.supply_credential_values(&name, credential_values);
+        }
         Ok(Self { name })
     }
 
@@ -1031,6 +963,117 @@ impl NapiMachine {
 
 /// The engine's credential policy for `configs`, and the values supplied with
 /// them by binding name.
+/// The machine `config` asks for, as the spec the engine resolves on every
+/// creation path, and the credential values it supplies. One conversion for
+/// an image and a `.smolmachine` alike, so an option cannot reach one and miss
+/// the other. Every field is named, so a new one does not compile until it is
+/// carried.
+fn create_spec(
+    config: &MachineConfig,
+) -> napi::Result<(
+    smolvm::machine_spec::CreateSpec,
+    std::collections::BTreeMap<String, String>,
+)> {
+    let MachineConfig {
+        // The machine's name and its source are not options of it.
+        name: _,
+        image: _,
+        env,
+        workdir,
+        user,
+        mounts,
+        ports,
+        resources,
+        persistent,
+        forkable,
+        detached,
+        labels,
+        credentials,
+    } = config.clone();
+    // An `s3://` source is mounted inside the guest by the agent, not
+    // bind-mounted from the host, so route it to the remote-volume list
+    // instead of the host-directory parse (which would reject it as a
+    // missing directory).
+    let (remote_specs, host_specs): (Vec<_>, Vec<_>) = mounts
+        .unwrap_or_default()
+        .into_iter()
+        .partition(|m| smolvm::remote_volume::is_remote_source(&m.source));
+    let mounts: Vec<smolvm::agent::HostMount> = host_specs
+        .iter()
+        .map(smolvm::agent::HostMount::try_from)
+        .collect::<smolvm::Result<_>>()
+        .into_napi()?;
+    let remote_volumes: Vec<_> = remote_specs
+        .into_iter()
+        .map(|m| {
+            if m.staged.unwrap_or(false) {
+                return Err(smolvm::Error::invalid_mount_path(
+                    "staged mode is only supported for local host directories",
+                ));
+            }
+            smolvm::remote_volume::from_parts(&m.source, &m.target, m.read_only.unwrap_or(false))
+        })
+        .collect::<smolvm::Result<_>>()
+        .into_napi()?;
+    let ports = ports
+        .unwrap_or_default()
+        .iter()
+        .map(smolvm::data::network::PortMapping::from)
+        .collect();
+    let resources = resources.unwrap_or_default();
+    // Validated by the same parser the image path always used.
+    let parsed = resources.to_vm_resources()?;
+    let VmResourcesConfig {
+        cpus,
+        memory_mib,
+        network,
+        allowed_cidrs,
+        // Hostname rules live apart from VmResources: the engine persists them
+        // separately and its DNS filter enforces them at runtime.
+        allowed_hosts,
+        storage_gib,
+        overlay_gib,
+        gpu,
+        gpu_vram_mib,
+        disk_durability,
+        cuda,
+        network_backend,
+    } = resources;
+    let (credentials, credential_values) = credential_policy(credentials.unwrap_or_default());
+    let spec = smolvm::machine_spec::CreateSpec {
+        env: env
+            .unwrap_or_default()
+            .into_iter()
+            .map(|item| (item.key, item.value))
+            .collect(),
+        workdir,
+        user,
+        // Unset resources stay unset, so a pack's own apply.
+        cpus,
+        mem: memory_mib,
+        storage_gb: storage_gib.and(parsed.storage_gib),
+        overlay_gb: overlay_gib.and(parsed.overlay_gib),
+        disk_durability: disk_durability.and(Some(parsed.disk_durability)),
+        mounts,
+        remote_volumes,
+        net: network.unwrap_or(false),
+        network_backend: network_backend.and(parsed.network_backend),
+        ports,
+        allowed_cidrs,
+        allowed_hosts,
+        credentials,
+        gpu: gpu.unwrap_or(false),
+        gpu_vram_mib,
+        cuda: cuda.unwrap_or(false),
+        forkable: forkable.unwrap_or(false),
+        ephemeral: !persistent.unwrap_or(false),
+        detached: detached.unwrap_or(false),
+        labels: labels.unwrap_or_default().into_iter().collect(),
+        ..Default::default()
+    };
+    Ok((spec, credential_values))
+}
+
 fn credential_policy(
     configs: Vec<crate::types::CredentialConfig>,
 ) -> (

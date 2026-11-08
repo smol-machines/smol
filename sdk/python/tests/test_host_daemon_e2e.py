@@ -128,6 +128,38 @@ def main() -> int:
         marker = restored.exec(["cat", "/root/marker"]).stdout.strip()
         check("a machine created from the pack has its state", marker == "packed-state", repr(marker))
         restored.delete()
+
+        # Options on a pack are applied the way they are on an image, and a
+        # branchable pack machine can be branched.
+        configured = Machine.create(
+            MachineConfig(
+                name="hdp-pack-options",
+                image=artifact,
+                env={"PACK_OPTION": "set"},
+                workdir="/tmp",
+                labels={"suite": "host-daemon"},
+                resources=ResourceSpec(cpus=1, memory_mb=768),
+                branchable=True,
+                wait_for_ports=False,
+            ),
+            LOCAL,
+        )
+        seen = configured.exec(["sh", "-c", 'echo "$PACK_OPTION $(pwd)"']).stdout.strip()
+        check("env and workdir reach a pack machine", seen == "set /tmp", repr(seen))
+        row = next(x for x in Machine.list(LOCAL) if x.name == "hdp-pack-options")
+        check(
+            "labels and resources reach a pack machine",
+            (row.labels or {}).get("suite") == "host-daemon"
+            and row.resources is not None
+            and row.resources.cpus == 1
+            and row.resources.memory_mib == 768,
+            f"{row.labels} {row.resources}",
+        )
+        branch = configured.fork("hdp-pack-branch")
+        branch_marker = branch.exec(["cat", "/root/marker"]).stdout.strip()
+        check("a branchable pack machine branches", branch_marker == "packed-state", repr(branch_marker))
+        branch.delete()
+        configured.delete()
     Machine.delete_by_name("hdp-b", LOCAL)
 
     small = Machine.create(

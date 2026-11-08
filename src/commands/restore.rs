@@ -39,7 +39,13 @@ impl RestoreCmd {
         };
         if local {
             let runtime = smolvm::embedded::EmbeddedRuntime::new()?;
-            runtime.restore_checkpoint_machine_detached(&self.name, &path)?;
+            // `--net` asks for what the checkpoint fixes: refused by name when
+            // the machine was captured without a network, never ignored.
+            let spec = smolvm::machine_spec::CreateSpec {
+                net: self.net,
+                ..Default::default()
+            };
+            runtime.restore_checkpoint_machine_detached_with_spec(&self.name, &path, &spec)?;
             println!(
                 "Restored {} as '{}' (running and forkable)",
                 path.display(),

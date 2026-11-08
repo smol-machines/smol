@@ -2449,28 +2449,22 @@ export async function makeTransport(
     throw new InvalidConfigError("egressInterceptor cannot be combined with branchable machines.");
   }
   let transport: LocalTransport | undefined;
-  // A `.smolmachine` image is a packed machine: create from it (as
-  // `smolvm machine create --from`), then start it.
-  if (config.image?.endsWith(".smolmachine")) {
-    const owned = !config.detach && (conn.handleSignals ?? true);
-    try {
-      const inner = await getNapiMachine().createFromPack(name, resolvePath(config.image));
-      transport = new LocalTransport(inner, owned, interceptor, owned);
-      await transport.start(interceptor, config.waitForPorts !== false);
-      return transport;
-    } catch (e) {
-      await transport?.delete().catch(() => {});
-      throw wrapNativeError(e);
-    }
-  }
   try {
     // Validate the config before loading the engine, so a config the local
     // target cannot honour fails the same way whether or not it is installed.
     const nativeConfig = toNativeConfig(name, config);
-    if (nativeConfig.image) {
-      nativeConfig.image = await getNapiMachine().prepareImage(nativeConfig.image);
+    let inner: NapiInstance;
+    if (config.image?.endsWith(".smolmachine")) {
+      // A packed machine (as `smolvm machine create --from`): the pack supplies
+      // defaults and this config overrides them, by the engine's rules for every
+      // creation path, so an option is applied or refused by name, never dropped.
+      inner = await getNapiMachine().createFromPack(name, resolvePath(config.image), nativeConfig);
+    } else {
+      if (nativeConfig.image) {
+        nativeConfig.image = await getNapiMachine().prepareImage(nativeConfig.image);
+      }
+      inner = new (getNapiMachine())(nativeConfig);
     }
-    const inner = new (getNapiMachine())(nativeConfig);
     // A detached machine is nobody's to stop on a signal — it was created to
     // survive this process — and its branches inherit that.
     const owned = !config.detach && (conn.handleSignals ?? true);

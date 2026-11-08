@@ -2623,27 +2623,16 @@ def make_transport(config: MachineConfig, conn: Optional[ConnectOptions] = None)
     native = _load_native()
     name = config.name or _generate_name()
     transport: Optional[LocalTransport] = None
-    if config.image is not None and config.image.endswith(".smolmachine"):
-        # A packed machine: create from it (as `smolvm machine create --from`),
-        # then start it.
-        try:
-            inner = native.Machine.create_from_pack(name, os.path.abspath(config.image))
-            transport = LocalTransport(inner, cleanup_on_exit=not config.detach, interceptor=binding)
-            transport.start(binding, config.wait_for_ports)
-            if not config.wait_for_ports:
-                _wait_for_execution(transport, config.ready_timeout_seconds)
-            return transport
-        except BaseException as e:
-            if transport is not None:
-                try:
-                    transport.delete()
-                except Exception:  # noqa: BLE001 - preserve the original failure
-                    pass
-            if isinstance(e, Exception):
-                raise wrap_native_error(e) from e
-            raise
     try:
-        inner = native.Machine(_native_config(name, config))
+        native_config = _native_config(name, config)
+        if config.image is not None and config.image.endswith(".smolmachine"):
+            # A packed machine (as `smolvm machine create --from`): the pack
+            # supplies defaults and this config overrides them, by the engine's
+            # rules for every creation path, so an option is applied or refused
+            # by name, never dropped.
+            inner = native.Machine.create_from_pack(name, os.path.abspath(config.image), native_config)
+        else:
+            inner = native.Machine(native_config)
         # A detached machine is meant to outlive this process, so the exit
         # hook that stops this process's machines leaves it running.
         transport = LocalTransport(inner, cleanup_on_exit=not config.detach, interceptor=binding)

@@ -132,10 +132,12 @@ impl MachineSummary {
                 memory_mib: record.mem,
                 storage_gib: record
                     .storage_gb
-                    .unwrap_or(smolvm::storage::DEFAULT_STORAGE_SIZE_GIB) as f64,
+                    .unwrap_or(smolvm::storage::DEFAULT_STORAGE_SIZE_GIB)
+                    as f64,
                 overlay_gib: record
                     .overlay_gb
-                    .unwrap_or(smolvm::storage::DEFAULT_OVERLAY_SIZE_GIB) as f64,
+                    .unwrap_or(smolvm::storage::DEFAULT_OVERLAY_SIZE_GIB)
+                    as f64,
             },
             ports,
             name: record.name,
@@ -229,7 +231,7 @@ pub struct CredentialConfig {
 
 /// VM resource allocation.
 #[napi(object)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct VmResourcesConfig {
     /// Number of vCPUs (default: src/data/resources.rs default).
     pub cpus: Option<u8>,

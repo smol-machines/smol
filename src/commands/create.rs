@@ -1,8 +1,6 @@
 //! smol machine create — create a persistent machine.
 
 use clap::Args;
-use smolvm::config::SmolvmConfig;
-use smolvm::data::network::PortMapping;
 use smolvm::network::NetworkBackend;
 
 #[derive(Args, Debug)]
@@ -25,13 +23,13 @@ pub struct CreateCmd {
     #[arg(long, value_name = "PATH")]
     pub from: Option<std::path::PathBuf>,
 
-    /// Number of vCPUs
-    #[arg(long, default_value_t = 4, value_name = "N")]
-    pub cpus: u8,
+    /// Number of vCPUs [default: 4, or the pack's]
+    #[arg(long, value_name = "N")]
+    pub cpus: Option<u8>,
 
-    /// Memory in MiB
-    #[arg(long, default_value_t = 8192, value_name = "MiB")]
-    pub mem: u32,
+    /// Memory in MiB [default: 8192, or the pack's]
+    #[arg(long, value_name = "MiB")]
+    pub mem: Option<u32>,
 
     /// Storage disk size in GiB (OCI layers and container data)
     #[arg(long, value_name = "GiB")]
@@ -63,8 +61,8 @@ pub struct CreateCmd {
     pub volume: Vec<String>,
 
     /// Expose port (HOST:GUEST, append /udp for UDP)
-    #[arg(short = 'p', long = "port", value_parser = PortMapping::parse, value_name = "HOST:GUEST[/udp]")]
-    pub port: Vec<PortMapping>,
+    #[arg(short = 'p', long = "port", value_parser = parse_port, value_name = "HOST:GUEST[/udp]")]
+    pub port: Vec<String>,
 
     /// Attach metadata to the machine (repeatable), e.g.
     /// `--label owner=ci --label sandbox=agent-7`.
@@ -107,7 +105,7 @@ pub struct CreateCmd {
     #[arg(long)]
     pub ssh_agent: bool,
 
-    /// Command to run once on each start, before the workload (repeatable)
+    /// Command to run once, on the machine's first start (repeatable)
     #[arg(long = "init", value_name = "COMMAND")]
     pub init: Vec<String>,
 
@@ -137,243 +135,261 @@ pub struct CreateCmd {
 }
 
 impl CreateCmd {
+    /// Create the machine with the engine's own `machine create`: the flags
+    /// here are a subset of its flags, handed to it unchanged, so a pack, a
+    /// checkpoint, an image and a bare machine apply every option by the one
+    /// set of rules the engine uses on every creation path, and an option a
+    /// source cannot take is refused by name instead of dropped.
     pub fn run(self) -> anyhow::Result<()> {
-        if let Some(from) = self.from.clone() {
-            return self.create_from_smolmachine(&from);
-        }
-
-        // A registry `--image` can name a smolmachine PACK artifact (e.g.
-        // registry.smolmachines.com/library/enforra-node:0.1.0) whose single
-        // "layer" is a complete .smolmachine sidecar, not an OCI filesystem
-        // layer. The in-guest OCI puller would tar-unpack its multi-GiB
-        // storage.ext4 into the guest disk and fill it before boot, so probe
-        // the manifest on the host and, when it is a pack, reroute through the
-        // proven from-.smolmachine flow (the same path as `--from`). The probe
-        // fails open — a non-pack ref or any probe error returns None and falls
-        // through to the normal registry pull, so ordinary images are untouched.
-        if let Some(img) = self.image.clone() {
-            if let Some(sidecar) = smolvm::data::pack_ref::resolve_pack_ref_blocking(&img)? {
-                return self.create_from_smolmachine(&sidecar);
-            }
-        }
-
-        let name = self
-            .name
-            .unwrap_or_else(smolvm::util::generate_machine_name);
-
-        // Remote volumes are mounted inside the guest by the agent, so peel
-        // them off before the host-directory parse, which would reject an
-        // `s3://` source as a missing directory.
-        let (host_volume_specs, remote_volumes) = smolvm::remote_volume::split_specs(&self.volume)?;
-        let parsed_mounts = smolvm::data::storage::HostMount::parse(&host_volume_specs)?;
-        let (mounts, staged_mounts) =
-            smolvm::data::storage::HostMount::split_storage_tuples(&parsed_mounts);
-
-        let (ports, udp_ports) = smolvm::data::network::PortMapping::split_tuples(&self.port);
-
-        let env = smolvm::util::parse_env_list(&self.env);
-
-        // Egress policy: validate --allow-cidr, resolve --allow-host to CIDRs,
-        // add localhost CIDRs for --outbound-localhost-only. Any of these implies
-        // outbound networking. Hosts are re-resolved at start (IPs rotate).
-        let mut allow_cidrs: Vec<String> = Vec::new();
-        for c in &self.allow_cidr {
-            allow_cidrs.push(
-                smolvm::smolfile::parse_cidr(c)
-                    .map_err(|e| anyhow::anyhow!("--allow-cidr: {e}"))?,
-            );
-        }
-        for h in &self.allow_host {
-            let cidrs = smolvm::smolfile::resolve_host_to_cidrs(h)
-                .map_err(|e| anyhow::anyhow!("--allow-host: {e}"))?;
-            allow_cidrs.extend(cidrs);
-        }
-        if self.outbound_localhost_only {
-            allow_cidrs.push("127.0.0.0/8".to_string());
-            allow_cidrs.push("::1/128".to_string());
-        }
-        let net = self.net || !allow_cidrs.is_empty();
-
-        let mut record =
-            smolvm::config::VmRecord::new(name.clone(), self.cpus, self.mem, mounts, ports, net);
-        record.staged_mounts = staged_mounts;
-        record.udp_ports = udp_ports;
-        if !allow_cidrs.is_empty() {
-            record.allowed_cidrs = Some(allow_cidrs);
-        }
-        if !self.allow_host.is_empty() {
-            record.dns_filter_hosts = Some(self.allow_host.clone());
-        }
-        record.image = self.image;
-        // The engine mounts these itself on every start, so persisting them is
-        // all that is needed for the volume to come back after a stop.
-        record.remote_volumes = remote_volumes;
-        // CLI trailing args become the machine's workload (entrypoint cleared
-        // so they win over the image default, matching the engine).
-        if !self.command.is_empty() {
-            record.cmd = self.command.clone();
-        }
-        record.env = env;
-        record.workdir = self.workdir;
-        record.user = self.user;
-        record.init = self.init;
-        record.ssh_agent = self.ssh_agent;
-        // Store secret references (not plaintext); resolved at each start/exec.
-        record.secret_refs =
-            super::common::parse_cli_secret_refs(&self.secret_env, &self.secret_file)?;
-        record.network_backend = self.net_backend;
-        record.storage_gb = self.storage;
-        record.overlay_gb = self.overlay;
-        if let Some(durability) = self.disk_durability {
-            record.disk_durability = durability;
-        }
-        // Match the engine: store gpu only when enabled (None == off), and
-        // reject a zero VRAM value rather than silently accepting it.
-        record.gpu = if self.gpu { Some(true) } else { None };
-        record.gpu_vram_mib = smolvm::data::resources::validate_gpu_vram_mib(self.gpu_vram)
-            .map_err(|e| anyhow::anyhow!("--gpu-vram: {}", e))?;
-        record.labels = smolvm::util::parse_labels(&self.label)?;
-        record.cuda = self.cuda;
-
-        // A registry image with no network can never be pulled (the guest runs
-        // the pull), so refuse here rather than deferring to a `start` that
-        // must fail.
-        record.validate_image_fetchable()?;
-        // Remote volumes mount into the workload container's namespace and
-        // need network to reach the bucket; refuse at create, not every start.
-        record.validate_remote_volumes()?;
-
-        let mut config = SmolvmConfig::load()?;
-        config.insert_vm(name.clone(), record)?;
-
-        println!("Created machine: {}", name);
-        println!("  CPUs: {}, Memory: {} MiB", self.cpus, self.mem);
+        let record = smolvm_create(self.engine_args())?;
+        println!("Created machine: {}", record.name);
+        println!("  CPUs: {}, Memory: {} MiB", record.cpus, record.mem);
         println!(
             "\nUse 'smol machine start --name {}' to start the machine",
-            name
+            record.name
         );
         Ok(())
     }
 
-    /// Create a machine from a packed `.smolmachine`: read its manifest for the
-    /// config defaults, extract its pre-extracted layers into the machine's
-    /// cache, and store `source_smolmachine` so start uses them instead of
-    /// pulling. Port of the engine's `run_from_smolmachine`.
-    fn create_from_smolmachine(self, sidecar_path: &std::path::Path) -> anyhow::Result<()> {
-        if !sidecar_path.exists() {
-            anyhow::bail!("file not found: {}", sidecar_path.display());
-        }
-        let manifest = smolvm_pack::packer::read_manifest_from_sidecar(sidecar_path)
-            .map_err(|e| anyhow::anyhow!("read .smolmachine: {e}"))?;
-        let footer = smolvm_pack::packer::read_footer_from_sidecar(sidecar_path)
-            .map_err(|e| anyhow::anyhow!("read sidecar footer: {e}"))?;
-        let canonical = sidecar_path
-            .canonicalize()
-            .unwrap_or_else(|_| sidecar_path.to_path_buf())
-            .to_string_lossy()
-            .into_owned();
-
-        let name = self
-            .name
-            .clone()
-            .unwrap_or_else(smolvm::util::generate_machine_name);
-
-        // CLI flags override manifest defaults (defaults are 4 cpus / 8192 MiB).
-        let cpus = if self.cpus != 4 {
-            self.cpus
-        } else {
-            manifest.cpus
-        };
-        let mem = if self.mem != 8192 {
-            self.mem
-        } else {
-            manifest.mem
-        };
-
-        // A .smolmachine is an untrusted, portable artifact: reject any secret
-        // refs it carries (Untrusted scope rejects every source kind) so a packed
-        // `from_env`/`from_file` can't read THIS host's env/files at exec time.
-        for (key, r) in &manifest.secret_refs {
-            smolvm::secrets::validate_ref(r, smolvm::secrets::ResolutionScope::Untrusted)
-                .map_err(|e| {
-                    anyhow::anyhow!("create from .smolmachine: secret '{key}': {e} (packs may not carry secret refs)")
-                })?;
-        }
-
-        // Remote volumes are mounted inside the guest by the agent, so peel
-        // them off before the host-directory parse, which would reject an
-        // `s3://` source as a missing directory.
-        let (host_volume_specs, remote_volumes) = smolvm::remote_volume::split_specs(&self.volume)?;
-        let parsed_mounts = smolvm::data::storage::HostMount::parse(&host_volume_specs)?;
-        let (mounts, staged_mounts) =
-            smolvm::data::storage::HostMount::split_storage_tuples(&parsed_mounts);
-        let (ports, udp_ports) = smolvm::data::network::PortMapping::split_tuples(&self.port);
-        let mut env = smolvm::util::parse_env_list(&manifest.env);
-        env.extend(smolvm::util::parse_env_list(&self.env));
-
-        let mut record = smolvm::config::VmRecord::new(
-            name.clone(),
+    /// The engine's `machine create` arguments for these flags. Every field is
+    /// named, so a new flag does not compile until it is passed on.
+    fn engine_args(self) -> Vec<String> {
+        let CreateCmd {
+            _local: _,
+            name,
+            image,
+            from,
             cpus,
             mem,
-            mounts,
-            ports,
-            self.net || manifest.network,
+            storage,
+            overlay,
+            gpu,
+            gpu_vram,
+            cuda,
+            command,
+            volume,
+            port,
+            label,
+            net,
+            allow_cidr,
+            allow_host,
+            outbound_localhost_only,
+            net_backend,
+            disk_durability,
+            ssh_agent,
+            init,
+            env,
+            workdir,
+            user,
+            secret_env,
+            secret_file,
+        } = self;
+        let mut args: Vec<String> = Vec::new();
+        let mut value = |flag: &str, value: Option<String>| {
+            if let Some(value) = value {
+                args.push(flag.to_string());
+                args.push(value);
+            }
+        };
+        value("--name", name);
+        value("--image", image);
+        value("--from", from.map(|p| p.to_string_lossy().into_owned()));
+        value("--cpus", cpus.map(|v| v.to_string()));
+        value("--mem", mem.map(|v| v.to_string()));
+        value("--storage", storage.map(|v| v.to_string()));
+        value("--overlay", overlay.map(|v| v.to_string()));
+        value("--gpu-vram", gpu_vram.map(|v| v.to_string()));
+        value("--net-backend", net_backend.map(net_backend_name));
+        value(
+            "--disk-durability",
+            disk_durability.map(|d| {
+                match d {
+                    smolvm::data::resources::DiskDurability::Full => "full",
+                    smolvm::data::resources::DiskDurability::Deferred => "deferred",
+                }
+                .to_string()
+            }),
         );
-        record.staged_mounts = staged_mounts;
-        record.udp_ports = udp_ports;
-        record.image = Some(manifest.image);
-        record.remote_volumes = remote_volumes;
-        // CLI trailing args override the artifact's baked (entrypoint, cmd),
-        // matching the engine's precedence.
-        if self.command.is_empty() {
-            record.entrypoint = manifest.entrypoint;
-            record.cmd = manifest.cmd;
-        } else {
-            record.entrypoint = Vec::new();
-            record.cmd = self.command.clone();
+        value("--workdir", workdir);
+        value("--user", user);
+        for (flag, values) in [
+            ("--volume", volume),
+            ("--port", port),
+            ("--label", label),
+            ("--allow-cidr", allow_cidr),
+            ("--allow-host", allow_host),
+            ("--init", init),
+            ("--env", env),
+            ("--secret-env", secret_env),
+            ("--secret-file", secret_file),
+        ] {
+            for v in values {
+                value(flag, Some(v));
+            }
         }
-        record.env = env;
-        record.workdir = manifest.workdir;
-        record.user = self.user.or(manifest.user);
-        record.init = self.init;
-        record.ssh_agent = self.ssh_agent;
-        record.network_backend = self.net_backend;
-        record.storage_gb = self.storage;
-        record.overlay_gb = self.overlay;
-        if let Some(durability) = self.disk_durability {
-            record.disk_durability = durability;
+        for (flag, on) in [
+            ("--gpu", gpu),
+            ("--cuda", cuda),
+            ("--net", net),
+            ("--outbound-localhost-only", outbound_localhost_only),
+            ("--ssh-agent", ssh_agent),
+        ] {
+            if on {
+                args.push(flag.to_string());
+            }
         }
-        record.gpu = if manifest.gpu { Some(true) } else { None };
-        record.source_smolmachine = Some(canonical);
-
-        // Create the data dir, then extract the bundle's layers into the
-        // machine's cache. Detach the layers volume on both success and failure
-        // (macOS mounts the case-sensitive volume even when extraction fails).
-        let _manager = smolvm::agent::AgentManager::for_vm_with_sizes(
-            &name,
-            record.storage_gb,
-            record.overlay_gb,
-        )?;
-        let cache_dir = smolvm::agent::machine_layers_cache_dir(&name);
-        smolvm_pack::extract::force_detach_layers_volume(&cache_dir);
-        match std::fs::remove_dir_all(&cache_dir) {
-            Ok(()) => {}
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-            Err(e) => anyhow::bail!("clear packed layers cache: {e}"),
+        if !command.is_empty() {
+            args.push("--".to_string());
+            args.extend(command);
         }
-        println!("Extracting .smolmachine assets...");
-        let result =
-            smolvm_pack::extract::extract_sidecar(sidecar_path, &cache_dir, &footer, false, false)
-                .map_err(|e| anyhow::anyhow!("extract sidecar: {e}"));
-        smolvm_pack::extract::force_detach_layers_volume(&cache_dir);
-        result?;
+        args
+    }
+}
 
-        let mut config = SmolvmConfig::load()?;
-        config.insert_vm(name.clone(), record)?;
+fn net_backend_name(backend: NetworkBackend) -> String {
+    <NetworkBackend as clap::ValueEnum>::to_possible_value(&backend)
+        .map(|v| v.get_name().to_string())
+        .unwrap_or_default()
+}
 
-        println!("Created machine: {name} (from {})", sidecar_path.display());
-        println!("  CPUs: {cpus}, Memory: {mem} MiB");
-        println!("\nUse 'smol machine start --name {name}' to start the machine");
-        Ok(())
+/// Validate a `-p` value the way the engine will parse it, keeping the text.
+fn parse_port(value: &str) -> Result<String, String> {
+    smolvm::data::network::PortMappingSpec::parse(value).map(|_| value.to_string())
+}
+
+/// Run the engine's `machine create` with `args` and return the record.
+fn smolvm_create(args: Vec<String>) -> anyhow::Result<smolvm::VmRecord> {
+    use clap::Parser;
+    #[derive(Parser)]
+    #[command(name = "smol")]
+    struct Engine {
+        #[command(subcommand)]
+        command: smolvm::cli::machine::MachineCmd,
+    }
+    let argv = ["smol", "create"].into_iter().map(String::from).chain(args);
+    let smolvm::cli::machine::MachineCmd::Create(create) = Engine::try_parse_from(argv)?.command
+    else {
+        unreachable!("the arguments name machine create");
+    };
+    Ok(create.create()?)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::Parser;
+
+    #[derive(Parser)]
+    struct Harness {
+        #[command(flatten)]
+        create: CreateCmd,
+    }
+
+    fn engine_args(argv: &[&str]) -> Vec<String> {
+        let mut full = vec!["smol"];
+        full.extend_from_slice(argv);
+        Harness::try_parse_from(full).unwrap().create.engine_args()
+    }
+
+    #[test]
+    fn every_flag_reaches_the_engine_create() {
+        let args = engine_args(&[
+            "-n",
+            "m",
+            "--from",
+            "/a.smolmachine",
+            "--cpus",
+            "2",
+            "--mem",
+            "512",
+            "--storage",
+            "30",
+            "--overlay",
+            "5",
+            "--gpu",
+            "--gpu-vram",
+            "1024",
+            "--cuda",
+            "-v",
+            "/a:/b",
+            "-p",
+            "8080:80/udp",
+            "--label",
+            "k=v",
+            "--net",
+            "--allow-cidr",
+            "10.0.0.0/8",
+            "--allow-host",
+            "example.com",
+            "--outbound-localhost-only",
+            "--net-backend",
+            "virtio-net",
+            "--disk-durability",
+            "deferred",
+            "--ssh-agent",
+            "--init",
+            "echo hi",
+            "-e",
+            "A=1",
+            "-w",
+            "/w",
+            "-u",
+            "1000",
+            "--secret-env",
+            "T=H",
+            "--secret-file",
+            "F=/f",
+            "sleep",
+            "1",
+        ]);
+        let joined = args.join(" ");
+        for expected in [
+            "--name m",
+            "--from /a.smolmachine",
+            "--cpus 2",
+            "--mem 512",
+            "--storage 30",
+            "--overlay 5",
+            "--gpu-vram 1024",
+            "--net-backend virtio-net",
+            "--disk-durability deferred",
+            "--workdir /w",
+            "--user 1000",
+            "--volume /a:/b",
+            "--port 8080:80/udp",
+            "--label k=v",
+            "--allow-cidr 10.0.0.0/8",
+            "--allow-host example.com",
+            "--init echo hi",
+            "--env A=1",
+            "--secret-env T=H",
+            "--secret-file F=/f",
+            "--gpu",
+            "--cuda",
+            "--net",
+            "--outbound-localhost-only",
+            "--ssh-agent",
+            "-- sleep 1",
+        ] {
+            assert!(
+                joined.contains(expected),
+                "{expected} missing from {joined}"
+            );
+        }
+        // And the engine accepts every one of them.
+        use clap::Parser as _;
+        #[derive(Parser)]
+        struct Engine {
+            #[command(subcommand)]
+            command: smolvm::cli::machine::MachineCmd,
+        }
+        let argv = ["smol", "create"].into_iter().map(String::from).chain(args);
+        assert!(Engine::try_parse_from(argv).is_ok());
+    }
+
+    #[test]
+    fn unset_resources_stay_unset_so_a_pack_keeps_its_own() {
+        let args = engine_args(&["--from", "/a.smolmachine"]);
+        assert!(!args.iter().any(|a| a == "--cpus" || a == "--mem"));
     }
 }

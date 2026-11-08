@@ -19,7 +19,7 @@ use pyo3::exceptions::PyRuntimeError;
 use pyo3::prelude::*;
 use pyo3::types::{PyBytes, PyDict};
 use smolvm::agent::ExecEvent;
-use smolvm::embedded::{runtime, ExecCancel, ExecOptions, ForkSourcePolicy, MachineSpec};
+use smolvm::embedded::{runtime, ExecCancel, ExecOptions, ForkSourcePolicy};
 use smolvm::error::{AgentErrorKind, Error as SmolvmError};
 
 #[path = "../../shared/exec_stream_utf8.rs"]
@@ -498,6 +498,230 @@ fn credential_policy(
     ))
 }
 
+/// The machine a Python config dict asks for, as the spec the engine resolves
+/// on every creation path, and the credential values it supplies. One
+/// conversion for an image and a `.smolmachine` alike, so an option cannot
+/// reach one and miss the other. Unset resources stay unset, so a pack's own
+/// apply.
+fn create_spec_from_config(
+    config: &Bound<'_, PyDict>,
+) -> PyResult<(
+    String,
+    smolvm::machine_spec::CreateSpec,
+    std::collections::BTreeMap<String, String>,
+)> {
+    let name: String = config
+        .get_item("name")?
+        .ok_or_else(|| PyRuntimeError::new_err("[INVALID_CONFIG] config['name'] is required"))?
+        .extract()?;
+    let persistent: bool = match config.get_item("persistent")? {
+        Some(v) if !v.is_none() => v.extract()?,
+        _ => false,
+    };
+    let detached: bool = match config.get_item("detached")? {
+        Some(value) if !value.is_none() => value.extract()?,
+        _ => false,
+    };
+    let forkable: bool = match config.get_item("forkable")? {
+        Some(v) if !v.is_none() => v.extract()?,
+        _ => false,
+    };
+    // Map the Python `resources` dict → engine `VmResources` (mirrors
+    // smol-node's `to_vm_resources`). `network`/`cpus`/`memory_mib` are
+    // load-bearing — without `network=true` the guest can't pull images.
+    let mut spec = smolvm::machine_spec::CreateSpec::default();
+    if let Some(r) = config.get_item("resources")? {
+        if let Ok(rd) = r.downcast::<PyDict>() {
+            if let Some(v) = rd.get_item("cpus")? {
+                if !v.is_none() {
+                    spec.cpus = Some(v.extract()?);
+                }
+            }
+            if let Some(v) = rd.get_item("memory_mib")? {
+                if !v.is_none() {
+                    spec.mem = Some(v.extract()?);
+                }
+            }
+            if let Some(v) = rd.get_item("network")? {
+                if !v.is_none() {
+                    spec.net = v.extract()?;
+                }
+            }
+            if let Some(v) = rd.get_item("allowed_cidrs")? {
+                if !v.is_none() {
+                    spec.allowed_cidrs = Some(v.extract()?);
+                }
+            }
+            if let Some(v) = rd.get_item("allowed_hosts")? {
+                if !v.is_none() {
+                    spec.allowed_hosts = Some(v.extract()?);
+                }
+            }
+            if let Some(v) = rd.get_item("storage_gib")? {
+                if !v.is_none() {
+                    spec.storage_gb = Some(v.extract()?);
+                }
+            }
+            if let Some(v) = rd.get_item("overlay_gib")? {
+                if !v.is_none() {
+                    spec.overlay_gb = Some(v.extract()?);
+                }
+            }
+            if let Some(v) = rd.get_item("gpu")? {
+                if !v.is_none() {
+                    spec.gpu = v.extract()?;
+                }
+            }
+            if let Some(v) = rd.get_item("gpu_vram_mib")? {
+                if !v.is_none() {
+                    spec.gpu_vram_mib = Some(v.extract()?);
+                }
+            }
+            if let Some(v) = rd.get_item("disk_durability")? {
+                if !v.is_none() {
+                    spec.disk_durability = Some(match v.extract::<String>()?.as_str() {
+                        "full" => smolvm::data::resources::DiskDurability::Full,
+                        "deferred" => smolvm::data::resources::DiskDurability::Deferred,
+                        other => {
+                            return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                                "disk_durability must be \"full\" or \"deferred\", not {other:?}"
+                            )))
+                        }
+                    });
+                }
+            }
+            if let Some(v) = rd.get_item("cuda")? {
+                if !v.is_none() {
+                    spec.cuda = v.extract()?;
+                }
+            }
+        }
+    }
+    // Map the Python `mounts` list (dicts of {source, target, read_only, staged})
+    // → engine `HostMount` (mirrors smol-node's `HostMount::try_from`).
+    // `HostMount::new` validates the paths, so config errors surface here.
+    let mut mounts: Vec<smolvm::agent::HostMount> = Vec::new();
+    let mut remote_volumes: Vec<smolvm::remote_volume::RemoteVolume> = Vec::new();
+    if let Some(m) = config.get_item("mounts")? {
+        if !m.is_none() {
+            for item in m.iter()? {
+                let d = item?;
+                let d = d.downcast::<PyDict>()?;
+                let source: String = d
+                    .get_item("source")?
+                    .ok_or_else(|| {
+                        PyRuntimeError::new_err("[CONFIG_ERROR] mount requires 'source'")
+                    })?
+                    .extract()?;
+                let target: String = d
+                    .get_item("target")?
+                    .ok_or_else(|| {
+                        PyRuntimeError::new_err("[CONFIG_ERROR] mount requires 'target'")
+                    })?
+                    .extract()?;
+                let read_only: bool = match d.get_item("read_only")? {
+                    Some(v) if !v.is_none() => v.extract()?,
+                    _ => true,
+                };
+                let staged: bool = match d.get_item("staged")? {
+                    Some(v) if !v.is_none() => v.extract()?,
+                    _ => false,
+                };
+                if read_only && staged {
+                    return Err(PyRuntimeError::new_err(
+                        "[MOUNT_ERROR] a staged mount is writable and cannot also be read-only",
+                    ));
+                }
+                // An `s3://` source is mounted inside the guest by the
+                // agent, not bind-mounted from the host, so it must not go
+                // through the host-directory validation below — which would
+                // reject it as a missing directory.
+                if smolvm::remote_volume::is_remote_source(&source) {
+                    if staged {
+                        return Err(PyRuntimeError::new_err(
+                                "[MOUNT_ERROR] staged mode is only supported for local host directories",
+                            ));
+                    }
+                    remote_volumes.push(
+                        smolvm::remote_volume::from_parts(&source, &target, read_only)
+                            .map_err(err)?,
+                    );
+                } else {
+                    let mut mount =
+                        smolvm::agent::HostMount::new(&source, &target, read_only).map_err(err)?;
+                    mount.staged = staged;
+                    mounts.push(mount);
+                }
+            }
+        }
+    }
+
+    // Map the Python `ports` list (dicts of {host, guest}) → engine `PortMapping`.
+    let mut ports: Vec<smolvm::data::network::PortMapping> = Vec::new();
+    if let Some(p) = config.get_item("ports")? {
+        if !p.is_none() {
+            for item in p.iter()? {
+                let d = item?;
+                let d = d.downcast::<PyDict>()?;
+                let host: u16 = d
+                    .get_item("host")?
+                    .ok_or_else(|| PyRuntimeError::new_err("[CONFIG_ERROR] port requires 'host'"))?
+                    .extract()?;
+                let guest: u16 = d
+                    .get_item("guest")?
+                    .ok_or_else(|| PyRuntimeError::new_err("[CONFIG_ERROR] port requires 'guest'"))?
+                    .extract()?;
+                ports.push(smolvm::data::network::PortMapping::new(host, guest));
+            }
+        }
+    }
+
+    let mut env = Vec::new();
+    if let Some(value) = config.get_item("env")? {
+        if !value.is_none() {
+            let values = value.downcast::<PyDict>()?;
+            for (key, value) in values.iter() {
+                env.push((key.extract()?, value.extract()?));
+            }
+        }
+    }
+    let workdir = config
+        .get_item("workdir")?
+        .filter(|value| !value.is_none())
+        .map(|value| value.extract())
+        .transpose()?;
+    let user = config
+        .get_item("user")?
+        .filter(|value| !value.is_none())
+        .map(|value| value.extract())
+        .transpose()?;
+    let command: Vec<String> = config
+        .get_item("command")?
+        .filter(|value| !value.is_none())
+        .map(|value| value.extract())
+        .transpose()?
+        .unwrap_or_default();
+
+    let (credentials, credential_values) = credential_policy(config)?;
+    let labels = match config.get_item("labels")? {
+        Some(value) if !value.is_none() => value.extract()?,
+        _ => std::collections::BTreeMap::new(),
+    };
+    spec.labels = labels;
+    spec.mounts = mounts;
+    spec.remote_volumes = remote_volumes;
+    spec.ports = ports;
+    spec.env = env;
+    spec.workdir = workdir;
+    spec.user = user;
+    spec.cmd = (!command.is_empty()).then_some(command);
+    spec.credentials = credentials;
+    spec.forkable = forkable;
+    spec.ephemeral = !persistent;
+    spec.detached = detached;
+    Ok((name, spec, credential_values))
+}
+
 /// A microVM sandbox handle. Mirrors `smol-node`'s `NapiMachine`.
 #[pyclass]
 struct Machine {
@@ -509,22 +733,7 @@ impl Machine {
     /// Create (and register) a machine. Does not boot until `start()`.
     #[new]
     fn new(py: Python<'_>, config: &Bound<'_, PyDict>) -> PyResult<Self> {
-        let name: String = config
-            .get_item("name")?
-            .ok_or_else(|| PyRuntimeError::new_err("[INVALID_CONFIG] config['name'] is required"))?
-            .extract()?;
-        let persistent: bool = match config.get_item("persistent")? {
-            Some(v) if !v.is_none() => v.extract()?,
-            _ => false,
-        };
-        let detached: bool = match config.get_item("detached")? {
-            Some(value) if !value.is_none() => value.extract()?,
-            _ => false,
-        };
-        let forkable: bool = match config.get_item("forkable")? {
-            Some(v) if !v.is_none() => v.extract()?,
-            _ => false,
-        };
+        let (name, spec, credential_values) = create_spec_from_config(config)?;
         let image: Option<String> = match config.get_item("image")? {
             Some(v) if !v.is_none() => {
                 let image: String = v.extract()?;
@@ -541,210 +750,8 @@ impl Machine {
             }
             _ => None,
         };
-
-        // Map the Python `resources` dict → engine `VmResources` (mirrors
-        // smol-node's `to_vm_resources`). `network`/`cpus`/`memory_mib` are
-        // load-bearing — without `network=true` the guest can't pull images.
-        let mut resources = smolvm::agent::VmResources::default();
-        let mut allowed_hosts: Vec<String> = Vec::new();
-        if let Some(r) = config.get_item("resources")? {
-            if let Ok(rd) = r.downcast::<PyDict>() {
-                if let Some(v) = rd.get_item("cpus")? {
-                    if !v.is_none() {
-                        resources.cpus = v.extract()?;
-                    }
-                }
-                if let Some(v) = rd.get_item("memory_mib")? {
-                    if !v.is_none() {
-                        resources.memory_mib = v.extract()?;
-                    }
-                }
-                if let Some(v) = rd.get_item("network")? {
-                    if !v.is_none() {
-                        resources.network = v.extract()?;
-                    }
-                }
-                if let Some(v) = rd.get_item("allowed_cidrs")? {
-                    if !v.is_none() {
-                        resources.allowed_cidrs = Some(v.extract()?);
-                    }
-                }
-                if let Some(v) = rd.get_item("allowed_hosts")? {
-                    if !v.is_none() {
-                        allowed_hosts = v.extract()?;
-                    }
-                }
-                if let Some(v) = rd.get_item("storage_gib")? {
-                    if !v.is_none() {
-                        resources.storage_gib = Some(v.extract()?);
-                    }
-                }
-                if let Some(v) = rd.get_item("overlay_gib")? {
-                    if !v.is_none() {
-                        resources.overlay_gib = Some(v.extract()?);
-                    }
-                }
-                if let Some(v) = rd.get_item("gpu")? {
-                    if !v.is_none() {
-                        resources.gpu = v.extract()?;
-                    }
-                }
-                if let Some(v) = rd.get_item("gpu_vram_mib")? {
-                    if !v.is_none() {
-                        resources.gpu_vram_mib = Some(v.extract()?);
-                    }
-                }
-                if let Some(v) = rd.get_item("disk_durability")? {
-                    if !v.is_none() {
-                        resources.disk_durability = match v.extract::<String>()?.as_str() {
-                            "full" => smolvm::data::resources::DiskDurability::Full,
-                            "deferred" => smolvm::data::resources::DiskDurability::Deferred,
-                            other => return Err(pyo3::exceptions::PyValueError::new_err(format!(
-                                "disk_durability must be \"full\" or \"deferred\", not {other:?}"
-                            ))),
-                        };
-                    }
-                }
-                if let Some(v) = rd.get_item("cuda")? {
-                    if !v.is_none() {
-                        resources.cuda = v.extract()?;
-                    }
-                }
-            }
-        }
-        // Map the Python `mounts` list (dicts of {source, target, read_only, staged})
-        // → engine `HostMount` (mirrors smol-node's `HostMount::try_from`).
-        // `HostMount::new` validates the paths, so config errors surface here.
-        let mut mounts: Vec<smolvm::agent::HostMount> = Vec::new();
-        let mut remote_volumes: Vec<smolvm::remote_volume::RemoteVolume> = Vec::new();
-        if let Some(m) = config.get_item("mounts")? {
-            if !m.is_none() {
-                for item in m.iter()? {
-                    let d = item?;
-                    let d = d.downcast::<PyDict>()?;
-                    let source: String = d
-                        .get_item("source")?
-                        .ok_or_else(|| {
-                            PyRuntimeError::new_err("[CONFIG_ERROR] mount requires 'source'")
-                        })?
-                        .extract()?;
-                    let target: String = d
-                        .get_item("target")?
-                        .ok_or_else(|| {
-                            PyRuntimeError::new_err("[CONFIG_ERROR] mount requires 'target'")
-                        })?
-                        .extract()?;
-                    let read_only: bool = match d.get_item("read_only")? {
-                        Some(v) if !v.is_none() => v.extract()?,
-                        _ => true,
-                    };
-                    let staged: bool = match d.get_item("staged")? {
-                        Some(v) if !v.is_none() => v.extract()?,
-                        _ => false,
-                    };
-                    if read_only && staged {
-                        return Err(PyRuntimeError::new_err(
-                            "[MOUNT_ERROR] a staged mount is writable and cannot also be read-only",
-                        ));
-                    }
-                    // An `s3://` source is mounted inside the guest by the
-                    // agent, not bind-mounted from the host, so it must not go
-                    // through the host-directory validation below — which would
-                    // reject it as a missing directory.
-                    if smolvm::remote_volume::is_remote_source(&source) {
-                        if staged {
-                            return Err(PyRuntimeError::new_err(
-                                "[MOUNT_ERROR] staged mode is only supported for local host directories",
-                            ));
-                        }
-                        remote_volumes.push(
-                            smolvm::remote_volume::from_parts(&source, &target, read_only)
-                                .map_err(err)?,
-                        );
-                    } else {
-                        let mut mount = smolvm::agent::HostMount::new(&source, &target, read_only)
-                            .map_err(err)?;
-                        mount.staged = staged;
-                        mounts.push(mount);
-                    }
-                }
-            }
-        }
-
-        // Map the Python `ports` list (dicts of {host, guest}) → engine `PortMapping`.
-        let mut ports: Vec<smolvm::data::network::PortMapping> = Vec::new();
-        if let Some(p) = config.get_item("ports")? {
-            if !p.is_none() {
-                for item in p.iter()? {
-                    let d = item?;
-                    let d = d.downcast::<PyDict>()?;
-                    let host: u16 = d
-                        .get_item("host")?
-                        .ok_or_else(|| {
-                            PyRuntimeError::new_err("[CONFIG_ERROR] port requires 'host'")
-                        })?
-                        .extract()?;
-                    let guest: u16 = d
-                        .get_item("guest")?
-                        .ok_or_else(|| {
-                            PyRuntimeError::new_err("[CONFIG_ERROR] port requires 'guest'")
-                        })?
-                        .extract()?;
-                    ports.push(smolvm::data::network::PortMapping::new(host, guest));
-                }
-            }
-        }
-
-        let mut env = Vec::new();
-        if let Some(value) = config.get_item("env")? {
-            if !value.is_none() {
-                let values = value.downcast::<PyDict>()?;
-                for (key, value) in values.iter() {
-                    env.push((key.extract()?, value.extract()?));
-                }
-            }
-        }
-        let workdir = config
-            .get_item("workdir")?
-            .filter(|value| !value.is_none())
-            .map(|value| value.extract())
-            .transpose()?;
-        let user = config
-            .get_item("user")?
-            .filter(|value| !value.is_none())
-            .map(|value| value.extract())
-            .transpose()?;
-        let command = config
-            .get_item("command")?
-            .filter(|value| !value.is_none())
-            .map(|value| value.extract())
-            .transpose()?
-            .unwrap_or_default();
-
-        let (credentials, credential_values) = credential_policy(config)?;
-        let labels = match config.get_item("labels")? {
-            Some(value) if !value.is_none() => value.extract()?,
-            _ => std::collections::BTreeMap::new(),
-        };
-        let spec = MachineSpec {
-            name: name.clone(),
-            labels,
-            mounts,
-            ports,
-            resources,
-            image,
-            command,
-            allowed_hosts,
-            persistent,
-            forkable,
-            detached,
-            runtime_managed: false,
-            remote_volumes,
-            credentials,
-            ..Default::default()
-        };
         let runtime = runtime().map_err(err)?;
-        py.allow_threads(|| runtime.create_machine_with_workload(spec, env, workdir, user))
+        py.allow_threads(|| runtime.create_machine_with_spec(&name, image.as_deref(), &spec))
             .map_err(err)?;
         // Held in memory for this machine's starts in this process; a binding
         // without a value is read from this process's environment instead.
@@ -834,12 +841,34 @@ impl Machine {
             .map_err(err)
     }
 
-    /// Create the stopped machine `name` from a `.smolmachine` artifact.
+    /// Create the stopped machine `name` from a `.smolmachine` artifact. The
+    /// pack supplies defaults and `config` overrides them, by the rules the
+    /// engine applies on every creation path; an option a live checkpoint
+    /// cannot take is refused by name. `config["image"]` names the pack and is
+    /// otherwise ignored.
     #[staticmethod]
-    fn create_from_pack(py: Python<'_>, name: String, pack: String) -> PyResult<Self> {
+    #[pyo3(signature = (name, pack, config=None))]
+    fn create_from_pack(
+        py: Python<'_>,
+        name: String,
+        pack: String,
+        config: Option<&Bound<'_, PyDict>>,
+    ) -> PyResult<Self> {
+        let (spec, credential_values) = match config {
+            Some(config) => {
+                let (_, spec, values) = create_spec_from_config(config)?;
+                (spec, values)
+            }
+            None => Default::default(),
+        };
         let runtime = runtime().map_err(err)?;
-        py.allow_threads(|| runtime.create_machine_from_pack(&name, std::path::Path::new(&pack)))
-            .map_err(err)?;
+        py.allow_threads(|| {
+            runtime.create_machine_from_pack_with(&name, std::path::Path::new(&pack), &spec)
+        })
+        .map_err(err)?;
+        if !credential_values.is_empty() {
+            runtime.supply_credential_values(&name, credential_values);
+        }
         Ok(Self { name })
     }
 
