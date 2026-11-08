@@ -146,6 +146,32 @@ async function main() {
     const marker = await restored.exec(['cat', '/root/marker']);
     check('a machine created from the pack has its state', marker.stdout.trim() === 'packed-state', JSON.stringify(marker.stdout));
     await restored.delete();
+
+    // Options on a pack are applied the way they are on an image, and a
+    // branchable pack machine can be branched.
+    const configured = await Machine.create({
+      name: 'hd-pack-options',
+      image: artifact,
+      env: { PACK_OPTION: 'set' },
+      workdir: '/tmp',
+      labels: { suite: 'host-daemon' },
+      resources: { cpus: 1, memoryMb: 768 },
+      branchable: true,
+      waitForPorts: false,
+    } as never);
+    const seen = await configured.exec(['sh', '-c', 'echo "$PACK_OPTION $(pwd)"']);
+    check('env and workdir reach a pack machine', seen.stdout.trim() === 'set /tmp', JSON.stringify(seen.stdout));
+    const packRow = (await Machine.list()).find((m) => m.name === 'hd-pack-options');
+    check(
+      'labels and resources reach a pack machine',
+      packRow?.labels?.suite === 'host-daemon' && packRow?.resources?.cpus === 1 && packRow?.resources?.memoryMib === 768,
+      JSON.stringify({ labels: packRow?.labels, resources: packRow?.resources }),
+    );
+    const branch = await configured.fork('hd-pack-branch');
+    const branchMarker = await branch.exec(['cat', '/root/marker']);
+    check('a branchable pack machine branches', branchMarker.stdout.trim() === 'packed-state', JSON.stringify(branchMarker.stdout));
+    await branch.delete();
+    await configured.delete();
   } catch (e) {
     check('pack() and create from it', false, `${code(e)}: ${(e as Error).message}`);
   } finally {

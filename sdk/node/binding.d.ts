@@ -483,8 +483,14 @@ export declare class NapiMachine {
    * the artifact's path.
    */
   pack(output: string): Promise<string>
-  /** Create the stopped machine `name` from a `.smolmachine` artifact. */
-  static createFromPack(name: string, pack: string): Promise<NapiMachine>
+  /**
+   * Create the stopped machine `name` from a `.smolmachine` artifact. The
+   * pack supplies defaults and `config` overrides them, by the rules the
+   * engine applies on every creation path; an option a live checkpoint
+   * cannot take is refused by name. `config.image` names the pack and is
+   * otherwise ignored.
+   */
+  static createFromPack(name: string, pack: string, config?: MachineConfig | undefined | null): Promise<NapiMachine>
   /**
    * Stop the machine and clean up all storage (disks, config). A command or
    * file transfer still running fails with code `INTERRUPTED` unless

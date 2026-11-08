@@ -201,7 +201,7 @@ export interface NapiMachineCtor {
   connect(name: string, interceptorAddress?: string, interceptorToken?: string): Promise<NapiMachine>;
   open(name: string): NapiMachine;
   deleteByName(name: string, options?: NativeStopOptions): Promise<void>;
-  createFromPack(name: string, pack: string): Promise<NapiMachine>;
+  createFromPack(name: string, pack: string, config?: NativeMachineConfig): Promise<NapiMachine>;
   list(): Promise<NativeMachineSummary[]>;
   restoreCheckpoint(name: string, artifact: string, keepIdentity?: boolean): NapiMachine;
   exportCheckpoint(source: string, output: string): number;
