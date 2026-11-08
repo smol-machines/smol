@@ -53,7 +53,7 @@
     "test:agent-ready": "tsx test/local-agent-ready.ts",
     "test:paused-connect": "tsx test/local-paused-connect.ts",
     "gen:openapi": "bash scripts/gen-openapi.sh",
-    "test:cloud": "tsx test/cloud-mock.ts && tsx test/cloud-deferred-ports.ts",
+    "test:cloud": "tsx test/cloud-mock.ts && tsx test/cloud-deferred-ports.ts && tsx test/cloud-resumable.ts",
     "test:unit": "tsx test/unit.ts",
     "test:host-daemon": "tsx test/host-daemon-e2e.ts"
   },

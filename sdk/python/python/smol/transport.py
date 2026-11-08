@@ -1227,6 +1227,13 @@ class CloudTransport:
     def exec(self, command: list[str], opts: Optional[ExecOptions] = None) -> ExecResult:
         body = self._command_body(command, opts)
         user = opts.user if opts else None
+        # A resumable exec where the control plane has them: a dropped
+        # connection or a control restart while the command runs costs a
+        # retry, never output.
+        if not (opts and opts.background):
+            resumed = self._exec_resumable(body)
+            if resumed is not None:
+                return resumed
         if user is not None:
             self._ensure_user(user)
         # The command may legitimately run far longer than the default cloud
@@ -1268,6 +1275,46 @@ class CloudTransport:
             stderr_bytes=_decode_exec_bytes(r, "stderrB64", stderr),
         )
 
+    def _exec_resumable(self, body: dict) -> Optional[ExecResult]:
+        run = _ResumableExec(self._base, self._key, self._id, body)
+        if not run.start():
+            return None
+        out: list[bytes] = []
+        err: list[bytes] = []
+        lost = 0
+        for piece in run.pieces():
+            if piece[0] == "stdout":
+                out.append(piece[1])
+            elif piece[0] == "stderr":
+                err.append(piece[1])
+            elif piece[0] == "lost":
+                lost += piece[2] - piece[1]
+            else:
+                _, exit_code, error = piece
+                if exit_code is None:
+                    raise SmolError(
+                        "MACHINE_INTERRUPTED",
+                        f"the command ended without an exit code: {error or 'no reason given'}",
+                    )
+                if lost:
+                    raise SmolError(
+                        "SMOLVM_ERROR",
+                        f"the command exited {exit_code}, but {lost} bytes of its output were "
+                        "dropped by the machine's node before this client read them",
+                    )
+                stdout_bytes = b"".join(out)
+                stderr_bytes = b"".join(err)
+                return ExecResult(
+                    exit_code=int(exit_code),
+                    stdout=stdout_bytes.decode("utf-8", "replace"),
+                    stderr=stderr_bytes.decode("utf-8", "replace"),
+                    stdout_truncated=False,
+                    stderr_truncated=False,
+                    stdout_bytes=stdout_bytes,
+                    stderr_bytes=stderr_bytes,
+                )
+        raise SmolError("SMOLVM_ERROR", "the exec ended without its exit status")
+
     def run(self, image: str, command: list[str], opts: Optional[ExecOptions] = None) -> ExecResult:
         raise NotSupportedError(
             "run(image, …) is not available on the cloud target; create a machine "
@@ -1277,6 +1324,18 @@ class CloudTransport:
 
     def exec_stream(self, command: list[str], opts: Optional[ExecOptions] = None) -> ExecStream:
         body = self._command_body(command, opts)
+        # A resumable exec where the control plane has them: a dropped
+        # connection or a control restart mid-command resumes from the last
+        # byte received. Killing the stream kills the command.
+        if not (opts and opts.background):
+            run = _ResumableExec(self._base, self._key, self._id, body)
+            if run.start():
+
+                def kill() -> None:
+                    run.cancelled.set()
+                    run.forget()
+
+                return ExecStream(self._resumable_events(run), kill)
         if opts is not None and opts.user is not None:
             self._ensure_user(opts.user)
         headers = {
@@ -1323,6 +1382,39 @@ class CloudTransport:
                 pass
 
         return ExecStream(self._sse_events(resp), kill)
+
+    @staticmethod
+    def _resumable_events(run: "_ResumableExec") -> Iterator[dict]:
+        """Event dicts from a resumable exec, decoded without breaking a
+        character split across two pieces."""
+        import codecs
+
+        decoders = {
+            "stdout": codecs.getincrementaldecoder("utf-8")("replace"),
+            "stderr": codecs.getincrementaldecoder("utf-8")("replace"),
+        }
+        for piece in run.pieces():
+            kind = piece[0]
+            if kind in ("stdout", "stderr"):
+                text = decoders[kind].decode(piece[1])
+                if text:
+                    yield {"kind": kind, "data": text}
+            elif kind == "lost":
+                yield {
+                    "kind": "stderr",
+                    "data": f"[smol: {piece[2] - piece[1]} bytes of output were dropped by the "
+                    "machine's node before this client read them]\n",
+                }
+            else:
+                for name, decoder in decoders.items():
+                    rest = decoder.decode(b"", final=True)
+                    if rest:
+                        yield {"kind": name, "data": rest}
+                _, exit_code, error = piece
+                if exit_code is None:
+                    yield {"kind": "error", "message": error or "the command ended without an exit code"}
+                else:
+                    yield {"kind": "exit", "exit_code": int(exit_code)}
 
     @staticmethod
     def _sse_events(resp: Any) -> Iterator[dict]:
@@ -1988,6 +2080,161 @@ def _cloud_error(status: int, raw: str, headers: Any, what: str) -> SmolError:
     )
 
 
+# ---------------------------------------------------------------------------
+# Resumable execs
+#
+# A resumable exec (``/v1/machines/{id}/execs``) is a command the machine's node
+# owns rather than the connection that started it. The client names it before
+# the first try (a retried start is then the same start) and reads its output
+# by offset: ``GET .../execs/{exec}?after=<next>`` answers with the output after
+# ``next``, and asking with ``after = next`` also tells the node it may drop what
+# came before. A dropped connection or a control restart costs a retry: the
+# same read returns the same bytes, so each byte arrives once, and the exit
+# code with the last of them.
+# ---------------------------------------------------------------------------
+
+# Seconds a read asks the control to wait for output when there is none yet.
+_RESUMABLE_WAIT_S = 20
+# One read's budget on the wire: its wait plus room for the answer.
+_RESUMABLE_READ_TIMEOUT_S = _RESUMABLE_WAIT_S + 30
+# How long failures in a row are retried before the exec is given up on (the
+# command keeps running on the node meanwhile).
+_RESUMABLE_BUDGET_S = 600.0
+
+_UNSUPPORTED = object()
+
+
+def _resumable_verdict(status: int, code: Optional[str], starting: bool) -> str:
+    """``retry``, ``unsupported`` (a start on a control plane without
+    resumable execs: use the plain exec) or ``fail``. A read is safe to repeat
+    whatever happened; a start only when it cannot have reached a node (a
+    gateway error, a draining control, a rate limit)."""
+    if status in (408, 429, 502, 504):
+        return "retry"
+    if status == 503:
+        if code == "machine_interrupted":
+            return "fail"
+        if not starting or code in (None, "control_draining"):
+            return "retry"
+        return "fail"
+    if starting and status in (404, 405, 501):
+        return "unsupported"
+    return "fail"
+
+
+class _ResumableExec:
+    """Follows one resumable exec: start it, then read its output once each
+    byte, riding out dropped connections and control restarts."""
+
+    def __init__(self, base: str, key: str, machine_id: str, body: dict) -> None:
+        self._base = base
+        self._key = key
+        self._machine = machine_id
+        self.exec_id = os.urandom(16).hex()
+        self._body = {k: v for k, v in body.items() if k not in ("background", "stream")}
+        self._body["execId"] = self.exec_id
+        self._body["waitSeconds"] = _RESUMABLE_WAIT_S
+        self._next = 0
+        self._answer: Any = None
+        self.cancelled = threading.Event()
+
+    def _request(self, method: str, path: str, body: Optional[dict], starting: bool) -> Any:
+        failing_since: Optional[float] = None
+        attempt = 0
+
+        def failed(retry_after: Optional[float] = None) -> bool:
+            nonlocal failing_since, attempt
+            if failing_since is None:
+                failing_since = time.monotonic()
+            if time.monotonic() - failing_since >= _RESUMABLE_BUDGET_S or self.cancelled.is_set():
+                return False
+            step = min(0.1 * (2 ** min(attempt, 5)), 2.0)
+            attempt += 1
+            wait = step if retry_after is None else min(max(retry_after, 0.05), 5.0)
+            self.cancelled.wait(wait)
+            return not self.cancelled.is_set()
+
+        while True:
+            try:
+                return _cloud_fetch_once(
+                    self._base, self._key, method, path,
+                    json_body=body, timeout=_RESUMABLE_READ_TIMEOUT_S,
+                )
+            except SmolError as error:
+                if error.status is None:
+                    # The connection dropped or timed out: the control may be
+                    # restarting; the load balancer sends the next try to one
+                    # that serves.
+                    if failed():
+                        continue
+                    raise
+                verdict = _resumable_verdict(error.status, error.problem_code, starting)
+                if verdict == "unsupported":
+                    return _UNSUPPORTED
+                if verdict == "retry" and failed(error.retry_after_s):
+                    continue
+                raise
+            except (OSError, http.client.HTTPException, ValueError) as error:
+                # A body cut off on the way, or unreadable: read again.
+                if failed():
+                    continue
+                raise SmolError("CONNECTION", f"cloud {method} {path} kept failing: {error}") from error
+
+    def start(self) -> bool:
+        """Start the exec; False when the control plane has no resumable execs."""
+        answer = self._request("POST", f"/v1/machines/{self._machine}/execs", self._body, True)
+        # An answer that is not an exec's (a catch-all route) means the
+        # control plane has none.
+        if answer is _UNSUPPORTED or not isinstance(answer, dict) or "execId" not in answer:
+            return False
+        self._answer = answer or {}
+        return True
+
+    def pieces(self) -> Iterator[tuple]:
+        """``("stdout"|"stderr", bytes)``, ``("lost", from, to)``, and last
+        ``("end", exit_code_or_None, error_or_None)``."""
+        answer = self._answer
+        while True:
+            if self.cancelled.is_set():
+                return
+            lost = answer.get("lost") or None
+            if lost and int(lost.get("to", 0)) > self._next:
+                yield ("lost", max(int(lost.get("from", 0)), self._next), int(lost["to"]))
+                self._next = int(lost["to"])
+            for chunk in answer.get("output") or []:
+                data = base64.b64decode(chunk.get("data") or "")
+                offset = int(chunk.get("offset", 0))
+                end = offset + len(data)
+                if end <= self._next:
+                    continue
+                if offset > self._next:
+                    break  # never out of order: read again from `next`
+                fresh = data[self._next - offset:]
+                self._next = end
+                yield ("stderr" if chunk.get("stream") == "stderr" else "stdout", fresh)
+            if answer.get("done") and int(answer.get("next", 0)) <= self._next:
+                self.forget()
+                yield ("end", answer.get("exitCode"), answer.get("error"))
+                return
+            path = (
+                f"/v1/machines/{self._machine}/execs/{self.exec_id}"
+                f"?after={self._next}&wait={_RESUMABLE_WAIT_S}"
+            )
+            answer = self._request("GET", path, None, False)
+            if not isinstance(answer, dict) or "next" not in answer:
+                raise SmolError("SMOLVM_ERROR", "the control plane stopped serving this exec")
+
+    def forget(self) -> None:
+        """Delete the exec: once its end was read, or to kill it."""
+        try:
+            _cloud_fetch_once(
+                self._base, self._key, "DELETE",
+                f"/v1/machines/{self._machine}/execs/{self.exec_id}", timeout=10,
+            )
+        except Exception:  # noqa: BLE001 - it expires on its own
+            pass
+
+
 def _job_info(r: Any) -> JobInfo:
     r = r or {}
     return JobInfo(
@@ -2024,10 +2271,14 @@ def _cloud_fetch(
                 json_body=json_body, raw_body=raw_body, accept=accept, timeout=timeout,
             )
         except SmolError as error:
-            if (
-                attempt >= retries
-                or error.status is None
-                or not _sdk_may_retry(error.status, method, idempotent)
+            # A connection cut off (a control restarting, a dropped network) is
+            # sent again when the call is safe to repeat, like a 502/503/504.
+            cut_off = error.status is None and error.code == "CONNECTION" and (
+                idempotent or method in ("GET", "HEAD", "PUT", "DELETE")
+            )
+            if attempt >= retries or (
+                not cut_off
+                and (error.status is None or not _sdk_may_retry(error.status, method, idempotent))
             ):
                 raise
             backoff = 0.5 * (2 ** attempt)
@@ -2097,6 +2348,10 @@ def _cloud_fetch_urllib(
         raise SmolError("CONNECTION", f"cloud request failed: {reason}") from e
     except TimeoutError as e:
         raise SmolError("TIMEOUT", f"cloud {method} {path} timed out after {timeout}s") from e
+    except (http.client.HTTPException, ConnectionError) as e:
+        # The answer was cut off midway (a control restarting, a dropped
+        # connection): a connection failure, which a safe call is retried on.
+        raise SmolError("CONNECTION", f"cloud {method} {path} was cut off: {e}") from e
 
 
 # How long a pooled connection may sit idle before it is dropped instead of

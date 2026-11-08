@@ -7,6 +7,7 @@
  *  Cloud-only/local-only capability gaps surface as `NotSupportedError`.
  */
 
+import { randomBytes } from "node:crypto";
 import { createReadStream, existsSync, readFileSync, statSync, unlinkSync } from "node:fs";
 import { request as httpRequest } from "node:http";
 import { request as httpsRequest } from "node:https";
@@ -1204,11 +1205,19 @@ async function cloudFetch<T = unknown>(
     try {
       return await cloudFetchOnce<T>(conn, method, path, opts);
     } catch (error) {
+      // A connection cut off (a control restarting, a dropped network) is
+      // sent again when the call is safe to repeat, like a 502/503/504: the
+      // request either never arrived or arrives twice to the same effect.
+      const cutOff =
+        error instanceof SmolError &&
+        error.code === "CONNECTION" &&
+        error.status === undefined &&
+        (opts.idempotent || ["GET", "HEAD", "PUT", "DELETE"].includes(method));
       if (
         !(error instanceof SmolError) ||
         attempt >= retries ||
-        error.status === undefined ||
-        !sdkMayRetry(error.status, method, opts.idempotent ?? false)
+        (!cutOff &&
+          (error.status === undefined || !sdkMayRetry(error.status, method, opts.idempotent ?? false)))
       ) {
         throw error;
       }
@@ -1302,11 +1311,214 @@ async function cloudFetchOnce<T = unknown>(
       const bytes = await conn.readResponseBytes(res);
       return Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength) as T;
     }
-    return Buffer.from(await res.arrayBuffer()) as T;
+    try {
+      return Buffer.from(await res.arrayBuffer()) as T;
+    } catch (e) {
+      // The body was cut off midway: a connection failure, which a download
+      // (safe to repeat) is retried on.
+      throw new SmolError("CONNECTION", `cloud ${method} ${path} was cut off: ${(e as Error).message}`);
+    }
   }
   if (res.status === 204) return undefined as T;
   const ct = res.headers.get("content-type") ?? "";
   return (ct.includes("application/json") ? await res.json() : undefined) as T;
+}
+
+// ---------------------------------------------------------------------------
+// Resumable execs
+//
+// A resumable exec (`/v1/machines/{id}/execs`) is a command the machine's node
+// owns rather than the connection that started it. The client names it before
+// the first try (a retried start is then the same start) and reads its output
+// by offset: `GET .../execs/{exec}?after=<next>` answers with the output after
+// `next`, and asking with `after = next` also tells the node it may drop what
+// came before. A dropped connection or a control restart costs a retry: the
+// same read returns the same bytes, so each byte arrives once, and the exit
+// code with the last of them.
+// ---------------------------------------------------------------------------
+
+/** Seconds a read asks the control to wait for output when there is none. */
+const RESUMABLE_WAIT_S = 20;
+/** One read's whole budget on the wire: its wait plus room for the answer. */
+const RESUMABLE_READ_TIMEOUT_MS = (RESUMABLE_WAIT_S + 30) * 1000;
+/** How long failures in a row are retried before the exec is given up on
+ *  (the command keeps running on the node meanwhile). */
+const RESUMABLE_BUDGET_MS = 10 * 60_000;
+
+/** One answer from a start or a read. */
+interface ResumableAnswer {
+  execId?: string;
+  done?: boolean;
+  exitCode?: number | null;
+  error?: string | null;
+  next?: number;
+  output?: { stream?: string; offset?: number; data?: string }[];
+  lost?: { from: number; to: number } | null;
+}
+
+/** What following a resumable exec yields. */
+export type ResumablePiece =
+  | { kind: "stdout"; data: Buffer }
+  | { kind: "stderr"; data: Buffer }
+  | { kind: "lost"; from: number; to: number }
+  | { kind: "end"; exitCode: number | null; error: string | null };
+
+/** What to do with a refused request: retry it, fall back to the plain exec
+ *  (a start on a control plane without resumable execs), or report it. A read
+ *  is safe to repeat whatever happened; a start only when it cannot have
+ *  reached a node (a gateway error, a draining control, a rate limit). */
+export function resumableVerdict(
+  status: number,
+  code: string | undefined,
+  starting: boolean,
+): "retry" | "unsupported" | "fail" {
+  if ([408, 429, 502, 504].includes(status)) return "retry";
+  if (status === 503) {
+    if (code === "machine_interrupted") return "fail";
+    if (!starting || code === undefined || code === "control_draining") return "retry";
+    return "fail";
+  }
+  if (starting && (status === 404 || status === 405 || status === 501)) return "unsupported";
+  return "fail";
+}
+
+/** Send one resumable-exec request until it has an answer worth acting on. */
+async function resumableRequest(
+  conn: CloudConn,
+  method: string,
+  path: string,
+  json: unknown,
+  starting: boolean,
+  signal: AbortSignal | undefined,
+): Promise<ResumableAnswer | "unsupported"> {
+  let failingSince: number | undefined;
+  let attempt = 0;
+  const failed = async (retryAfter?: number): Promise<boolean> => {
+    failingSince ??= Date.now();
+    if (Date.now() - failingSince >= RESUMABLE_BUDGET_MS) return false;
+    const step = Math.min(100 * 2 ** Math.min(attempt, 5), 2_000);
+    attempt++;
+    const wait = retryAfter === undefined ? step : Math.min(Math.max(retryAfter, 50), 5_000);
+    await sleepUnlessAborted(wait, signal);
+    return true;
+  };
+  for (;;) {
+    signal?.throwIfAborted();
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), RESUMABLE_READ_TIMEOUT_MS);
+    const onAbort = () => controller.abort();
+    signal?.addEventListener("abort", onAbort, { once: true });
+    let status: number;
+    let text: string;
+    let retryAfter: number | undefined;
+    try {
+      const res = await (conn.fetch ?? fetch)(`${conn.baseUrl}${path}`, {
+        method,
+        headers: {
+          authorization: `Bearer ${conn.apiKey}`,
+          ...(json !== undefined ? { "content-type": "application/json" } : {}),
+        },
+        body: json !== undefined ? JSON.stringify(json) : null,
+        signal: controller.signal,
+      });
+      status = res.status;
+      retryAfter = retryAfterMs(res.headers.get("retry-after"));
+      text = await res.text();
+    } catch (e) {
+      if (signal?.aborted) throw signal.reason;
+      // The connection dropped or timed out: the control may be restarting,
+      // and the load balancer sends the next try to a control that serves.
+      if (await failed()) continue;
+      throw new SmolError(
+        "CONNECTION",
+        `cloud ${method} ${path} kept failing; the command may still be running: ${(e as Error).message}`,
+      );
+    } finally {
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", onAbort);
+    }
+    if (status >= 200 && status < 300) {
+      try {
+        failingSince = undefined;
+        attempt = 0;
+        return JSON.parse(text) as ResumableAnswer;
+      } catch {
+        // A body cut off on the way: read again.
+        if (await failed()) continue;
+      }
+    }
+    const problem = problemOf(text);
+    const verdict = resumableVerdict(status, problem.code, starting);
+    if (verdict === "unsupported") return "unsupported";
+    if (verdict === "retry" && (await failed(retryAfter))) continue;
+    throw new SmolError(
+      status === 404 ? "NOT_FOUND" : status === 409 ? "CONFLICT" : status === 401 ? "UNAUTHORIZED" : "SMOLVM_ERROR",
+      `cloud ${method} ${path} → ${status}: ${text.trim().slice(0, 500)}`,
+      {
+        status,
+        ...(problem.code !== undefined ? { problemCode: problem.code } : {}),
+        retryable: false,
+      },
+    );
+  }
+}
+
+/** Run `json` (a command request) as a resumable exec in machine `id`,
+ *  yielding its output once each, then its end. Yields nothing and returns
+ *  `false` when the control plane (or the machine's node) has no resumable
+ *  execs: the caller then uses the plain exec. */
+async function* resumableExec(
+  conn: CloudConn,
+  id: string,
+  json: Record<string, unknown>,
+  signal?: AbortSignal,
+): AsyncGenerator<ResumablePiece, boolean> {
+  const execId = randomBytes(16).toString("hex");
+  const start: Record<string, unknown> = { ...json, execId, waitSeconds: RESUMABLE_WAIT_S };
+  delete start.background;
+  delete start.stream;
+  let answer = await resumableRequest(conn, "POST", `/v1/machines/${id}/execs`, start, true, signal);
+  // An answer that is not an exec's (a catch-all route) means the control
+  // plane has none.
+  if (answer === "unsupported" || typeof (answer as { execId?: unknown }).execId !== "string") return false;
+  let next = 0;
+  for (;;) {
+    if (answer === "unsupported" || typeof answer.next !== "number") {
+      throw new SmolError("SMOLVM_ERROR", "the control plane stopped serving this exec");
+    }
+    if (answer.lost && answer.lost.to > next) {
+      yield { kind: "lost", from: Math.max(answer.lost.from, next), to: answer.lost.to };
+      next = answer.lost.to;
+    }
+    for (const chunk of answer.output ?? []) {
+      const data = Buffer.from(chunk.data ?? "", "base64");
+      const offset = chunk.offset ?? 0;
+      const end = offset + data.length;
+      if (end <= next) continue;
+      if (offset > next) break; // never out of order: read again from `next`
+      const fresh = data.subarray(next - offset);
+      next = end;
+      yield chunk.stream === "stderr" ? { kind: "stderr", data: fresh } : { kind: "stdout", data: fresh };
+    }
+    if (answer.done && (answer.next ?? 0) <= next) {
+      // Collected: the node may forget it now rather than at its TTL.
+      await (conn.fetch ?? fetch)(`${conn.baseUrl}/v1/machines/${id}/execs/${execId}`, {
+        method: "DELETE",
+        headers: { authorization: `Bearer ${conn.apiKey}` },
+        signal: AbortSignal.timeout(10_000),
+      }).catch(() => {});
+      yield { kind: "end", exitCode: answer.exitCode ?? null, error: answer.error ?? null };
+      return true;
+    }
+    answer = await resumableRequest(
+      conn,
+      "GET",
+      `/v1/machines/${id}/execs/${execId}?after=${next}&wait=${RESUMABLE_WAIT_S}`,
+      undefined,
+      false,
+      signal,
+    );
+  }
 }
 
 /** Best-effort readiness probe: a trivial in-guest exec that only succeeds once
@@ -1522,6 +1734,10 @@ class CloudTransport implements Transport {
   }
 
   async exec(command: string[], opts?: ExecOptions): Promise<RawExec> {
+    if (!opts?.background) {
+      const resumed = await this.execResumable(command, opts);
+      if (resumed) return resumed;
+    }
     if (opts?.user !== undefined) await this.ensureUser(opts.user, opts.signal);
     // smolfleet MachineCommandRequest: command (CommandSpec — argv array),
     // cwd, env, timeoutSeconds, user. (exactOptionalPropertyTypes: coerce undefined → null.)
@@ -1581,6 +1797,65 @@ class CloudTransport implements Transport {
     };
   }
 
+  /** `exec` as a resumable exec: a dropped connection or a control restart
+   *  while the command runs costs a retry, never output. `undefined` when the
+   *  control plane has no resumable execs. */
+  private async execResumable(command: string[], opts?: ExecOptions): Promise<RawExec | undefined> {
+    const out: Buffer[] = [];
+    const err: Buffer[] = [];
+    let lost = 0;
+    const gen = resumableExec(this.conn, this.id, this.commandJson(command, opts), opts?.signal);
+    for (;;) {
+      const step = await gen.next();
+      if (step.done) {
+        if (!step.value) return undefined;
+        break;
+      }
+      const piece = step.value;
+      if (piece.kind === "stdout") out.push(piece.data);
+      else if (piece.kind === "stderr") err.push(piece.data);
+      else if (piece.kind === "lost") lost += piece.to - piece.from;
+      else {
+        if (piece.exitCode === null) {
+          throw new SmolError(
+            "MACHINE_INTERRUPTED",
+            `the command ended without an exit code: ${piece.error ?? "no reason given"}`,
+          );
+        }
+        if (lost > 0) {
+          throw new SmolError(
+            "SMOLVM_ERROR",
+            `the command exited ${piece.exitCode}, but ${lost} bytes of its output were dropped by the machine's node before this client read them`,
+          );
+        }
+        const stdoutBytes = Buffer.concat(out);
+        const stderrBytes = Buffer.concat(err);
+        return {
+          exitCode: piece.exitCode,
+          stdout: stdoutBytes.toString("utf8"),
+          stderr: stderrBytes.toString("utf8"),
+          stdoutTruncated: false,
+          stderrTruncated: false,
+          stdoutBytes: new Uint8Array(stdoutBytes),
+          stderrBytes: new Uint8Array(stderrBytes),
+        };
+      }
+    }
+    throw new SmolError("SMOLVM_ERROR", "the exec ended without its exit status");
+  }
+
+  /** The control plane's command request for `command`. */
+  private commandJson(command: string[], opts?: ExecOptions): Record<string, unknown> {
+    return {
+      command,
+      env: opts?.env ?? {},
+      cwd: opts?.workdir ?? null,
+      timeoutSeconds: opts?.timeout ?? null,
+      ...(opts?.user !== undefined ? { user: opts.user } : {}),
+      ...(opts?.stdin !== undefined ? { stdin: stdinText(opts.stdin) ?? null } : {}),
+    };
+  }
+
   async run(
     _image: string,
     _command: string[],
@@ -1598,6 +1873,41 @@ class CloudTransport implements Transport {
   ): AsyncGenerator<ExecEvent> {
     const signal = opts?.signal;
     signal?.throwIfAborted();
+    // A resumable exec where the control plane has them: a dropped connection
+    // or a control restart mid-command resumes from the last byte received.
+    {
+      const gen = resumableExec(this.conn, this.id, this.commandJson(command, opts), signal);
+      const decoders = { stdout: new TextDecoder(), stderr: new TextDecoder() };
+      let first = true;
+      for (;;) {
+        const step = await gen.next();
+        if (step.done) {
+          if (step.value || !first) return;
+          break; // no resumable execs: the plain stream below
+        }
+        first = false;
+        const piece = step.value;
+        if (piece.kind === "stdout" || piece.kind === "stderr") {
+          const data = decoders[piece.kind].decode(piece.data, { stream: true });
+          if (data) yield { kind: piece.kind, data };
+        } else if (piece.kind === "lost") {
+          yield {
+            kind: "stderr",
+            data: `[smol: ${piece.to - piece.from} bytes of output were dropped by the machine's node before this client read them]\n`,
+          };
+        } else {
+          for (const kind of ["stdout", "stderr"] as const) {
+            const rest = decoders[kind].decode();
+            if (rest) yield { kind, data: rest };
+          }
+          if (piece.exitCode === null) {
+            yield { kind: "error", message: piece.error ?? "the command ended without an exit code" };
+          } else {
+            yield { kind: "exit", exitCode: piece.exitCode };
+          }
+        }
+      }
+    }
     // A stream's response cannot echo the user, so the probe is the only check.
     if (opts?.user !== undefined) await this.ensureUser(opts.user, signal);
     const json: CloudCommandRequest = {

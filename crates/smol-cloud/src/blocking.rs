@@ -534,13 +534,117 @@ impl Client {
     // -- work --------------------------------------------------------------
 
     /// Run a command and wait for it.
+    ///
+    /// It runs as a resumable exec where the control plane has them: the
+    /// machine's node owns the command, so a dropped connection or a control
+    /// restart while it runs is retried without losing or repeating output.
+    /// A control plane without them gets the plain exec, bounded by `timeout`.
     pub fn exec(&self, id: &str, command: &Command, timeout: Duration) -> Result<CommandOutput> {
+        if !command.background {
+            if let Some(output) = self.exec_resumable(id, command)? {
+                return Ok(output);
+            }
+        }
         self.json(
             reqwest::Method::POST,
             &format!("/v1/machines/{id}/exec"),
             Body::Json(serde_json::to_value(command).map_err(serialize_error)?),
             timeout,
         )
+    }
+
+    /// [`Self::exec`] as a resumable exec; `None` when the control plane (or
+    /// the machine's node) has none.
+    fn exec_resumable(&self, id: &str, command: &Command) -> Result<Option<CommandOutput>> {
+        let cancel = StreamCancel::new();
+        let Some(mut events) = self.start_resumable(id, command, &cancel)? else {
+            return Ok(None);
+        };
+        let (mut stdout, mut stderr) = (Vec::new(), Vec::new());
+        let mut lost = Vec::new();
+        let outcome = loop {
+            match events.step()? {
+                Step::Piece(crate::resumable::Piece::Stdout(b)) => stdout.extend(b),
+                Step::Piece(crate::resumable::Piece::Stderr(b)) => stderr.extend(b),
+                Step::Lost(from, to) => lost.push((from, to)),
+                Step::Done(outcome) => break outcome,
+                Step::Cancelled => unreachable!("nothing cancels a buffered exec"),
+            }
+        };
+        let Some(exit_code) = outcome.exit_code else {
+            return Err(Error::new(
+                ErrorKind::MachineInterrupted,
+                format!(
+                    "the command ended without an exit code: {}",
+                    outcome.error.unwrap_or_else(|| "no reason given".into())
+                ),
+            ));
+        };
+        if let Some((from, _)) = lost.first() {
+            return Err(Error::new(
+                ErrorKind::Other,
+                format!(
+                    "the command exited {exit_code}, but {} bytes of its output (from offset {from}) were dropped by the machine's node before this client read them",
+                    lost.iter().map(|(f, t)| t - f).sum::<u64>()
+                ),
+            ));
+        }
+        use base64::Engine as _;
+        let b64 = |b: &[u8]| base64::engine::general_purpose::STANDARD.encode(b);
+        Ok(Some(CommandOutput {
+            exit_code: Some(exit_code),
+            stdout: Some(String::from_utf8_lossy(&stdout).into_owned()),
+            stderr: Some(String::from_utf8_lossy(&stderr).into_owned()),
+            stdout_b64: Some(b64(&stdout)),
+            stderr_b64: Some(b64(&stderr)),
+            stdout_truncated: Some(false),
+            stderr_truncated: Some(false),
+            // A control plane with resumable execs runs the command as the
+            // user it was asked for.
+            user: command.user.clone(),
+        }))
+    }
+
+    /// Start `command` as a resumable exec in machine `id`. `None` when the
+    /// control plane (or the machine's node) has no resumable execs.
+    fn start_resumable(
+        &self,
+        id: &str,
+        command: &Command,
+        cancel: &StreamCancel,
+    ) -> Result<Option<ResumableEvents>> {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .map_err(|e| Error::new(ErrorKind::Other, format!("start a stream runtime: {e}")))?;
+        let mut run = ResumableRun {
+            runtime,
+            http: self.stream_http.clone(),
+            credentials: self.credentials.clone(),
+            cancelled: cancel.subscribe(),
+        };
+        let exec_id = crate::resumable::new_exec_id();
+        let body = crate::resumable::start_body(
+            serde_json::to_value(command).map_err(serialize_error)?,
+            &exec_id,
+        );
+        let path = crate::resumable::start_path(id);
+        let answer = match run.send_retrying(
+            reqwest::Method::POST,
+            &path,
+            Some(&body),
+            crate::resumable::READ_TIMEOUT,
+            true,
+        )? {
+            Sent::Answer(answer) if crate::resumable::is_exec_answer(&answer.body) => answer,
+            Sent::Answer(_) | Sent::Unsupported => return Ok(None),
+            Sent::Cancelled => {
+                return Ok(Some(ResumableEvents::cancelled(run, id, &exec_id)));
+            }
+        };
+        let mut events = ResumableEvents::new(run, id, &exec_id);
+        events.absorb_answer(&answer)?;
+        Ok(Some(events))
     }
 
     /// Run a command and read its output as it arrives.
@@ -569,6 +673,25 @@ impl Client {
         command: &Command,
         cancel: &StreamCancel,
     ) -> Result<impl Iterator<Item = StreamEvent>> {
+        // A resumable exec where the control plane has them: a dropped
+        // connection or a control restart mid-command is picked up again from
+        // the last byte received.
+        if !command.background {
+            if let Some(events) = self.start_resumable(id, command, cancel)? {
+                return Ok(ExecEvents::Resumable(Box::new(events)));
+            }
+        }
+        self.exec_stream_plain(id, command, cancel)
+            .map(|events| ExecEvents::Plain(Box::new(events)))
+    }
+
+    /// The plain streaming exec, for a control plane without resumable execs.
+    fn exec_stream_plain(
+        &self,
+        id: &str,
+        command: &Command,
+        cancel: &StreamCancel,
+    ) -> Result<SseEvents<StreamBody>> {
         let path = format!("/v1/machines/{id}/exec/stream");
         // A private runtime per stream: the blocking client's reads cannot be
         // interrupted from another thread, and an async read raced against the
@@ -1326,6 +1449,296 @@ fn status_error(
     Error::new(kind, message).with_response(status.as_u16(), problem_code, retryable, retry_after)
 }
 
+/// The events of a streamed exec: resumable, or the plain stream.
+enum ExecEvents {
+    Resumable(Box<ResumableEvents>),
+    Plain(Box<SseEvents<StreamBody>>),
+}
+
+impl Iterator for ExecEvents {
+    type Item = StreamEvent;
+
+    fn next(&mut self) -> Option<StreamEvent> {
+        match self {
+            ExecEvents::Resumable(events) => events.next(),
+            ExecEvents::Plain(events) => events.next(),
+        }
+    }
+}
+
+/// One answer to a resumable-exec request.
+struct Answer {
+    body: Vec<u8>,
+}
+
+/// How a request ended.
+enum Sent {
+    Answer(Answer),
+    Unsupported,
+    Cancelled,
+}
+
+/// The private runtime and plumbing one resumable exec runs on: async, so a
+/// read waiting for output can be cut short by a cancel from another thread.
+struct ResumableRun {
+    runtime: tokio::runtime::Runtime,
+    http: reqwest::Client,
+    credentials: Credentials,
+    cancelled: tokio::sync::watch::Receiver<bool>,
+}
+
+impl ResumableRun {
+    /// Send one request until it gets an answer that is not worth retrying.
+    /// A dropped connection, a timeout and a retryable status (a control
+    /// restarting answers 503) are retried, quickly and for up to
+    /// [`crate::resumable::RECONNECT_BUDGET`]: every request here is safe to
+    /// repeat (a start is idempotent on its exec id, a read on its offset).
+    fn send_retrying(
+        &mut self,
+        method: reqwest::Method,
+        path: &str,
+        body: Option<&serde_json::Value>,
+        timeout: Duration,
+        starting: bool,
+    ) -> Result<Sent> {
+        use crate::resumable::{Backoff, Verdict};
+        let mut backoff = Backoff::default();
+        loop {
+            self.credentials.renew_if_expiring()?;
+            let mut request = self
+                .http
+                .request(
+                    method.clone(),
+                    format!("{}{path}", self.credentials.base_url()),
+                )
+                .bearer_auth(self.credentials.api_key())
+                .timeout(timeout);
+            if let Some(body) = body {
+                request = request.json(body);
+            }
+            let mut cancelled = self.cancelled.clone();
+            let outcome = self.runtime.block_on(async {
+                tokio::select! {
+                    biased;
+                    _ = wait_cancelled(&mut cancelled) => None,
+                    r = async {
+                        let response = request.send().await?;
+                        let status = response.status();
+                        let retry = retry_after(response.headers());
+                        let rid = request_id(response.headers());
+                        let bytes = response.bytes().await?;
+                        Ok::<_, reqwest::Error>((status, retry, rid, bytes))
+                    } => Some(r),
+                }
+            });
+            let (status, retry, rid, bytes) = match outcome {
+                None => return Ok(Sent::Cancelled),
+                Some(Ok(answer)) => answer,
+                Some(Err(e)) => {
+                    // The connection dropped or timed out: the control may be
+                    // restarting. Try again; the load balancer picks a control.
+                    match backoff.after_failure(None) {
+                        Some(wait) => {
+                            std::thread::sleep(wait);
+                            continue;
+                        }
+                        None => {
+                            return Err(Error::new(
+                                ErrorKind::Connection,
+                                format!(
+                                    "{method} {path} kept failing for {:?}; the command may still be running: {e}",
+                                    backoff.failing_for()
+                                ),
+                            ))
+                        }
+                    }
+                }
+            };
+            if status.is_success() {
+                return Ok(Sent::Answer(Answer {
+                    body: bytes.to_vec(),
+                }));
+            }
+            if status == reqwest::StatusCode::UNAUTHORIZED
+                && self
+                    .credentials
+                    .renew_after_rejection(&self.credentials.api_key())
+                    .unwrap_or(false)
+            {
+                continue;
+            }
+            let code = crate::resumable::problem_code(&bytes);
+            match crate::resumable::verdict(status.as_u16(), code.as_deref(), starting) {
+                Verdict::Unsupported => return Ok(Sent::Unsupported),
+                Verdict::Retry => {
+                    if let Some(wait) = backoff.after_failure(retry) {
+                        std::thread::sleep(wait);
+                        continue;
+                    }
+                }
+                Verdict::Fail => {}
+            }
+            let text = String::from_utf8_lossy(&bytes);
+            return Err(status_error(status, &method, path, &text, retry).with_request_id(rid));
+        }
+    }
+}
+
+/// One step of a resumable exec.
+enum Step {
+    Piece(crate::resumable::Piece),
+    Lost(u64, u64),
+    Done(crate::resumable::Outcome),
+    Cancelled,
+}
+
+/// A resumable exec being followed: reads its output by offset until its end,
+/// riding out dropped connections and control restarts.
+struct ResumableEvents {
+    run: ResumableRun,
+    reader: crate::resumable::Reader,
+    steps: std::collections::VecDeque<Step>,
+    finished: bool,
+    stdout: crate::resumable::Utf8Text,
+    stderr: crate::resumable::Utf8Text,
+}
+
+impl ResumableEvents {
+    fn new(run: ResumableRun, machine: &str, exec_id: &str) -> Self {
+        Self {
+            run,
+            reader: crate::resumable::Reader::new(machine, exec_id),
+            steps: Default::default(),
+            finished: false,
+            stdout: Default::default(),
+            stderr: Default::default(),
+        }
+    }
+
+    fn cancelled(run: ResumableRun, machine: &str, exec_id: &str) -> Self {
+        let mut events = Self::new(run, machine, exec_id);
+        events.steps.push_back(Step::Cancelled);
+        events.finished = true;
+        events
+    }
+
+    /// Queue what one answer carried.
+    fn absorb_answer(&mut self, answer: &Answer) -> Result<()> {
+        let absorbed = self
+            .reader
+            .absorb(&answer.body)
+            .map_err(|e| Error::new(ErrorKind::Other, e))?;
+        if let Some((from, to)) = absorbed.lost {
+            self.steps.push_back(Step::Lost(from, to));
+        }
+        self.steps
+            .extend(absorbed.pieces.into_iter().map(Step::Piece));
+        if let Some(outcome) = absorbed.done {
+            self.steps.push_back(Step::Done(outcome));
+            self.finished = true;
+            self.forget();
+        }
+        Ok(())
+    }
+
+    /// Delete the exec once its end was read; it would expire on its own.
+    fn forget(&mut self) {
+        let path = self.reader.delete_path();
+        let request = self
+            .run
+            .http
+            .delete(format!("{}{path}", self.run.credentials.base_url()))
+            .bearer_auth(self.run.credentials.api_key())
+            .timeout(Duration::from_secs(10));
+        // `send` arms the request's timeout, which needs the runtime.
+        let _ = self
+            .run
+            .runtime
+            .block_on(async move { request.send().await });
+    }
+
+    /// The next step, reading more when none is queued.
+    fn step(&mut self) -> Result<Step> {
+        loop {
+            if let Some(step) = self.steps.pop_front() {
+                return Ok(step);
+            }
+            if self.finished {
+                return Ok(Step::Cancelled);
+            }
+            let path = self.reader.read_path();
+            match self.run.send_retrying(
+                reqwest::Method::GET,
+                &path,
+                None,
+                crate::resumable::READ_TIMEOUT,
+                false,
+            )? {
+                Sent::Answer(answer) => self.absorb_answer(&answer)?,
+                Sent::Cancelled | Sent::Unsupported => {
+                    self.finished = true;
+                    return Ok(Step::Cancelled);
+                }
+            }
+        }
+    }
+}
+
+impl Iterator for ResumableEvents {
+    type Item = StreamEvent;
+
+    fn next(&mut self) -> Option<StreamEvent> {
+        loop {
+            match self.step() {
+                Ok(Step::Piece(crate::resumable::Piece::Stdout(b))) => {
+                    let text = self.stdout.push(&b);
+                    if !text.is_empty() {
+                        return Some(StreamEvent::Stdout(text));
+                    }
+                }
+                Ok(Step::Piece(crate::resumable::Piece::Stderr(b))) => {
+                    let text = self.stderr.push(&b);
+                    if !text.is_empty() {
+                        return Some(StreamEvent::Stderr(text));
+                    }
+                }
+                Ok(Step::Lost(from, to)) => {
+                    return Some(StreamEvent::Stderr(format!(
+                        "[smol: {} bytes of output (offsets {from}..{to}) were dropped by the machine's node before this client read them]\n",
+                        to - from
+                    )))
+                }
+                Ok(Step::Done(outcome)) => {
+                    let (out, err) = (self.stdout.finish(), self.stderr.finish());
+                    if !out.is_empty() {
+                        self.steps.push_front(Step::Done(outcome));
+                        return Some(StreamEvent::Stdout(out));
+                    }
+                    if !err.is_empty() {
+                        self.steps.push_front(Step::Done(outcome));
+                        return Some(StreamEvent::Stderr(err));
+                    }
+                    self.steps.clear();
+                    return Some(match outcome.exit_code {
+                        Some(code) => StreamEvent::Exit(code),
+                        None => StreamEvent::Error(
+                            outcome
+                                .error
+                                .unwrap_or_else(|| "the command ended without an exit code".into()),
+                        ),
+                    });
+                }
+                Ok(Step::Cancelled) => return None,
+                Err(e) => {
+                    self.finished = true;
+                    self.steps.clear();
+                    return Some(StreamEvent::Error(e.to_string()));
+                }
+            }
+        }
+    }
+}
+
 /// Ends a live [`Client::exec_stream_cancellable`] stream from any thread.
 /// Clones share one token; cancelling twice is harmless.
 #[derive(Debug, Clone)]
@@ -1658,6 +2071,13 @@ mod tests {
         (url, seen)
     }
 
+    /// What a control plane without resumable execs answers their start.
+    const NO_RESUMABLE_EXECS: (&str, &str, &str) = (
+        "404 Not Found",
+        "",
+        r#"{"status":404,"code":"not_found","detail":"no such route"}"#,
+    );
+
     const UNAVAILABLE: (&str, &str, &str) = (
         "503 Service Unavailable",
         "retry-after: 0\r\n",
@@ -1783,11 +2203,15 @@ mod tests {
 
     #[test]
     fn an_interrupted_exec_is_typed_retryable_and_not_resent() {
-        let (url, seen) = scripted_server(vec![(
-            "503 Service Unavailable",
-            "retry-after: 2\r\n",
-            r#"{"status":503,"code":"machine_interrupted","detail":"the machine stopped","retryable":true}"#,
-        )]);
+        // A control plane without resumable execs, which then refuses the plain exec.
+        let (url, seen) = scripted_server(vec![
+            NO_RESUMABLE_EXECS,
+            (
+                "503 Service Unavailable",
+                "retry-after: 2\r\n",
+                r#"{"status":503,"code":"machine_interrupted","detail":"the machine stopped","retryable":true}"#,
+            ),
+        ]);
         let client = Client::new(Credentials::new(&url, "smk_test")).unwrap();
         let error = client
             .exec(
@@ -1804,7 +2228,7 @@ mod tests {
         assert_eq!(error.status(), Some(503));
         assert_eq!(error.problem_code(), Some("machine_interrupted"));
         assert_eq!(error.retry_after(), Some(Duration::from_secs(2)));
-        assert_eq!(seen.load(std::sync::atomic::Ordering::SeqCst), 1);
+        assert_eq!(seen.load(std::sync::atomic::Ordering::SeqCst), 2);
     }
 
     #[test]
@@ -1814,9 +2238,10 @@ mod tests {
             "retry-after: 0\r\n",
             r#"{"status":429,"code":"too_many_requests","detail":"rate limit exceeded","retryable":true}"#,
         );
-        let (url, seen) = scripted_server(vec![limited, UNAVAILABLE]);
+        let (url, seen) = scripted_server(vec![NO_RESUMABLE_EXECS, limited, UNAVAILABLE]);
         let client = Client::new(Credentials::new(&url, "smk_test")).unwrap();
-        // The 429 is resent; the 503 that follows is not, because exec could run twice.
+        // The plain exec's 429 is resent; the 503 that follows is not, because
+        // a plain exec could run twice.
         let error = client
             .exec(
                 "mach-x",
@@ -1828,7 +2253,7 @@ mod tests {
             )
             .unwrap_err();
         assert_eq!(error.status(), Some(503));
-        assert_eq!(seen.load(std::sync::atomic::Ordering::SeqCst), 2);
+        assert_eq!(seen.load(std::sync::atomic::Ordering::SeqCst), 3);
 
         let (url, seen) = scripted_server(vec![UNAVAILABLE]);
         let client = Client::new(Credentials::new(&url, "smk_test"))
@@ -1960,5 +2385,171 @@ mod tests {
         let raw = "event: stdout\ndata: partial\n";
         let events: Vec<_> = SseEvents::new(raw.as_bytes()).collect();
         assert_eq!(events, vec![StreamEvent::Stdout("partial".into())]);
+    }
+
+    /// A control plane with resumable execs whose output is `lines` lines,
+    /// served a few bytes per read. Every `drop_every`-th request is cut off
+    /// without an answer, as a control restarting does; the first start may be
+    /// refused as draining. Returns the URL and every request line seen.
+    fn resumable_server(
+        lines: usize,
+        drop_every: usize,
+        refuse_first_start: bool,
+    ) -> (String, std::sync::Arc<std::sync::Mutex<Vec<String>>>) {
+        use base64::Engine as _;
+        use std::io::{Read, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+        let log = seen.clone();
+        let output: Vec<u8> = (0..lines)
+            .flat_map(|i| format!("line {i}\n").into_bytes())
+            .collect();
+        std::thread::spawn(move || {
+            let mut n = 0usize;
+            for stream in listener.incoming() {
+                let mut stream = stream.unwrap();
+                let mut buf = vec![0_u8; 16384];
+                let read = stream.read(&mut buf).unwrap_or(0);
+                let request = String::from_utf8_lossy(&buf[..read]).to_string();
+                let first = request.lines().next().unwrap_or_default().to_string();
+                let body = request
+                    .split("\r\n\r\n")
+                    .nth(1)
+                    .unwrap_or_default()
+                    .to_string();
+                n += 1;
+                log.lock().unwrap().push(format!("{first} {body}"));
+                if drop_every > 0 && n.is_multiple_of(drop_every) {
+                    drop(stream); // cut off, no answer
+                    continue;
+                }
+                let starts = log
+                    .lock()
+                    .unwrap()
+                    .iter()
+                    .filter(|l| l.starts_with("POST"))
+                    .count();
+                let (status, body) = if first.starts_with("POST")
+                    && refuse_first_start
+                    && starts == 1
+                {
+                    (
+                        "503 Service Unavailable",
+                        r#"{"code":"control_draining","retryable":true}"#.to_string(),
+                    )
+                } else if first.starts_with("DELETE") {
+                    ("204 No Content", String::new())
+                } else {
+                    let after: usize = first
+                        .split("after=")
+                        .nth(1)
+                        .and_then(|v| v.split(['&', ' ']).next())
+                        .and_then(|v| v.parse().ok())
+                        .unwrap_or(0);
+                    let end = (after + 7).min(output.len());
+                    let done = end == output.len();
+                    let data =
+                        base64::engine::general_purpose::STANDARD.encode(&output[after..end]);
+                    (
+                        if first.starts_with("POST") { "201 Created" } else { "200 OK" },
+                        serde_json::json!({
+                            "execId": "x", "state": if done {"exited"} else {"running"},
+                            "done": done, "exitCode": if done { serde_json::json!(4) } else { serde_json::Value::Null },
+                            "output": [{"stream": if after.is_multiple_of(2) {"stdout"} else {"stderr"}, "offset": after, "data": data}],
+                            "next": end, "start": after, "end": output.len(),
+                        })
+                        .to_string(),
+                    )
+                };
+                let _ = write!(
+                    stream,
+                    "HTTP/1.1 {status}\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+            }
+        });
+        (url, seen)
+    }
+
+    fn command() -> Command {
+        Command {
+            command: vec!["build".to_string()],
+            ..Default::default()
+        }
+    }
+
+    /// Connections cut off mid-command (every third request, start included)
+    /// cost retries only: every byte arrives once, in order, with the exit code.
+    #[test]
+    fn a_resumable_exec_rides_out_dropped_connections() {
+        let (url, seen) = resumable_server(30, 3, true);
+        let client = Client::new(Credentials::new(&url, "smk_test")).unwrap();
+        let out = client.exec("mach-r", &command(), REQUEST_TIMEOUT).unwrap();
+        use base64::Engine as _;
+        let mut bytes = base64::engine::general_purpose::STANDARD
+            .decode(out.stdout_b64.unwrap())
+            .unwrap();
+        bytes.extend(
+            base64::engine::general_purpose::STANDARD
+                .decode(out.stderr_b64.unwrap())
+                .unwrap(),
+        );
+        let mut all: Vec<u8> = Vec::new();
+        let expected: Vec<u8> = (0..30)
+            .flat_map(|i| format!("line {i}\n").into_bytes())
+            .collect();
+        // Stdout and stderr were split by offset; together they are the output.
+        all.extend(bytes);
+        all.sort_unstable();
+        let mut want = expected.clone();
+        want.sort_unstable();
+        assert_eq!(all, want, "every byte exactly once");
+        assert_eq!(out.exit_code, Some(4));
+        let seen = seen.lock().unwrap();
+        let starts: Vec<_> = seen.iter().filter(|l| l.starts_with("POST")).collect();
+        assert!(starts.len() >= 2, "the draining refusal was retried");
+        let id = |l: &str| {
+            let v: serde_json::Value = serde_json::from_str(
+                l.split_once(' ')
+                    .unwrap()
+                    .1
+                    .split_once(' ')
+                    .unwrap()
+                    .1
+                    .split_once(' ')
+                    .unwrap()
+                    .1,
+            )
+            .unwrap();
+            v["execId"].as_str().unwrap().to_string()
+        };
+        assert!(
+            starts.iter().all(|l| id(l) == id(starts[0])),
+            "every start names the same exec"
+        );
+        assert!(
+            seen.iter().any(|l| l.starts_with("DELETE")),
+            "the collected exec is deleted"
+        );
+    }
+
+    /// The streamed form delivers the same bytes in order, as events.
+    #[test]
+    fn a_streamed_resumable_exec_delivers_output_in_order_across_drops() {
+        let (url, _) = resumable_server(20, 4, false);
+        let client = Client::new(Credentials::new(&url, "smk_test")).unwrap();
+        let mut text = String::new();
+        let mut exit = None;
+        for event in client.exec_stream("mach-s", &command()).unwrap() {
+            match event {
+                StreamEvent::Stdout(t) | StreamEvent::Stderr(t) => text.push_str(&t),
+                StreamEvent::Exit(code) => exit = Some(code),
+                StreamEvent::Error(e) => panic!("{e}"),
+            }
+        }
+        let expected: String = (0..20).map(|i| format!("line {i}\n")).collect();
+        assert_eq!(text, expected);
+        assert_eq!(exit, Some(4));
     }
 }
