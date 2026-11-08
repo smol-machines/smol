@@ -332,6 +332,10 @@ class AsyncMachine:
         """Publish a guest port on the host; see :meth:`Machine.publish`."""
         return await asyncio.to_thread(self._m.publish, guest, host, protocol)
 
+    async def publish_atomic(self, guest: int) -> PublishedPort:
+        """Allocate and retain a local loopback TCP listener atomically."""
+        return await asyncio.to_thread(self._m.publish_atomic, guest)
+
     async def unpublish(
         self, guest: Optional[int] = None, host: Optional[int] = None, protocol: str = "tcp"
     ) -> None:

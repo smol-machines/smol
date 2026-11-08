@@ -19,6 +19,7 @@ from typing import Any, Callable, Optional
 
 from .transport import (
     ExecStream,
+    LocalTransport,
     Transport,
     _load_native,
     connect_transport,
@@ -459,6 +460,19 @@ class Machine:
         # Report what took effect: on the cloud the node chose the host port.
         now = [p for p in self._t.ports() if p.guest == guest and p.protocol == protocol]
         return next((p for p in now if p.host == mapping.host), now[0] if now else mapping)
+
+    def publish_atomic(self, guest: int) -> PublishedPort:
+        """Publish a local guest TCP port on an OS-allocated loopback listener.
+
+        The engine owns the listener continuously, including during allocation.
+        No free-port probe releases the port before publication. The machine
+        must be running. Cloud and UDP publication use :meth:`publish` instead.
+        """
+        if not isinstance(self._t, LocalTransport):
+            raise NotSupportedError("atomic loopback publication is local-only")
+        if isinstance(guest, bool) or not isinstance(guest, int) or not 1 <= guest <= 65535:
+            raise InvalidConfigError("guest must be a TCP port in 1..65535")
+        return self._t.publish_atomic(guest)
 
     def unpublish(
         self, guest: Optional[int] = None, host: Optional[int] = None, protocol: str = "tcp"
