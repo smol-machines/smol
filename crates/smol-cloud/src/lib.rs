@@ -8,6 +8,7 @@
 //! - [`types`] is the wire contract, usable with any HTTP client.
 //! - [`credentials`] resolves the endpoint and key the same way everywhere.
 //! - [`blocking`] is a synchronous client, behind the `blocking` feature.
+//! - [`resumable`] is the resumable-exec protocol, for any HTTP client.
 //!
 //! ```no_run
 //! # #[cfg(feature = "blocking")]
@@ -32,6 +33,7 @@
 pub mod blocking;
 pub mod credentials;
 pub mod error;
+pub mod resumable;
 pub mod types;
 
 pub use credentials::{CliSession, Credentials, DEFAULT_BASE_URL};

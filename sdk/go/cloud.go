@@ -551,6 +551,13 @@ func decodeExecBytes(b64 *string, text string) []byte {
 }
 
 func (t *cloudTransport) exec(ctx context.Context, command []string, opts *ExecOptions) (*ExecResult, error) {
+	// A resumable exec where the control plane has them: a dropped connection
+	// or a control restart while the command runs costs a retry, never output.
+	if opts == nil || !opts.Background {
+		if res, err := t.execResumable(ctx, command, opts); res != nil || err != nil {
+			return res, err
+		}
+	}
 	user := ""
 	if opts != nil {
 		user = opts.User
@@ -642,6 +649,42 @@ func (t *cloudTransport) execStream(ctx context.Context, command []string, opts 
 		if err := ctx.Err(); err != nil {
 			yield(ExecEvent{}, err)
 			return
+		}
+		// A resumable exec where the control plane has them: a dropped
+		// connection or a control restart mid-command resumes from the last
+		// byte received.
+		if opts == nil || !opts.Background {
+			stopped := false
+			supported, err := followResumable(ctx, t.conn, t.id, newCommandRequest(command, opts), func(p resumablePiece) bool {
+				var ev ExecEvent
+				switch p.kind {
+				case "stdout", "stderr":
+					ev = ExecEvent{Kind: EventKind(p.kind), Data: p.data}
+				case "lost":
+					ev = ExecEvent{Kind: EventStderr, Data: []byte(fmt.Sprintf("[smol: %d bytes of output were dropped by the machine's node before this client read them]\n", p.to-p.from))}
+				case "end":
+					if p.exitCode == nil {
+						msg := p.message
+						if msg == "" {
+							msg = "the command ended without an exit code"
+						}
+						ev = ExecEvent{Kind: EventError, Message: msg}
+					} else {
+						ev = ExecEvent{Kind: EventExit, ExitCode: *p.exitCode}
+					}
+				}
+				if !yield(ev, nil) {
+					stopped = true
+					return false
+				}
+				return true
+			})
+			if supported {
+				if err != nil && !stopped {
+					yield(ExecEvent{}, err)
+				}
+				return
+			}
 		}
 		// A stream's response cannot echo the user, so the probe is the only check.
 		if opts != nil && opts.User != "" {
@@ -735,14 +778,38 @@ func (t *cloudTransport) execStream(ctx context.Context, command []string, opts 
 }
 
 func (t *cloudTransport) readFile(ctx context.Context, path string) ([]byte, error) {
-	return cloudDo(ctx, t.conn, "GET", t.path("/files/"+encodePath(path)), fetchOpts{bytes: true})
+	return cloudDoAgain(ctx, t.conn, "GET", t.path("/files/"+encodePath(path)), fetchOpts{bytes: true})
+}
+
+// cloudDoAgain is cloudDo for a request that is safe to repeat (a file read or
+// write: the machine writes a file only once all of it has arrived): one cut
+// off by a control restarting or a dropped connection, or answered 502/503/504,
+// is sent again whole, a few times.
+func cloudDoAgain(ctx context.Context, c cloudConn, method, path string, opts fetchOpts) ([]byte, error) {
+	var err error
+	for attempt := 0; attempt < 4; attempt++ {
+		var data []byte
+		if data, err = cloudDo(ctx, c, method, path, opts); err == nil {
+			return data, nil
+		}
+		var e *Error
+		if !errors.As(err, &e) || !(e.Code == CodeConnection || e.Status == 502 || e.Status == 503 || e.Status == 504) {
+			return nil, err
+		}
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(time.Duration(250<<attempt) * time.Millisecond):
+		}
+	}
+	return nil, err
 }
 
 func (t *cloudTransport) writeFile(ctx context.Context, path string, data []byte, mode os.FileMode) error {
 	if data == nil {
 		data = []byte{}
 	}
-	if _, err := cloudDo(ctx, t.conn, "PUT", t.path("/files/"+encodePath(path)), fetchOpts{body: data}); err != nil {
+	if _, err := cloudDoAgain(ctx, t.conn, "PUT", t.path("/files/"+encodePath(path)), fetchOpts{body: data}); err != nil {
 		return err
 	}
 	// The files PUT carries no mode, so apply a requested one with chmod.

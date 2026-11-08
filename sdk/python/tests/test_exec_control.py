@@ -108,6 +108,9 @@ class Handler(BaseHTTPRequestHandler):
                 control.stream_closed.set()
             self.close_connection = True
             return
+        # Read the body before answering: the connection is kept alive, and an
+        # unread body would be taken for the next request.
+        self._body()
         self._json(404, {"error": "no route"})
 
 

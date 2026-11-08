@@ -350,6 +350,13 @@ impl ExecCmd {
                 body["user"] = serde_json::json!(u);
             }
 
+            // A resumable exec where the control plane has them: the machine's
+            // node owns the command, so a dropped connection or a control
+            // restart while it runs costs a retry, not the command's output.
+            if let Some(code) = run_resumable(&http, &endpoint, &id, body.clone()).await? {
+                std::process::exit(code);
+            }
+
             let resp = http
                 .post(format!("{}/v1/machines/{}/exec", endpoint, id))
                 .json(&body)
@@ -431,11 +438,6 @@ impl ExecCmd {
             use futures_util::StreamExt;
             use std::io::Write as _;
 
-            // A stream carries no response object to echo the user in, so prove
-            // the control plane honours it first; then it goes in this body too.
-            if let Some(u) = &user {
-                probe_cloud_user(&http, &endpoint, &id, u).await?;
-            }
             let mut body = serde_json::json!({
                 "command": command,
                 "env": env,
@@ -444,6 +446,16 @@ impl ExecCmd {
             });
             if let Some(u) = &user {
                 body["user"] = serde_json::json!(u);
+            }
+            // A resumable exec where the control plane has them (a control
+            // that has them honours `user`).
+            if let Some(code) = run_resumable(&http, &endpoint, &id, body.clone()).await? {
+                std::process::exit(code);
+            }
+            // A stream carries no response object to echo the user in, so prove
+            // the control plane honours it first; then it goes in this body too.
+            if let Some(u) = &user {
+                probe_cloud_user(&http, &endpoint, &id, u).await?;
             }
             let resp = http
                 .post(format!("{}/v1/machines/{}/exec/stream", endpoint, id))
@@ -512,6 +524,13 @@ impl ExecCmd {
     /// frames, stdout arrives as binary frames, and resize/exit are JSON text
     /// frames — matching the node's protocol.
     fn run_cloud_interactive(self) -> anyhow::Result<()> {
+        // A terminal on a resumable exec where the control plane has them: a
+        // dropped connection or a control restart reattaches, resending the
+        // keystrokes the machine had not taken and skipping output already
+        // shown.
+        if let Some(code) = self.run_cloud_attached()? {
+            std::process::exit(code);
+        }
         // The interactive session is a WebSocket whose query carries only the
         // command and terminal size; the control plane and node do not yet take
         // a user on it. Refuse rather than open a shell as the wrong account.
@@ -645,6 +664,235 @@ impl ExecCmd {
             std::process::exit(exit_code);
         })
     }
+}
+
+impl ExecCmd {
+    /// [`Self::run_cloud_interactive`] on a resumable exec. `None` when the
+    /// control plane has no resumable execs.
+    fn run_cloud_attached(&self) -> anyhow::Result<Option<i32>> {
+        use futures_util::{SinkExt, StreamExt};
+        use smolvm::agent::terminal;
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        use tokio_tungstenite::tungstenite::Message;
+
+        let command = strip_separator(&self.command);
+        if command.is_empty() {
+            anyhow::bail!("no command specified");
+        }
+        let name = self.name.clone().ok_or_else(|| {
+            anyhow::anyhow!(
+                "machine name or ID required for --cloud.\nUse: smol machine shell --cloud --name <NAME>"
+            )
+        })?;
+        let env: std::collections::HashMap<String, String> =
+            smolvm::util::parse_env_list(&self.env)
+                .into_iter()
+                .collect();
+        let (http, cloud_config) = super::cloud::cloud_client()?;
+        let endpoint = cloud_config.endpoint()?.to_string();
+        let token = cloud_config
+            .api_key
+            .clone()
+            .ok_or_else(|| anyhow::anyhow!("not logged in to the cloud; run `smol auth login`"))?;
+        let tty = self.tty || terminal::stdin_is_tty();
+        let user = self.user.clone();
+        let workdir = self.workdir.clone();
+        let timeout = self.timeout;
+
+        let rt = tokio::runtime::Runtime::new()?;
+        let result = rt.block_on(async move {
+            let id = super::cloud::resolve_machine_id(&http, &endpoint, &name).await?;
+            let (cols, rows) = terminal::get_terminal_size().unwrap_or((80, 24));
+            let mut body = serde_json::json!({
+                "command": command,
+                "env": env,
+                "cwd": workdir,
+                "tty": tty,
+                "cols": cols,
+                "rows": rows,
+            });
+            if let Some(t) = timeout {
+                body["timeoutSeconds"] = t.into();
+            }
+            if let Some(u) = &user {
+                body["user"] = serde_json::json!(u);
+            }
+            let Some(exec_id) =
+                super::resumable::start_interactive(&http, &endpoint, &id, body).await?
+            else {
+                return Ok(None);
+            };
+            let ws_base = endpoint
+                .replacen("https://", "wss://", 1)
+                .replacen("http://", "ws://", 1);
+
+            let _raw = if terminal::stdin_is_tty() {
+                terminal::RawModeGuard::new(0)
+            } else {
+                None
+            };
+            let mut term = super::resumable::Terminal::default();
+            let mut stdin = tokio::io::stdin();
+            let mut stdout = tokio::io::stdout();
+            let mut buf = vec![0u8; 8192];
+            let mut stdin_open = true;
+            #[cfg(unix)]
+            let mut winch =
+                tokio::signal::unix::signal(tokio::signal::unix::SignalKind::window_change())?;
+            #[cfg(not(unix))]
+            let mut winch = WinchStub;
+            let mut backoff = smol_cloud::resumable::Backoff::default();
+
+            let code = 'session: loop {
+                // (Re)attach from the offset reached; the bearer goes in a header,
+                // never the URL, which proxies log.
+                use tokio_tungstenite::tungstenite::client::IntoClientRequest;
+                use tokio_tungstenite::tungstenite::http::header::{HeaderValue, AUTHORIZATION};
+                let url = format!(
+                    "{ws_base}/v1/machines/{id}/execs/{exec_id}/attach?after={}",
+                    term.next
+                );
+                let mut request = url
+                    .into_client_request()
+                    .map_err(|e| anyhow::anyhow!("build attach request: {e}"))?;
+                request.headers_mut().insert(
+                    AUTHORIZATION,
+                    HeaderValue::from_str(&format!("Bearer {token}"))
+                        .map_err(|e| anyhow::anyhow!("invalid authorization header: {e}"))?,
+                );
+                let ws = match tokio_tungstenite::connect_async(request).await {
+                    Ok((ws, _)) => ws,
+                    Err(tokio_tungstenite::tungstenite::Error::Http(resp))
+                        if resp.status().as_u16() == 404 =>
+                    {
+                        drop(_raw);
+                        anyhow::bail!(
+                            "the session is gone (it ended, or its machine stopped)"
+                        );
+                    }
+                    Err(e) => match backoff.after_failure(None) {
+                        Some(wait) => {
+                            tokio::time::sleep(wait).await;
+                            continue 'session;
+                        }
+                        None => {
+                            drop(_raw);
+                            anyhow::bail!("lost the session's control plane: {e}");
+                        }
+                    },
+                };
+                let (mut ws_tx, mut ws_rx) = ws.split();
+                loop {
+                    tokio::select! {
+                        r = stdin.read(&mut buf), if stdin_open => match r {
+                            Ok(0) | Err(_) => {
+                                stdin_open = false;
+                                // Without a terminal, end of input is the command's too.
+                                if !tty && ws_tx.send(term.eof()).await.is_err() {
+                                    continue 'session;
+                                }
+                            }
+                            Ok(n) => {
+                                for frame in term.stdin(&buf[..n]) {
+                                    if ws_tx.send(frame).await.is_err() {
+                                        // Kept until acknowledged: resent on reattach.
+                                        continue 'session;
+                                    }
+                                }
+                            }
+                        },
+                        _ = winch.recv() => {
+                            if let Some((c, r)) = terminal::get_terminal_size() {
+                                let frame = format!("{{\"type\":\"resize\",\"cols\":{c},\"rows\":{r}}}");
+                                let _ = ws_tx.send(Message::Text(frame.into())).await;
+                            }
+                        }
+                        msg = ws_rx.next() => {
+                            let msg = match msg {
+                                Some(Ok(msg)) => msg,
+                                // Dropped, or closed for a control restart (1012):
+                                // reattach and pick up where this left off.
+                                _ => continue 'session,
+                            };
+                            if matches!(msg, Message::Close(_)) {
+                                continue 'session;
+                            }
+                            match term.take_frame(&msg) {
+                                super::resumable::FromNode::Output(bytes) => {
+                                    stdout.write_all(&bytes).await?;
+                                    stdout.flush().await?;
+                                    let _ = ws_tx.send(term.ack()).await;
+                                }
+                                super::resumable::FromNode::Resend(frames) => {
+                                    // The hello: this attach works, so the next
+                                    // drop starts a fresh run of retries.
+                                    backoff.succeeded();
+                                    for frame in frames {
+                                        if ws_tx.send(frame).await.is_err() {
+                                            continue 'session;
+                                        }
+                                    }
+                                }
+                                super::resumable::FromNode::Lost(from, to) => {
+                                    let _ = ws_tx.send(term.ack()).await;
+                                    eprint!("\r\n[smol: {} bytes of output were dropped while reconnecting]\r\n", to - from);
+                                }
+                                super::resumable::FromNode::Exit(code, error) => {
+                                    if let Some(error) = error.filter(|_| code.is_none()) {
+                                        eprint!("\r\n{error}\r\n");
+                                    }
+                                    break 'session code.unwrap_or(1);
+                                }
+                                super::resumable::FromNode::Nothing => {}
+                            }
+                        }
+                    }
+                }
+            };
+            drop(_raw); // restore the terminal before the caller's hard exit
+            Ok(Some(code))
+        });
+        // The stdin reader is a blocking thread parked in read(): waiting for it
+        // would hang the exit until the next keystroke.
+        rt.shutdown_background();
+        result
+    }
+}
+
+/// Run a cloud command as a resumable exec, writing its output as it arrives.
+/// Returns its exit code, or `None` when the control plane has no resumable
+/// execs (the caller then uses the plain exec).
+async fn run_resumable(
+    http: &reqwest::Client,
+    endpoint: &str,
+    id: &str,
+    body: serde_json::Value,
+) -> anyhow::Result<Option<i32>> {
+    use std::io::Write as _;
+    let mut out = std::io::stdout();
+    let mut err = std::io::stderr();
+    let outcome = super::resumable::run(http, endpoint, id, body, |piece| match piece {
+        smol_cloud::resumable::Piece::Stdout(b) => {
+            let _ = out.write_all(&b);
+            let _ = out.flush();
+        }
+        smol_cloud::resumable::Piece::Stderr(b) => {
+            let _ = err.write_all(&b);
+            let _ = err.flush();
+        }
+    })
+    .await?;
+    Ok(outcome.map(|o| match o.exit_code {
+        Some(code) => code,
+        None => {
+            eprintln!(
+                "error: {}",
+                o.error
+                    .unwrap_or_else(|| "the command ended without an exit code".into())
+            );
+            1
+        }
+    }))
 }
 
 /// Percent-encode a query-string value, leaving RFC 3986 unreserved chars (and

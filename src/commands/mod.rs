@@ -35,6 +35,7 @@ pub mod registry;
 pub mod resize;
 pub mod resolve;
 pub mod restore;
+pub mod resumable;
 pub mod rm;
 pub mod rollout;
 pub mod run;

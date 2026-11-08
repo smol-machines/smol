@@ -115,6 +115,9 @@ impl LogsCmd {
         let follow = self.follow;
         let tail = self.tail;
         super::cloud::run_cloud_command(self.name, |http, endpoint, id| async move {
+            if follow {
+                return follow_cloud_logs(&http, &endpoint, &id, tail).await;
+            }
             // The machine's console (agent tracing + the workload's stdout/stderr)
             // — the same source the web console shows, and what `smol machine logs`
             // is expected to surface. `--events` switches to the control-plane
@@ -184,6 +187,72 @@ impl LogsCmd {
             }
             Ok(())
         })
+    }
+}
+
+/// Follow a cloud machine's console, resuming after a dropped connection or a
+/// control restart from the last line received: each event carries its log
+/// offset as its id, and a reconnect asks for what follows it.
+async fn follow_cloud_logs(
+    http: &reqwest::Client,
+    endpoint: &str,
+    id: &str,
+    tail: u32,
+) -> anyhow::Result<()> {
+    let mut last_id: Option<u64> = None;
+    let mut backoff = smol_cloud::resumable::Backoff::default();
+    loop {
+        let mut query = vec![("follow", "true".to_string()), ("ids", "true".to_string())];
+        match last_id {
+            Some(after) => query.push(("after", after.to_string())),
+            None => query.push(("tail", tail.to_string())),
+        }
+        // No overall deadline: a follow lasts as long as the user wants it.
+        // A silent connection is noticed by the keep-alive watch instead.
+        let sent = http
+            .get(format!("{endpoint}/v1/machines/{id}/logs"))
+            .query(&query)
+            .timeout(std::time::Duration::from_secs(10 * 365 * 24 * 3600))
+            .send()
+            .await;
+        let resp = match sent {
+            Ok(resp) if resp.status().is_success() => resp,
+            Ok(resp) if resp.status().as_u16() == 404 => {
+                anyhow::bail!("machine '{}' not found", id)
+            }
+            Ok(resp) if !super::common::is_retryable_status(resp.status()) => {
+                super::cloud::check_response(resp, "stream logs").await?;
+                return Ok(());
+            }
+            _ => match backoff.after_failure(None) {
+                Some(wait) => {
+                    tokio::time::sleep(wait).await;
+                    continue;
+                }
+                None => anyhow::bail!("lost the control plane while following logs"),
+            },
+        };
+        let seen_before = last_id;
+        super::resumable::read_log_events(resp, &mut last_id, print_console_line).await?;
+        if last_id.is_none() && seen_before.is_none() {
+            // A control plane whose events carry no ids cannot resume a follow:
+            // reading again would replay or skip lines. Say so instead.
+            anyhow::bail!(
+                "the log stream ended and this control plane cannot resume it; run the command again"
+            );
+        }
+        // A stream that moved the follow on proves the way works; one that
+        // ended at once (a control on its way down) counts as a failure, so
+        // reconnects back off instead of spinning.
+        if last_id != seen_before {
+            backoff.succeeded();
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        } else {
+            match backoff.after_failure(None) {
+                Some(wait) => tokio::time::sleep(wait).await,
+                None => anyhow::bail!("lost the control plane while following logs"),
+            }
+        }
     }
 }
 

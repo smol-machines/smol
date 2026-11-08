@@ -133,9 +133,6 @@ fn cp_cloud(
                 rel
             );
             if is_upload {
-                // Stream the file straight from disk into the request body so a
-                // large upload is never read wholly into RAM (mirrors the local
-                // path's chunked `write_file_from_reader`).
                 let meta = tokio::fs::metadata(&local_path)
                     .await
                     .map_err(|e| anyhow::anyhow!("{}: {}", local_path, e))?;
@@ -143,19 +140,40 @@ fn cp_cloud(
                     anyhow::bail!("{}: is a directory (cp copies a single file)", local_path);
                 }
                 let size = meta.len();
-                let file = tokio::fs::File::open(&local_path)
-                    .await
-                    .map_err(|e| anyhow::anyhow!("{}: {}", local_path, e))?;
-                let body = reqwest::Body::wrap_stream(tokio_util::io::ReaderStream::new(file));
-                // Set Content-Length explicitly (a streamed body has unknown length
-                // and would otherwise be chunked) to preserve the prior semantics.
-                let resp = http
-                    .put(&url)
-                    .header(reqwest::header::CONTENT_LENGTH, size)
-                    .body(body)
-                    .send()
-                    .await?;
-                cloud::check_response(resp, "upload file to machine").await?;
+                // A transfer cut off (a control restarting, a dropped
+                // connection) is sent again whole: the machine writes a file
+                // only once all of it has arrived, so a cut upload leaves
+                // nothing behind and a repeat is the same write.
+                let mut attempt = 0;
+                loop {
+                    attempt += 1;
+                    // Stream the file straight from disk into the request body so a
+                    // large upload is never read wholly into RAM (mirrors the local
+                    // path's chunked `write_file_from_reader`).
+                    let file = tokio::fs::File::open(&local_path)
+                        .await
+                        .map_err(|e| anyhow::anyhow!("{}: {}", local_path, e))?;
+                    let body = reqwest::Body::wrap_stream(tokio_util::io::ReaderStream::new(file));
+                    // Set Content-Length explicitly (a streamed body has unknown length
+                    // and would otherwise be chunked) to preserve the prior semantics.
+                    let sent = http
+                        .put(&url)
+                        .header(reqwest::header::CONTENT_LENGTH, size)
+                        .timeout(transfer_timeout(size))
+                        .body(body)
+                        .send()
+                        .await;
+                    match sent {
+                        Ok(resp)
+                            if !(retry_transfer(resp.status()) && attempt < TRANSFER_ATTEMPTS) =>
+                        {
+                            cloud::check_response(resp, "upload file to machine").await?;
+                            break;
+                        }
+                        Err(e) if attempt >= TRANSFER_ATTEMPTS => return Err(e.into()),
+                        _ => tokio::time::sleep(transfer_backoff(attempt)).await,
+                    }
+                }
                 eprintln!("Uploaded {local_path} ({size} bytes) -> {label}:{guest_path}");
             } else {
                 // Refuse to clobber a directory target, mirroring local `cp`.
@@ -165,11 +183,39 @@ fn cp_cloud(
                         local_path
                     );
                 }
-                let resp = http.get(&url).send().await?;
-                let resp = cloud::check_response(resp, "download file from machine").await?;
-                // Stream the response body chunk-by-chunk to disk so a large
-                // download is never buffered entirely in memory.
-                let size = write_chunks_to_file(resp.bytes_stream(), &local_path)
+                // Written beside the target and renamed into place once whole,
+                // so a download cut off midway (and read again) never leaves a
+                // truncated file where the complete one belongs.
+                let partial = format!("{local_path}.smol-partial");
+                let mut attempt = 0;
+                let size = loop {
+                    attempt += 1;
+                    let fetched = async {
+                        let resp = http
+                            .get(&url)
+                            .timeout(transfer_timeout(smol_cloud::blocking::MAX_FILE_BYTES))
+                            .send()
+                            .await?;
+                        if retry_transfer(resp.status()) {
+                            anyhow::bail!("{} from the control plane", resp.status());
+                        }
+                        let resp =
+                            cloud::check_response(resp, "download file from machine").await?;
+                        // Stream the response body chunk-by-chunk to disk so a large
+                        // download is never buffered entirely in memory.
+                        write_chunks_to_file(resp.bytes_stream(), &partial).await
+                    }
+                    .await;
+                    match fetched {
+                        Ok(size) => break size,
+                        Err(e) if attempt >= TRANSFER_ATTEMPTS || !transient(&e) => {
+                            let _ = tokio::fs::remove_file(&partial).await;
+                            return Err(e.context(format!("download {guest_path}")));
+                        }
+                        Err(_) => tokio::time::sleep(transfer_backoff(attempt)).await,
+                    }
+                };
+                tokio::fs::rename(&partial, &local_path)
                     .await
                     .map_err(|e| anyhow::anyhow!("{}: {}", local_path, e))?;
                 eprintln!("Downloaded {label}:{guest_path} ({size} bytes) -> {local_path}");
@@ -177,6 +223,33 @@ fn cp_cloud(
             Ok(())
         },
     )
+}
+
+/// Tries per file transfer before a cut-off one is reported.
+const TRANSFER_ATTEMPTS: u32 = 5;
+
+/// How long a transfer of `bytes` may take: the ordinary request window plus
+/// the time `bytes` needs on a slow link (as the SDK allows).
+fn transfer_timeout(bytes: u64) -> std::time::Duration {
+    smol_cloud::blocking::transfer_timeout(bytes)
+}
+
+/// A status that says the request never reached a machine: a control
+/// restarting or the load balancer without a control for a moment.
+fn retry_transfer(status: reqwest::StatusCode) -> bool {
+    matches!(status.as_u16(), 502..=504)
+}
+
+/// Whether a failed download is worth repeating: the connection, not the file.
+fn transient(e: &anyhow::Error) -> bool {
+    e.chain().any(|cause| {
+        cause.downcast_ref::<reqwest::Error>().is_some()
+            || cause.to_string().contains("from the control plane")
+    })
+}
+
+fn transfer_backoff(attempt: u32) -> std::time::Duration {
+    std::time::Duration::from_millis(250 * 2u64.pow(attempt.min(4)))
 }
 
 /// Drain a byte stream to `path`, returning the number of bytes written.
