@@ -67,6 +67,10 @@ enum Commands {
     /// Manage CLI configuration
     Config(commands::config::ConfigCmd),
 
+    /// Run a Docker engine in a managed machine (docker and docker compose
+    /// work with no DOCKER_HOST)
+    Docker(smolvm::cli::docker::DockerCmd),
+
     /// Manage framework-aware fused rollout executors and policy versions
     Rollout(commands::rollout::RolloutCmd),
 
@@ -235,6 +239,7 @@ fn main() {
         Commands::Auth(cmd) => cmd.run(),
         Commands::Cloud(cmd) => cmd.run(),
         Commands::Config(cmd) => cmd.run(),
+        Commands::Docker(cmd) => cmd.run().map_err(anyhow::Error::from),
         Commands::Rollout(cmd) => cmd.run(),
         Commands::BootVm { config } => boot_vm(config).map_err(|e| anyhow::anyhow!("{}", e)),
         #[cfg(unix)]
