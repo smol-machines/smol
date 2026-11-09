@@ -1354,10 +1354,13 @@ impl Transport for LocalTransport {
         }
         let borrowed: Vec<&str> = args.iter().map(String::as_str).collect();
         self.run(&borrowed)?;
-        Ok(Box::new(LocalTransport::with_ports(
-            name,
-            options.ports.clone(),
-        )?))
+        Ok(Box::new(LocalTransport {
+            name: name.into(),
+            cli: self.cli.clone(),
+            credential_env: self.credential_env.clone(),
+            ports: options.ports.clone(),
+            interceptor: std::sync::Mutex::new(None),
+        }))
     }
 
     fn branch_batch(
@@ -1810,6 +1813,32 @@ mod io_tests {
             args.contains("--from test --name child --label owner=child"),
             "{args}"
         );
+    }
+
+    #[test]
+    fn branches_keep_the_selected_engine_and_credentials() {
+        let dir = tempfile::tempdir().unwrap();
+        let log = dir.path().join("args");
+        let mut transport = cli(
+            dir.path(),
+            &format!(
+                "test \"$SMOL_SDK_TEST_CREDENTIAL\" = fixture\necho \"$*\" >> {}",
+                log.display()
+            ),
+        );
+        transport.credential_env =
+            CredentialEnv::new(vec![("SMOL_SDK_TEST_CREDENTIAL".into(), "fixture".into())]);
+        transport.ports = vec![Port::same(9000)];
+        let child = transport
+            .branch("child", &BranchOptions::new().port(Port::new(18080, 8080)))
+            .unwrap();
+        assert_eq!(child.host_port(8080).unwrap(), Some(18080));
+        assert_eq!(child.host_port(9000).unwrap(), None);
+        let result = child.exec(vec!["true".into()], ExecOptions::new()).unwrap();
+        assert_eq!(result.exit_code, 0, "{}", result.stderr_utf8());
+        let args = std::fs::read_to_string(&log).unwrap();
+        assert!(args.contains("machine branch --from test --name child -p 18080:8080"));
+        assert!(args.contains("machine exec --name child -- true"), "{args}");
     }
 
     #[test]
