@@ -352,6 +352,10 @@ sets a label on a branch over the ones it inherits.
 to a host path without holding it in memory, and `machine.data_dir()` returns
 the host directory the engine keeps the machine's files in. Both are local only.
 
+`machine.copy_in("./project", "/work")` copies a host file or directory into the guest the same
+way (a directory recursively, like `cp -r`, with an engine of 1.34 or later). Local only; on the
+cloud, `write_file` per file.
+
 `stream.kill()` (or a `KillHandle` from `stream.kill_handle()`, usable from
 another thread) kills the command and ends the stream. Dropping the stream
 without killing it leaves the command running in the guest, like dropping a

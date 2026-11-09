@@ -1144,6 +1144,16 @@ impl Transport for LocalTransport {
         .map(|_| ())
     }
 
+    fn copy_in(&self, host_path: &Path, guest_path: &str) -> Result<()> {
+        self.run(&[
+            "machine",
+            "cp",
+            &host_path.to_string_lossy(),
+            &format!("{}:{guest_path}", self.name),
+        ])
+        .map(|_| ())
+    }
+
     fn data_dir(&self) -> Result<PathBuf> {
         let out = self.run(&["machine", "data-dir", "--name", &self.name])?;
         Ok(PathBuf::from(String::from_utf8_lossy(&out).trim()))
@@ -2110,6 +2120,26 @@ mod io_tests {
 
         let failing = cli(dir.path(), "echo 'vm not found: test' >&2\nexit 1");
         let error = failing.copy_out("/x", &host).unwrap_err();
+        assert_eq!(error.kind(), ErrorKind::NotFound);
+    }
+
+    #[test]
+    fn copy_in_hands_the_host_path_to_machine_cp() {
+        let dir = tempfile::tempdir().unwrap();
+        let log = dir.path().join("args");
+        let transport = cli(dir.path(), &format!("echo \"$*\" > {}", log.display()));
+        let host = dir.path().join("project");
+        std::fs::create_dir(&host).unwrap();
+        transport.copy_in(&host, "/work").unwrap();
+        let args = std::fs::read_to_string(&log).unwrap();
+        assert_eq!(
+            args.trim(),
+            format!("machine cp {} test:/work", host.display()),
+            "a directory goes to the engine as it is; the engine copies it recursively"
+        );
+
+        let failing = cli(dir.path(), "echo 'vm not found: test' >&2\nexit 1");
+        let error = failing.copy_in(&host, "/work").unwrap_err();
         assert_eq!(error.kind(), ErrorKind::NotFound);
     }
 

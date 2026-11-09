@@ -982,6 +982,16 @@ impl Machine {
         self.transport.copy_out(guest_path, host_path.as_ref())
     }
 
+    /// Copy a host file or directory into the running guest at `guest_path`,
+    /// without holding it in memory. A directory is copied the way `cp -r`
+    /// does, into `guest_path` under its own name when that is an existing
+    /// directory and as `guest_path` otherwise, with an engine of 1.34 or
+    /// later; an older engine refuses a directory. Local only; on the cloud
+    /// use [`Machine::write_file`] per file.
+    pub fn copy_in(&self, host_path: impl AsRef<Path>, guest_path: &str) -> Result<()> {
+        self.transport.copy_in(host_path.as_ref(), guest_path)
+    }
+
     /// The host directory the engine keeps this machine's disks, sockets and
     /// logs in, such as `egress-denials.log`. Local only.
     pub fn data_dir(&self) -> Result<PathBuf> {

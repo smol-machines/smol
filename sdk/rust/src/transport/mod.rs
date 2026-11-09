@@ -112,6 +112,14 @@ pub(crate) trait Transport: Send + Sync + std::fmt::Debug {
         ))
     }
 
+    /// Copy a host file or directory into the guest. Local only.
+    fn copy_in(&self, _host_path: &Path, _guest_path: &str) -> Result<()> {
+        Err(unsupported(
+            "copy_in()",
+            "a cloud machine has no host path to copy from; use write_file()",
+        ))
+    }
+
     /// The machine's directory on the host. Local only.
     fn data_dir(&self) -> Result<PathBuf> {
         Err(unsupported(
