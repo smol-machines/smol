@@ -189,6 +189,13 @@ See **[docs/cli.md](docs/cli.md)** for the full command reference, and run
 
 ## Fused policy rollouts
 
+`smol usage summary` reads the local journal of machine lifecycle events (create,
+branch, start, stop, delete and the rest): how deep branch trees go, how many
+children a source fans out to, how long machines live. It records the shape of
+use, never names, commands, paths or images, and nothing leaves the host unless
+`smol usage share on` is run. `smol usage off` disables it. See the engine's
+`docs/usage-journal.md`.
+
 On a CUDA rollout node, `smol rollout` declaratively registers a loopback vLLM
 backend and publishes immutable LoRA versions without exposing vLLM's adapter
 loader directly. Python and Node training loops use the matching
