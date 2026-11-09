@@ -535,10 +535,19 @@ def _native_config(name: str, config: MachineConfig) -> dict:
                 res["cpus"] = r.cpus
             if r.memory_mb is not None:
                 res["memory_mib"] = r.memory_mb
-            if r.allow_cidrs is not None:
-                res["allowed_cidrs"] = list(r.allow_cidrs)
-            if r.allow_hosts is not None:
-                res["allowed_hosts"] = list(r.allow_hosts)
+            if network is not False:
+                has_allow_list = r.allow_cidrs is not None or r.allow_hosts is not None
+                empty_allow_list = (
+                    has_allow_list and not r.allow_cidrs and not r.allow_hosts
+                )
+                if empty_allow_list:
+                    res["allowed_cidrs"] = ["127.0.0.0/8", "::1/128"]
+                    res["allowed_hosts"] = []
+                else:
+                    if r.allow_cidrs is not None:
+                        res["allowed_cidrs"] = list(r.allow_cidrs)
+                    if r.allow_hosts is not None:
+                        res["allowed_hosts"] = list(r.allow_hosts)
             if r.storage_gb is not None:
                 res["storage_gib"] = r.storage_gb
             if r.overlay_gb is not None:
@@ -2698,6 +2707,34 @@ def resolve_network(config: MachineConfig) -> Optional[bool]:
     r = config.resources
     canonical = r.network if r is not None else None
     return canonical if canonical is not None else config.network
+
+
+def pack_egress_override(
+    config: MachineConfig,
+) -> Optional[tuple[bool, list[str], list[str]]]:
+    """The caller's `(network, cidrs, hosts)` egress for a `.smolmachine`
+    create, or `None` to keep the policy the pack carries.
+
+    A pack records its own outbound policy, which applies when the caller says
+    nothing about networking or passes a bare `network=True`. An explicit
+    `network=False` turns egress off (and wins over an allow list), and an
+    explicit allow list restricts egress to what it names (an empty one allows
+    nothing). Mirrors `packEgressOverride` in the Node SDK.
+    """
+    r = config.resources
+    network = resolve_network(config)
+    if network is False:
+        return (False, [], [])
+    has_cidrs = r is not None and r.allow_cidrs is not None
+    has_hosts = r is not None and r.allow_hosts is not None
+    if has_cidrs or has_hosts:
+        cidrs = list(r.allow_cidrs or []) if r is not None else []
+        hosts = list(r.allow_hosts or []) if r is not None else []
+        if not cidrs and not hosts:
+            # Loopback only: empty lists alone would read as unrestricted.
+            return (True, ["127.0.0.0/8", "::1/128"], [])
+        return (True, cidrs, hosts)
+    return None
 
 
 def _cli_session() -> tuple[Optional[str], Optional[str]]:
