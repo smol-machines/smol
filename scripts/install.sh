@@ -18,9 +18,22 @@
 #   SMOL_NO_MODIFY_PATH=1        do not add BIN_DIR to your shell's startup file
 #   SMOL_INSECURE_SKIP_CHECKSUM=1  install without verifying the checksum (NOT recommended)
 #
+# Flags (each one sets the matching variable above):
+#   --version VERSION   release to install, e.g. 1.29.1 or v1.29.1
+#   --prefix DIR        where the bundle lives
+#   --no-modify-path    do not touch your shell's startup file
+#   --uninstall         remove the bundle and the `smol` symlink
+#   --help              show this help
+#
+#   curl -sSL https://smolmachines.com/install.sh | bash -s -- --version 1.29.1
+#
 # The whole body runs inside main(), invoked on the LAST line, so a truncated
 # `curl | bash` download never executes a partial script.
 set -euo pipefail
+
+usage() {
+  sed -n '2,30p' "$0" 2>/dev/null | sed 's/^# \{0,1\}//' || true
+}
 
 main() {
   umask 022   # never leave the install dir / binary group- or world-writable
@@ -31,6 +44,28 @@ main() {
 
   err() { echo "error: $*" >&2; exit 1; }
   have() { command -v "$1" >/dev/null 2>&1; }
+
+  # ── flags ─────────────────────────────────────────────────────────────────
+  local UNINSTALL=0
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --version)        [ $# -ge 2 ] || err "--version needs a value"; SMOL_VERSION="$2"; shift 2 ;;
+      --version=*)      SMOL_VERSION="${1#--version=}"; shift ;;
+      --prefix)         [ $# -ge 2 ] || err "--prefix needs a value"; PREFIX="$2"; shift 2 ;;
+      --prefix=*)       PREFIX="${1#--prefix=}"; shift ;;
+      --no-modify-path) SMOL_NO_MODIFY_PATH=1; shift ;;
+      --uninstall)      UNINSTALL=1; shift ;;
+      -h|--help)        usage; exit 0 ;;
+      *) err "unknown option: $1 (try --help)" ;;
+    esac
+  done
+  # A bare number is accepted for --version; releases are tagged vX.Y.Z.
+  case "${SMOL_VERSION:-}" in ""|v*) ;; *) SMOL_VERSION="v$SMOL_VERSION" ;; esac
+
+  if [ "$UNINSTALL" = 1 ]; then
+    uninstall
+    return
+  fi
 
   # ── refuse to rm -rf a dangerous / non-smol PREFIX ────────────────────────
   case "$PREFIX" in
@@ -170,6 +205,39 @@ main() {
     echo "   remove it:  rm '$shadow'   then run:  hash -r"
   fi
   echo ">> done — try:  smol run -I alpine --net -- cat /etc/os-release"
+}
+
+# Remove what install put down: the bundle at PREFIX (only if it is a smol
+# install), the symlink in BIN_DIR, and the PATH line the installer added.
+# Machines, checkpoints and settings under ~/.cache and ~/.config are kept.
+uninstall() {
+  local removed=0
+  if [ -e "$PREFIX" ]; then
+    if [ -e "$PREFIX/smol-bin" ] || [ -e "$PREFIX/smol" ]; then
+      rm -rf "$PREFIX"
+      echo ">> removed $PREFIX"
+      removed=1
+    else
+      echo ">> $PREFIX is not a smol install; left alone"
+    fi
+  fi
+  if [ -L "$BIN_DIR/smol" ]; then
+    rm -f "$BIN_DIR/smol"
+    echo ">> removed $BIN_DIR/smol"
+    removed=1
+  fi
+  local marker="# added by the smol installer" rc
+  for rc in "${ZDOTDIR:-$HOME}/.zshrc" "$HOME/.bashrc" "$HOME/.bash_profile" "$HOME/.profile" \
+            "${XDG_CONFIG_HOME:-$HOME/.config}/fish/conf.d/smol.fish"; do
+    [ -f "$rc" ] || continue
+    if grep -qF "$marker" "$rc" 2>/dev/null; then
+      # Drop the marker line and the PATH line right after it.
+      awk -v m="$marker" 'skip { skip = 0; next } $0 == m { skip = 1; next } { print }' "$rc" > "$rc.smol-tmp" \
+        && mv "$rc.smol-tmp" "$rc" && echo ">> removed the PATH line from $rc"
+    fi
+  done
+  [ "$removed" = 1 ] || echo ">> nothing to remove"
+  echo ">> machines and settings were kept; delete ~/.cache/smolvm and ~/.config/smol to remove them too"
 }
 
 # Put BIN_DIR on PATH for future shells, as rustup and bun do: one marked line
