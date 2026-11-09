@@ -10,6 +10,8 @@ import { adapterSha256, RolloutClient } from '../rollout';
 import { checkCloudFileSize, cliConfigApiKey, CLOUD_MAX_FILE_BYTES, egressPolicy, encodePath, errorSentence, resolveNetwork, selectsCloud, toNativeConfig, transferTimeoutMs } from '../transport';
 import { wireDefaultHardening } from '../assets';
 import { Machine } from '../machine';
+import { Manifest } from '@openai/agents-core/sandbox';
+import { SmolmachinesSandboxClient } from '../openai-agents';
 
 let passed = 0;
 let failed = 0;
@@ -538,6 +540,27 @@ async function finish() {
     } finally {
       globalThis.fetch = realFetch;
     }
+  });
+
+  // --- OpenAI Agents SDK client: refusals happen before any machine exists ---
+  const oai = new SmolmachinesSandboxClient({ image: 'alpine' });
+  await checkAsync('openai-agents: a core snapshot is refused before a machine is made', async () => {
+    await assert.rejects(oai.create({ manifest: new Manifest(), snapshot: { type: 'local', baseDir: '/tmp' } as never }), /snapshots/);
+  });
+  await checkAsync('openai-agents: unsupported manifest entries are refused, not ignored', async () => {
+    await assert.rejects(oai.create(new Manifest({ entries: { repo: { type: 'git_repo', repo: 'a/b' } } })), /git_repo/);
+    await assert.rejects(
+      oai.create(new Manifest({ entries: { f: { type: 'file', content: 'x', permissions: 0o600 as never } } })),
+      /permissions/,
+    );
+  });
+  await checkAsync('openai-agents: serialized state that names no machine is refused', async () => {
+    await assert.rejects(oai.deserializeSessionState({ machine: 'someone-elses-vm' }), /names no machine/);
+  });
+  check('openai-agents: only a preserving client keeps owned sessions', () => {
+    assert.strictEqual(oai.canPersistOwnedSessionState(), false);
+    assert.strictEqual(new SmolmachinesSandboxClient({ preserveOnExit: true }).canPersistOwnedSessionState(), true);
+    assert.strictEqual(oai.backendId, 'smolmachines');
   });
 
   console.log(`\n${passed} passed, ${failed} failed`);
