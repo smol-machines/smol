@@ -2,9 +2,10 @@
 #
 # Assert every published SDK directory carries the repository LICENSE.
 #
-# A package built from a subdirectory only ships what is in that directory. The
-# Go module zip for sdk/go had no LICENSE, so pkg.go.dev showed "Documentation
-# not displayed due to license restrictions" for every version up to v1.32.4.
+# A package built from a subdirectory only ships what is in that directory
+# (cmd/go alone falls back to the root LICENSE). Keep the Apache-2.0 terms
+# verbatim: pkg.go.dev classifies them with github.com/google/licensecheck, and
+# one stray word made it report UNKNOWN and hide the Go SDK docs through v1.33.0.
 # Runs in CI on every push/PR; needs no engine or secrets.
 set -euo pipefail
 cd "$(dirname "$0")/.."
