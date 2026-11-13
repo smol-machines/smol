@@ -48,7 +48,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { platform: darwin-arm64, os: macos-14,        target: aarch64-apple-darwin,        use_zig: "0" }
+          - { platform: darwin-arm64, os: macos-15,        target: aarch64-apple-darwin,        use_zig: "0" }
           - { platform: linux-x86_64, os: ubuntu-latest,    target: x86_64-unknown-linux-gnu,    use_zig: "1" }
           - { platform: linux-arm64,  os: ubuntu-24.04-arm, target: aarch64-unknown-linux-gnu,   use_zig: "1" }
     runs-on: ${{ matrix.os }}
