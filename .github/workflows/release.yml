@@ -132,7 +132,7 @@ jobs:
           # lib build if needed.
           # `engine_lib` (relative to sdk/node) feeds the addon build + bundle step;
           # `lib_subdir` (relative to the engine root) feeds the helper cargo build.
-          - { os: macos-14, target: aarch64-apple-darwin, engine_lib: ../../__engine__/lib, lib_subdir: lib, rootfs_arch: aarch64 }
+          - { os: macos-15, target: aarch64-apple-darwin, engine_lib: ../../__engine__/lib, lib_subdir: lib, rootfs_arch: aarch64 }
           - { os: ubuntu-latest, target: x86_64-unknown-linux-gnu, engine_lib: ../../__engine__/lib/linux-x86_64, lib_subdir: lib/linux-x86_64, rootfs_arch: x86_64 }
           - { os: ubuntu-24.04-arm, target: aarch64-unknown-linux-gnu, engine_lib: ../../__engine__/lib/linux-aarch64, lib_subdir: lib/linux-aarch64, rootfs_arch: aarch64 }
     runs-on: ${{ matrix.os }}
@@ -371,7 +371,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { os: macos-14, target: aarch64-apple-darwin, plat: darwin-arm64, lib: libsmol_go.dylib }
+          - { os: macos-15, target: aarch64-apple-darwin, plat: darwin-arm64, lib: libsmol_go.dylib }
           - { os: ubuntu-latest, target: x86_64-unknown-linux-gnu, plat: linux-x64, lib: libsmol_go.so }
           - { os: ubuntu-24.04-arm, target: aarch64-unknown-linux-gnu, plat: linux-arm64, lib: libsmol_go.so }
     runs-on: ${{ matrix.os }}
@@ -474,7 +474,7 @@ jobs:
           # to the SDK crate (sdk/node | sdk/python). x86_64-apple-darwin (Intel) is
           # dropped: the engine ships no Intel-mac libkrun — re-add with an Intel
           # lib build if needed.
-          - { os: macos-14, target: aarch64-apple-darwin, engine_lib: ../../__engine__/lib, lib_subdir: lib, rootfs_arch: aarch64 }
+          - { os: macos-15, target: aarch64-apple-darwin, engine_lib: ../../__engine__/lib, lib_subdir: lib, rootfs_arch: aarch64 }
           - { os: ubuntu-latest, target: x86_64-unknown-linux-gnu, engine_lib: ../../__engine__/lib/linux-x86_64, lib_subdir: lib/linux-x86_64, rootfs_arch: x86_64 }
           - { os: ubuntu-24.04-arm, target: aarch64-unknown-linux-gnu, engine_lib: ../../__engine__/lib/linux-aarch64, lib_subdir: lib/linux-aarch64, rootfs_arch: aarch64 }
     runs-on: ${{ matrix.os }}
