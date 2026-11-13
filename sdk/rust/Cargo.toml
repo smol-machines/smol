@@ -5,7 +5,7 @@
 
 [package]
 name = "smolmachines"
-version = "1.34.0"
+version = "1.34.4"
 edition = "2021"
 rust-version = "1.82"
 description = "Embed smol machines microVMs directly in a Rust process"
@@ -22,7 +22,7 @@ categories = ["virtualization", "api-bindings"]
 # The cloud transport. Shared with the `smol` CLI so the two clients of the
 # control plane cannot drift. Blocking, because the whole SDK is: the caller
 # owns the choice of runtime.
-smol-cloud = { path = "../../crates/smol-cloud", version = "1.34.0", features = ["blocking"] }
+smol-cloud = { path = "../../crates/smol-cloud", version = "1.34.4", features = ["blocking"] }
 serde_json = "1"
 # Which engine was chosen, and why, at `debug`; a library logs through the facade.
 log = "0.4"
