@@ -29,15 +29,15 @@ Global behavior:
 
 | Command | Description |
 |---------|-------------|
-| `smol machine create <name> --image <ref>` | Create a **persistent** machine (does not run a command). Use `--from <path.smolmachine>` to create from a packed artifact (uses its layers, no pull). Restrict egress with `--allow-cidr`/`--allow-host`/`--outbound-localhost-only` (imply `--net`). |
-| `smol machine start <name>` / `smol machine stop <name>` | Start / stop a persistent machine. Add `--branchable` to `start` to make it a branch source (`--forkable` remains an alias). For trusted local egress interception, set `SMOLVM_INTERCEPTOR_TOKEN` and pass `--egress-interceptor 127.0.0.1:PORT` on each start. |
+| `smol machine create --name <name> --image <ref>` | Create a **persistent** machine (does not run a command). Use `--from <path.smolmachine>` to create from a packed artifact (uses its layers, no pull). Restrict egress with `--allow-cidr`/`--allow-host`/`--outbound-localhost-only` (imply `--net`). Everything from the first bare argument on, flags included, becomes the workload command, so a bare `<name>` does not name the machine. |
+| `smol machine start --name <name>` / `smol machine stop --name <name>` | Start / stop a persistent machine. Add `--branchable` to `start` to make it a branch source (`--forkable` remains an alias). For trusted local egress interception, set `SMOLVM_INTERCEPTOR_TOKEN` and pass `--egress-interceptor 127.0.0.1:PORT` on each start. |
 | `smol machine ls` | List machines, local **and** cloud (`--json`; `--local`/`--cloud` to scope). Alias: `list`. |
-| `smol machine status <name>` | Show one machine's status (`--json`). |
-| `smol machine rm <name>` | Delete a machine (`--force` to skip the confirmation prompt). Alias: `delete`. |
+| `smol machine status --name <name>` | Show one machine's status (`--json`). |
+| `smol machine rm --name <name>` | Delete a machine (`--force` to skip the confirmation prompt). Alias: `delete`. |
 | `smol machine exec --name <name> -- <cmd…>` | Run a command in a machine (`--stream` for live output; `-e KEY=VALUE`, `-w DIR`, `-i/-t`). Inject secrets host-side for the call with `--secret-env GUEST=HOST_VAR` / `--secret-file GUEST=/path` (never persisted). |
 | `smol machine shell --name <name>` | Interactive shell into a machine. Alias: `sh`. |
 | `smol machine cp <src> <dst>` | Copy files host↔guest (`name:/path` denotes a guest path). |
-| `smol machine logs <name>` | Fetch machine logs (`--tail N`). |
+| `smol machine logs --name <name>` | Fetch machine logs (`--tail N`). Here `-n` is short for `--tail`, not `--name`. |
 | `smol machine branch --from <source> --name <child>` | Create an independent child from a running branchable machine (copy-on-write RAM + disks). Use `--branchable` on the child to branch again; `--keep-machine-id` keeps the source's `/etc/machine-id` in the child so Nx-style caches keyed by it survive (hostname and SSH host keys are still re-minted). `fork`, `--golden`, and `--forkable` remain compatibility aliases. |
 | `smol machine checkpoint --name <source> --store <store> --output <point.smolcheckpoint>` | Capture a periodic local rollback point as a self-contained directory while reusing unchanged RAM and disk chunks from the store. Omit `--store` to write one portable file. |
 | `smol machine checkpoint --export-from <point> --output <file.smolcheckpoint>` | Export a stored checkpoint directory as one portable file. |

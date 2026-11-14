@@ -348,6 +348,11 @@ def test_local_availability_passes_the_engine_verdict_through():
             mock.patch.object(transport_module, "_load_native", return_value=native):
         available, code, _ = transport_module.local_availability()
     assert (available, code) == (False, "UNSUPPORTED_PLATFORM")
+    with mock.patch.object(transport_module.sys, "platform", "linux"), \
+            mock.patch.object(transport_module.platform, "machine", return_value="x86_64"), \
+            mock.patch.object(transport_module.platform, "libc_ver", return_value=("glibc", "2.31")), \
+            mock.patch.object(transport_module, "_load_native", return_value=native):
+        assert transport_module.local_availability() == (True, None, None)
 
 
 def main() -> int:
