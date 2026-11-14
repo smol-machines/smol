@@ -866,6 +866,15 @@ class LocalTransport:
         except Exception as e:  # noqa: BLE001
             raise wrap_native_error(e) from e
 
+    def publish_atomic(self, guest: int) -> PublishedPort:
+        try:
+            host = self._inner.publish_atomic(guest)
+        except AttributeError:
+            raise NotSupportedError("reinstall a smolmachines wheel with atomic local port publication") from None
+        except Exception as error:
+            raise wrap_native_error(error) from error
+        return PublishedPort(guest=guest, host=host, protocol="tcp")
+
     def set_ports(self, ports: "list[PublishedPort]") -> None:
         for p in ports:
             if p.host is None:

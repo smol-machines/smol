@@ -909,6 +909,13 @@ impl Machine {
             .map_err(err)
     }
 
+    /// Publish a new loopback TCP listener with no free-port probe/rebind gap.
+    fn publish_atomic(&self, py: Python<'_>, guest: u16) -> PyResult<u16> {
+        let runtime = runtime().map_err(err)?;
+        py.allow_threads(|| runtime.publish_atomic(&self.name, guest))
+            .map_err(err)
+    }
+
     /// Pack this stopped machine into a `.smolmachine`; returns its path.
     fn pack(&self, py: Python<'_>, output: String) -> PyResult<String> {
         let runtime = runtime().map_err(err)?;
