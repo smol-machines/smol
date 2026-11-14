@@ -182,6 +182,11 @@ fn main() {
     // the tree, rustls 0.23 can't auto-pick one, so install ring explicitly.
     let _ = rustls::crypto::ring::default_provider().install_default();
 
+    // Honor SMOLVM_DATA_DIR before anything computes a path, as the engine
+    // binary does, so a scratch data root keeps this run off the real one.
+    // Still single-threaded here, so moving HOME is safe.
+    smolvm::process::apply_system_data_root(/* allow_auto */ false);
+
     // Fast-path: handle the internal _boot-vm subcommand before clap parsing
     // so that the subprocess spawned by start_via_subprocess() can boot the VM.
     // std::env::current_exe() resolves to this binary (smol), so smol must
