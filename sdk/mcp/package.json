@@ -41,7 +41,8 @@
     "build": "tsc -p tsconfig.json",
     "start": "node dist/index.js",
     "test:e2e": "npm run build && tsx test/e2e.ts",
-    "test:http": "npm run build && tsx test/http.ts"
+    "test:http": "npm run build && tsx test/http.ts",
+    "test:extract": "tsx test/extract.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.32.1",

@@ -135,6 +135,22 @@ async function main(): Promise<void> {
     const hostHello = await readFile(path.join(work, "hello.txt"), "utf8");
     check("original host workspace untouched", hostHello.trim() === "from the host", hostHello);
 
+    // A machine plants a symlink to a host directory in one export and writes
+    // through it in the next; neither may reach outside hostPath.
+    const outside = await mkdtemp(path.join(tmpdir(), "smol-mcp-outside-"));
+    const plantDir = await mkdtemp(path.join(tmpdir(), "smol-mcp-plant-"));
+    await call("smol_exec", {
+      machine: child,
+      command: `mkdir -p /tmp/a /tmp/b/link && ln -s ${outside} /tmp/a/link && echo escaped > /tmp/b/link/canary.txt`,
+    });
+    const plant = await call("smol_export", { machine: child, guestPath: "/tmp/a", hostPath: plantDir });
+    check("a machine's symlink is skipped on export", !plant.result.isError && (plant.json?.skipped ?? []).length === 1, plant.body.slice(0, 300));
+    await call("smol_export", { machine: child, guestPath: "/tmp/b", hostPath: plantDir });
+    const escaped = await readFile(path.join(outside, "canary.txt"), "utf8").catch(() => "");
+    check("a second export cannot write through a planted link", escaped === "", escaped);
+    await rm(outside, { recursive: true, force: true });
+    await rm(plantDir, { recursive: true, force: true });
+
     const del = await call("smol_delete", { machine: `${src}-gc` });
     check("delete grandchild", !del.result.isError, del.body);
     const del2 = await call("smol_delete", { machine: child });

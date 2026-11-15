@@ -67,6 +67,7 @@ jobs:
       # tsc both type-checks and emits dist/, the same build release.yml publishes.
       - run: npm run build
       - run: npm pack --dry-run
+      - run: npm run test:extract
 
   go-check:
     name: Go · fmt, vet, tests
