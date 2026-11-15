@@ -20,6 +20,7 @@ import { z } from "zod";
 import { Machine } from "smolmachines";
 import type { ConnectOptions, MachineConfig } from "smolmachines";
 import { spawn } from "node:child_process";
+import { extractUntrusted } from "./extract.js";
 import { mkdir, stat } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { homedir } from "node:os";
@@ -139,7 +140,7 @@ const server = new McpServer(
   { name: "smolmachines", version: VERSION },
   {
     instructions: [
-      "Each machine is a real Linux microVM with its own kernel; the host is not reachable except through these tools.",
+      "Each machine is a real Linux microVM with its own kernel. It touches the host only through these tools: smol_create copies a host directory in, and smol_export writes regular files and directories (never links) under the hostPath you name.",
       "Typical flow: smol_create with the project as `workspace` (it is copied to /workspace), then smol_exec to work.",
       "Before a risky change, call smol_branch and continue in the child. If it worked, keep working there or smol_export the results; if not, smol_delete the child and the source is untouched.",
       "smol_checkpoint saves a point you can smol_restore into a fresh machine later. Branching and checkpoints cost only what changed.",
@@ -408,7 +409,7 @@ server.registerTool(
   {
     title: "Copy out of a machine",
     description:
-      "Copy a directory (or file) from a machine to a host directory. Use it to bring a branch's results back after reviewing them; nothing leaves a machine unless you call this.",
+      "Copy a directory (or file) from a machine to a host directory. Use it to bring a branch's results back after reviewing them; nothing leaves a machine unless you call this. Only regular files and directories are written, never through a symlink; links, devices and FIFOs in the machine are skipped and listed.",
     inputSchema: {
       machine: z.string(),
       guestPath: z.string().describe("Directory or file inside the machine."),
@@ -417,6 +418,7 @@ server.registerTool(
   },
   async (args) => {
     try {
+      if (!path.isAbsolute(args.hostPath)) throw new Error(`hostPath must be absolute: ${args.hostPath}`);
       const m = await machine(args.machine);
       await mkdir(args.hostPath, { recursive: true });
       const parent = path.posix.dirname(args.guestPath);
@@ -427,9 +429,17 @@ server.registerTool(
       if (result.exitCode !== 0) throw new Error(`tar in machine failed: ${result.stderr}`);
       const archive = Buffer.from(result.stdout, "base64");
       if (archive.length > TRANSFER_CAP) throw new Error(`export exceeds ${TRANSFER_CAP} bytes`);
-      const untar = await host("tar", ["-xzf", "-", "-C", args.hostPath], archive);
-      if (untar.code !== 0) throw new Error(`tar on host failed: ${untar.stderr}`);
-      return text({ machine: args.machine, from: args.guestPath, to: args.hostPath, bytes: archive.length });
+      // The archive is machine-made, so it is unpacked by a validating reader,
+      // never by the host's tar.
+      const unpacked = await extractUntrusted(archive, args.hostPath, TRANSFER_CAP);
+      return text({
+        machine: args.machine,
+        from: args.guestPath,
+        to: args.hostPath,
+        bytes: archive.length,
+        files: unpacked.files,
+        skipped: unpacked.skipped.length ? unpacked.skipped : undefined,
+      });
     } catch (error) {
       return failure(error);
     }
