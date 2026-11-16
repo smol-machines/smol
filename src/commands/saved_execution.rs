@@ -8,6 +8,9 @@ pub struct SavedExecutionCmd {
     pub cloud: bool,
     #[arg(long)]
     pub local: bool,
+    /// Return the local machine identity and saved checkpoint path as JSON.
+    #[arg(long, requires = "local")]
+    pub json: bool,
 }
 
 impl SavedExecutionCmd {
@@ -22,6 +25,9 @@ impl SavedExecutionCmd {
             resolve::route(Some(&self.name), target)?
         };
         let operation = if resume { "resume" } else { "pause" };
+        if self.json && location == Location::Cloud {
+            anyhow::bail!("structured saved execution is available for local machines only");
+        }
         if location == Location::Cloud {
             return super::cloud::run_cloud_command(
                 Some(name),
@@ -48,6 +54,26 @@ impl SavedExecutionCmd {
             }
         } else {
             runtime.pause_machine(&name)?;
+        }
+        if self.json {
+            let record = runtime
+                .list_machines()?
+                .into_iter()
+                .find(|record| record.name == name)
+                .ok_or_else(|| anyhow::anyhow!("machine disappeared after {operation}"))?;
+            if !resume && record.paused_checkpoint.is_none() {
+                anyhow::bail!("machine paused without a saved checkpoint path");
+            }
+            println!(
+                "{}",
+                serde_json::to_string(&serde_json::json!({
+                    "name": record.name,
+                    "created_at": record.created_at,
+                    "state": record.state.to_string(),
+                    "checkpoint": record.paused_checkpoint,
+                }))?
+            );
+            return Ok(());
         }
         println!(
             "Machine '{name}' {}",

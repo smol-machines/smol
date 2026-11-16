@@ -4,6 +4,11 @@
 //! already async. An async caller can use [`crate::types`] and
 //! [`crate::credentials`] with its own HTTP client.
 
+mod download;
+#[cfg(test)]
+mod tenant_tests;
+mod upload;
+
 use std::io::{BufRead, BufReader, Read};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -74,8 +79,9 @@ enum Body<'a> {
 #[derive(Debug, Clone)]
 pub struct Client {
     credentials: Credentials,
+    tenant: Option<reqwest::header::HeaderValue>,
     http: reqwest::blocking::Client,
-    /// Streams only: async so a read can be raced against a cancel.
+    /// Streams and uploads: async so network waits can be cancelled.
     stream_http: reqwest::Client,
     max_retries: u32,
 }
@@ -97,6 +103,7 @@ impl Client {
             })?;
         Ok(Self {
             credentials,
+            tenant: None,
             http,
             stream_http,
             max_retries: DEFAULT_MAX_RETRIES,
@@ -111,6 +118,41 @@ impl Client {
     pub fn with_max_retries(mut self, max_retries: u32) -> Self {
         self.max_retries = max_retries;
         self
+    }
+
+    /// Scope every control-plane call to this account's stable tenant ID.
+    /// Clones and streams keep the selection; a refusal never falls back to
+    /// the credential's personal account. Object-storage uploads carry neither
+    /// this header nor the API credential. Scoped clients refuse redirects so
+    /// account headers cannot follow a response to another origin.
+    pub fn with_tenant(mut self, tenant: &str) -> Result<Self> {
+        if tenant.is_empty()
+            || tenant.len() > 256
+            || !tenant.is_ascii()
+            || tenant
+                .bytes()
+                .any(|b| b.is_ascii_whitespace() || b.is_ascii_control())
+        {
+            return Err(Error::new(ErrorKind::Other, "Invalid cloud tenant ID"));
+        }
+        let value = reqwest::header::HeaderValue::from_str(tenant)
+            .map_err(|_| Error::new(ErrorKind::Other, "Invalid cloud tenant ID"))?;
+        self.http = reqwest::blocking::Client::builder()
+            .redirect(reqwest::redirect::Policy::none())
+            .build()
+            .map_err(|e| {
+                Error::new(ErrorKind::Connection, format!("build the HTTP client: {e}"))
+            })?;
+        self.stream_http = reqwest::Client::builder()
+            .redirect(reqwest::redirect::Policy::none())
+            .connect_timeout(REQUEST_TIMEOUT)
+            .pool_max_idle_per_host(0)
+            .build()
+            .map_err(|e| {
+                Error::new(ErrorKind::Connection, format!("build the HTTP client: {e}"))
+            })?;
+        self.tenant = Some(value);
+        Ok(self)
     }
 
     /// Build a client, resolving credentials from the environment and the CLI
@@ -191,6 +233,9 @@ impl Client {
             )
             .bearer_auth(key)
             .timeout(timeout);
+        if let Some(tenant) = &self.tenant {
+            request = request.header("Smol-Tenant", tenant);
+        }
         match body {
             Body::None => {}
             Body::Json(value) => request = request.json(value),
@@ -403,6 +448,18 @@ impl Client {
             &format!("/v1/machines/{id}/pause"),
             Body::None,
             START_TIMEOUT,
+        )
+    }
+
+    /// Read the exact checkpoint linked to a machine's pause, without capturing
+    /// new state or guessing from checkpoint timestamps. Older control planes
+    /// can return 405; callers should check support before pausing for a move.
+    pub fn saved_execution(&self, id: &str) -> Result<crate::types::SavedExecution> {
+        self.json(
+            reqwest::Method::GET,
+            &format!("/v1/machines/{}/pause", encode_path(id)),
+            Body::None,
+            REQUEST_TIMEOUT,
         )
     }
 
@@ -621,6 +678,7 @@ impl Client {
             runtime,
             http: self.stream_http.clone(),
             credentials: self.credentials.clone(),
+            tenant: self.tenant.clone(),
             cancelled: cancel.subscribe(),
         };
         let exec_id = crate::resumable::new_exec_id();
@@ -701,12 +759,15 @@ impl Client {
             .build()
             .map_err(|e| Error::new(ErrorKind::Other, format!("start a stream runtime: {e}")))?;
         self.credentials.renew_if_expiring()?;
-        let request = self
+        let mut request = self
             .stream_http
             .post(format!("{}{path}", self.credentials.base_url()))
             .bearer_auth(self.credentials.api_key())
             .header(reqwest::header::ACCEPT, "text/event-stream")
             .json(command);
+        if let Some(tenant) = &self.tenant {
+            request = request.header("Smol-Tenant", tenant);
+        }
         let mut cancelled = cancel.subscribe();
         let sent = runtime.block_on(async {
             tokio::select! {
@@ -895,6 +956,17 @@ impl Client {
         )
     }
 
+    /// Inspect a stored capture or an upload, including after an interrupted
+    /// transfer or a completion request whose response was lost.
+    pub fn get_checkpoint(&self, checkpoint_id: &str) -> Result<Checkpoint> {
+        self.json(
+            reqwest::Method::GET,
+            &format!("/v1/checkpoints/{}", encode_path(checkpoint_id)),
+            Body::None,
+            REQUEST_TIMEOUT,
+        )
+    }
+
     /// Delete a stored capture. The control plane refuses one that a machine
     /// was restored from, or that holds a paused machine's saved execution,
     /// until that machine is gone.
@@ -979,68 +1051,47 @@ impl Client {
         image: Option<&str>,
         on_progress: &mut dyn FnMut(u64, u64),
     ) -> Result<Checkpoint> {
-        let size = std::fs::metadata(path)
-            .map_err(|e| Error::new(ErrorKind::Other, format!("read {}: {e}", path.display())))?
-            .len();
-        let upload: CheckpointUpload = self.json(
-            reqwest::Method::POST,
-            "/v1/checkpoints",
-            Body::Json(serde_json::json!({ "sizeBytes": size, "image": image })),
-            REQUEST_TIMEOUT,
-        )?;
-        let sent = Arc::new(std::sync::atomic::AtomicU64::new(0));
-        let parts: Vec<(usize, u64, u64)> = upload
-            .upload_urls
-            .iter()
-            .enumerate()
-            .map(|(index, _)| {
-                let start = index as u64 * upload.part_size_bytes;
-                (index, start, upload.part_size_bytes.min(size - start))
-            })
-            .collect();
-        let next = std::sync::atomic::AtomicUsize::new(0);
-        let finished = std::sync::atomic::AtomicUsize::new(0);
-        let failure: std::sync::Mutex<Option<Error>> = std::sync::Mutex::new(None);
-        let workers = UPLOAD_PARALLELISM.min(parts.len());
-        std::thread::scope(|scope| {
-            for _ in 0..workers {
-                scope.spawn(|| {
-                    loop {
-                        let index = next.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                        let Some(&(part, start, len)) = parts.get(index) else {
-                            break;
-                        };
-                        if failure.lock().unwrap().is_some() {
-                            break;
-                        }
-                        if let Err(error) =
-                            self.put_part(path, &upload.upload_urls[part], start, len, &sent)
-                        {
-                            failure.lock().unwrap().get_or_insert(error);
-                            break;
-                        }
-                    }
-                    finished.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                });
-            }
-            while finished.load(std::sync::atomic::Ordering::SeqCst) < workers {
-                on_progress(
-                    sent.load(std::sync::atomic::Ordering::SeqCst).min(size),
-                    size,
-                );
-                std::thread::sleep(Duration::from_millis(250));
-            }
-        });
-        if let Some(error) = failure.into_inner().unwrap() {
-            return Err(error);
+        let upload = self.begin_checkpoint_upload(path, image)?;
+        self.send_checkpoint_upload(path, &upload, on_progress)?;
+        self.complete_checkpoint_upload(&upload.checkpoint.id)
+    }
+
+    /// Allocate an upload before sending any file data. Persist the returned
+    /// checkpoint id with the selected account before calling
+    /// [`Self::send_checkpoint_upload`], so an interrupted transfer can be
+    /// inspected or removed with [`Self::delete_checkpoint`].
+    ///
+    /// The returned URLs are temporary credentials; keep them in memory, not
+    /// logs or a durable operation journal. Allocation itself can have an
+    /// ambiguous outcome if the server's response is lost.
+    pub fn begin_checkpoint_upload(
+        &self,
+        path: &std::path::Path,
+        image: Option<&str>,
+    ) -> Result<CheckpointUpload> {
+        let metadata = std::fs::metadata(path)
+            .map_err(|e| Error::new(ErrorKind::Other, format!("read {}: {e}", path.display())))?;
+        if !metadata.is_file() || metadata.len() == 0 {
+            return Err(Error::new(
+                ErrorKind::Other,
+                "checkpoint must be a nonempty file",
+            ));
         }
-        on_progress(size, size);
         self.json(
             reqwest::Method::POST,
-            &format!(
-                "/v1/checkpoints/{}/complete",
-                encode_path(&upload.checkpoint.id)
-            ),
+            "/v1/checkpoints",
+            Body::Json(serde_json::json!({ "sizeBytes": metadata.len(), "image": image })),
+            REQUEST_TIMEOUT,
+        )
+    }
+
+    /// Validate and finalize a fully uploaded checkpoint. Keep its id if the
+    /// response is lost: query the checkpoint before retrying or restoring it.
+    /// Use the same account-scoped client as for allocation.
+    pub fn complete_checkpoint_upload(&self, checkpoint_id: &str) -> Result<Checkpoint> {
+        self.json(
+            reqwest::Method::POST,
+            &format!("/v1/checkpoints/{}/complete", encode_path(checkpoint_id)),
             Body::None,
             CHECKPOINT_TIMEOUT,
         )
@@ -1049,70 +1100,6 @@ impl Client {
     /// Send one slice of the file to its pre-signed URL, retrying a few times:
     /// a multi-gigabyte upload over a home connection will see a dropped
     /// request now and then.
-    fn put_part(
-        &self,
-        path: &std::path::Path,
-        url: &str,
-        start: u64,
-        len: u64,
-        sent: &Arc<std::sync::atomic::AtomicU64>,
-    ) -> Result<()> {
-        use std::io::Seek;
-        let mut last = None;
-        for attempt in 0..UPLOAD_PART_ATTEMPTS {
-            if attempt > 0 {
-                std::thread::sleep(Duration::from_secs(2 << attempt));
-            }
-            let mut file = std::fs::File::open(path).map_err(|e| {
-                Error::new(ErrorKind::Other, format!("open {}: {e}", path.display()))
-            })?;
-            file.seek(std::io::SeekFrom::Start(start))
-                .map_err(|e| Error::new(ErrorKind::Other, format!("read the checkpoint: {e}")))?;
-            let counted = Arc::new(std::sync::atomic::AtomicU64::new(0));
-            let reader = CountingReader {
-                inner: file.take(len),
-                sent: Arc::clone(sent),
-                counted: Arc::clone(&counted),
-            };
-            let result = self
-                .http
-                .put(url)
-                .header(reqwest::header::CONTENT_LENGTH, len)
-                .body(reqwest::blocking::Body::sized(reader, len))
-                .timeout(UPLOAD_PART_TIMEOUT)
-                .send();
-            // Settle this attempt only once its response is in: the body is
-            // dropped as soon as it is sent, well before the server answers.
-            let counted = counted.load(std::sync::atomic::Ordering::SeqCst);
-            match result {
-                Ok(response) if response.status().is_success() => {
-                    // The reader is capped at `len`, so this tops the part up
-                    // to exactly its size.
-                    sent.fetch_add(len - counted, std::sync::atomic::Ordering::SeqCst);
-                    return Ok(());
-                }
-                Ok(response) => {
-                    // Whatever this attempt sent is resent by the next one.
-                    sent.fetch_sub(counted, std::sync::atomic::Ordering::SeqCst);
-                    let status = response.status();
-                    let body = response.text().unwrap_or_default();
-                    last = Some(Error::new(
-                        ErrorKind::Connection,
-                        format!("upload part at byte {start} failed: {status} {body}"),
-                    ));
-                }
-                Err(e) => {
-                    sent.fetch_sub(counted, std::sync::atomic::Ordering::SeqCst);
-                    last = Some(Error::new(
-                        ErrorKind::Connection,
-                        format!("upload part at byte {start} failed: {e}"),
-                    ));
-                }
-            }
-        }
-        Err(last.expect("at least one attempt"))
-    }
-
     /// Delete a machine and take a final, settled usage reading.
     ///
     /// The control plane samples usage synchronously before the teardown, so
@@ -1484,6 +1471,7 @@ struct ResumableRun {
     runtime: tokio::runtime::Runtime,
     http: reqwest::Client,
     credentials: Credentials,
+    tenant: Option<reqwest::header::HeaderValue>,
     cancelled: tokio::sync::watch::Receiver<bool>,
 }
 
@@ -1513,6 +1501,9 @@ impl ResumableRun {
                 )
                 .bearer_auth(self.credentials.api_key())
                 .timeout(timeout);
+            if let Some(tenant) = &self.tenant {
+                request = request.header("Smol-Tenant", tenant);
+            }
             if let Some(body) = body {
                 request = request.json(body);
             }
@@ -1644,12 +1635,15 @@ impl ResumableEvents {
     /// Delete the exec once its end was read; it would expire on its own.
     fn forget(&mut self) {
         let path = self.reader.delete_path();
-        let request = self
+        let mut request = self
             .run
             .http
             .delete(format!("{}{path}", self.run.credentials.base_url()))
             .bearer_auth(self.run.credentials.api_key())
             .timeout(Duration::from_secs(10));
+        if let Some(tenant) = &self.run.tenant {
+            request = request.header("Smol-Tenant", tenant);
+        }
         // `send` arms the request's timeout, which needs the runtime.
         let _ = self
             .run
@@ -1739,7 +1733,7 @@ impl Iterator for ResumableEvents {
     }
 }
 
-/// Ends a live [`Client::exec_stream_cancellable`] stream from any thread.
+/// Ends a live stream or checkpoint upload from any thread.
 /// Clones share one token; cancelling twice is harmless.
 #[derive(Debug, Clone)]
 pub struct StreamCancel(Arc<tokio::sync::watch::Sender<bool>>);
@@ -1930,25 +1924,6 @@ fn sse_event(kind: &str, data: &str) -> Option<StreamEvent> {
                 .unwrap_or(0) as i32,
         )),
         _ => None,
-    }
-}
-
-/// Counts bytes as the HTTP client reads them, for upload progress. A retried
-/// part takes back what it had counted.
-struct CountingReader<R> {
-    inner: R,
-    sent: Arc<std::sync::atomic::AtomicU64>,
-    counted: Arc<std::sync::atomic::AtomicU64>,
-}
-
-impl<R: Read> Read for CountingReader<R> {
-    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
-        let n = self.inner.read(buf)?;
-        self.counted
-            .fetch_add(n as u64, std::sync::atomic::Ordering::SeqCst);
-        self.sent
-            .fetch_add(n as u64, std::sync::atomic::Ordering::SeqCst);
-        Ok(n)
     }
 }
 

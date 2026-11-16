@@ -509,7 +509,7 @@ pub struct Checkpoint {
     pub id: String,
     /// The machine this captures.
     pub machine_id: String,
-    /// Capture status, `ready` once it can be restored from.
+    /// Capture status, `available` once it can be restored from.
     pub status: String,
     /// Size of the stored artifact.
     pub size_bytes: u64,
@@ -518,9 +518,25 @@ pub struct Checkpoint {
     pub arch: String,
     /// When the capture was taken.
     pub created_at: String,
-    /// Pre-signed URL to download the artifact.
+    /// Authenticated download endpoint for the artifact.
     #[serde(default)]
     pub download_url: Option<String>,
+}
+
+/// A machine's current pause association, including a pending upload.
+/// This read is not a lease; recheck before resuming the checkpoint elsewhere.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SavedExecution {
+    /// Stable identity of the machine whose pause was inspected.
+    pub machine_id: String,
+    /// Lifecycle state observed with the pause association.
+    pub state: String,
+    /// Whether ingress may resume this pause automatically. A manual pause
+    /// returns false even when the machine is configured to pause when idle.
+    pub wake_on_request: bool,
+    /// The associated capture, including one whose upload is still pending.
+    pub checkpoint: Option<Checkpoint>,
 }
 
 /// Where to send a checkpoint file's bytes, as `POST /v1/checkpoints` returns.

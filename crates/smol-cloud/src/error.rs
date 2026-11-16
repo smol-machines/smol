@@ -14,6 +14,8 @@ pub enum ErrorKind {
     Conflict,
     /// The request outlived its deadline.
     Timeout,
+    /// The caller stopped an operation before it completed.
+    Cancelled,
     /// The request could not be delivered.
     Connection,
     /// The machine stopped or became unreachable while a command ran in it.
@@ -31,6 +33,7 @@ impl ErrorKind {
             Self::Unauthorized => "UNAUTHORIZED",
             Self::Conflict => "CONFLICT",
             Self::Timeout => "TIMEOUT",
+            Self::Cancelled => "CANCELLED",
             Self::Connection => "CONNECTION",
             Self::MachineInterrupted => "MACHINE_INTERRUPTED",
             Self::Other => "SMOLVM_ERROR",

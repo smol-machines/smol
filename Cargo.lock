@@ -2630,10 +2630,13 @@ name = "smol-cloud"
 version = "1.35.0"
 dependencies = [
  "base64 0.22.1",
+ "futures-util",
  "reqwest",
  "serde",
  "serde_json",
+ "tempfile",
  "tokio",
+ "tokio-util",
 ]
 
 [[package]]

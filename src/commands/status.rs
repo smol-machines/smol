@@ -55,6 +55,10 @@ impl StatusCmd {
             if let Some(fields) = obj.as_object_mut() {
                 fields.insert("running".into(), serde_json::json!(is_running));
                 fields.insert("pid".into(), serde_json::json!(manager.child_pid()));
+                fields.insert(
+                    "paused_checkpoint".into(),
+                    serde_json::json!(record.as_ref().and_then(|r| r.paused_checkpoint.as_ref())),
+                );
             }
             println!("{}", serde_json::to_string_pretty(&obj)?);
         } else if is_running {
