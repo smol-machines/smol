@@ -85,6 +85,7 @@ impl Target {
 #[derive(Debug)]
 pub struct Tunnel {
     address: SocketAddr,
+    browser_url: Option<String>,
     routes: mpsc::Sender<(Option<Target>, std::sync::mpsc::SyncSender<()>)>,
     stop: Option<oneshot::Sender<()>>,
     worker: Option<JoinHandle<()>>,
@@ -93,35 +94,55 @@ pub struct Tunnel {
 
 impl Tunnel {
     pub(crate) fn open(target: Target) -> Result<Self> {
-        Self::open_at(0, Some(target), false)
+        Self::open_at(0, Some(target), None)
     }
 
     /// Reserve a loopback port, initially with traffic suspended. Pass zero
     /// to allocate a port, or a saved port to retain an app's address after a
     /// restart. An occupied port fails without choosing a different address.
     pub fn bind(port: u16) -> Result<Self> {
-        Self::open_at(port, None, false)
+        Self::open_at(port, None, None)
     }
 
     /// Reserve a browser-facing HTTP address, initially suspended. Requests
-    /// must use this listener's exact `127.0.0.1:port` Host and, when present,
+    /// must use this listener's exact `name.localhost:port` Host and, when present,
     /// same-origin Origin/Fetch Metadata headers. HTTP bodies stream without
     /// buffering in full; WebSocket upgrades are supported. CONNECT, forward
     /// proxy requests, and other upgrade protocols are rejected.
     ///
-    /// Use `http://{address}/` in the browser. The address remains private to
+    /// Give each app a unique, stable lowercase DNS label (up to 63 ASCII
+    /// letters, digits or hyphens) and open [`Self::browser_url`]. Separate
+    /// names give apps separate cookie hosts, unlike ports on one IP address.
+    /// The browser must resolve `*.localhost` to loopback. The address is private to
     /// this computer and exists only while this handle is alive. This does not
     /// authenticate other local processes or publish a public cloud URL.
-    pub fn bind_http(port: u16) -> Result<Self> {
-        Self::open_at(port, None, true)
+    pub fn bind_http(port: u16, name: &str) -> Result<Self> {
+        if name.is_empty()
+            || name.len() > 63
+            || !name
+                .bytes()
+                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == b'-')
+            || name.starts_with('-')
+            || name.ends_with('-')
+        {
+            return Err(Error::new(
+                ErrorKind::Config,
+                "Choose a lowercase app DNS label",
+            ));
+        }
+        Self::open_at(port, None, Some(name))
     }
 
-    fn open_at(port: u16, mut target: Option<Target>, http: bool) -> Result<Self> {
+    fn open_at(port: u16, mut target: Option<Target>, http_name: Option<&str>) -> Result<Self> {
         let listener = TcpListener::bind(("127.0.0.1", port)).map_err(|_| connection_error())?;
         listener
             .set_nonblocking(true)
             .map_err(|_| connection_error())?;
         let address = listener.local_addr().map_err(|_| connection_error())?;
+        let http_authority = http_name.map(|name| format!("{name}.localhost:{}", address.port()));
+        let browser_url = http_authority
+            .as_ref()
+            .map(|authority| format!("http://{authority}/"));
         let runtime = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
@@ -168,9 +189,10 @@ impl Tunnel {
                                 if let Some(target) = &target {
                                     if clients.len() < 64 {
                                         let target = target.clone();
+                                        let http_authority = http_authority.clone();
                                         clients.spawn(async move {
-                                            if http {
-                                                http::serve(socket, target, address).await
+                                            if let Some(authority) = http_authority {
+                                                http::serve(socket, target, authority).await
                                             } else {
                                                 relay(socket, target).await
                                             }
@@ -187,6 +209,7 @@ impl Tunnel {
             .map_err(|_| connection_error())?;
         let mut tunnel = Self {
             address,
+            browser_url,
             routes,
             stop: Some(stop),
             worker: Some(worker),
@@ -247,6 +270,11 @@ impl Tunnel {
     /// The local address to give an SSH client or another TCP client.
     pub fn address(&self) -> SocketAddr {
         self.address
+    }
+
+    /// The browser URL for an HTTP tunnel, or `None` for a raw TCP tunnel.
+    pub fn browser_url(&self) -> Option<&str> {
+        self.browser_url.as_deref()
     }
 
     /// The last upstream failure, if any. Credentials are never included.

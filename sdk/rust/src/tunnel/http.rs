@@ -12,19 +12,20 @@ use hyper::{
     Method, Request, Response, StatusCode, Version,
 };
 use hyper_util::rt::{TokioIo, TokioTimer};
-use std::{convert::Infallible, net::SocketAddr, time::Duration};
+use std::{convert::Infallible, time::Duration};
 use tokio::{net::TcpStream, sync::mpsc};
 
 type Body = UnsyncBoxBody<Bytes, hyper::Error>;
 type Task = BoxFuture<'static, Result<()>>;
 
-pub(super) async fn serve(socket: TcpStream, target: Target, address: SocketAddr) -> Result<()> {
+pub(super) async fn serve(socket: TcpStream, target: Target, authority: String) -> Result<()> {
     let (tasks, mut pending) = mpsc::channel::<Task>(8);
     let service = service_fn(move |request| {
         let target = target.clone();
+        let authority = authority.clone();
         let tasks = tasks.clone();
         async move {
-            Ok::<_, Infallible>(match forward(request, target, address, tasks).await {
+            Ok::<_, Infallible>(match forward(request, target, &authority, tasks).await {
                 Ok(response) => response,
                 Err(_) => reply(StatusCode::BAD_GATEWAY, "App connection failed.\n"),
             })
@@ -83,15 +84,14 @@ fn single_header(headers: &HeaderMap, name: &str, expected: &str, required: bool
     valid && values.next().is_none()
 }
 
-fn allowed<B>(request: &Request<B>, address: SocketAddr) -> bool {
-    let authority = address.to_string();
+fn allowed<B>(request: &Request<B>, authority: &str) -> bool {
     let origin = format!("http://{authority}");
     request.version() == Version::HTTP_11
         && request.method() != Method::CONNECT
         && request.uri().scheme().is_none()
         && request.uri().authority().is_none()
         && request.uri().path().starts_with('/')
-        && single_header(request.headers(), "host", &authority, true)
+        && single_header(request.headers(), "host", authority, true)
         && single_header(request.headers(), "origin", &origin, false)
         && (single_header(request.headers(), "sec-fetch-site", "same-origin", false)
             || single_header(request.headers(), "sec-fetch-site", "none", false))
@@ -141,12 +141,12 @@ fn strip_hop_headers(headers: &mut HeaderMap, upgrade: bool) {
 async fn forward(
     mut request: Request<Incoming>,
     target: Target,
-    address: SocketAddr,
+    authority: &str,
     tasks: mpsc::Sender<Task>,
 ) -> Result<Response<Body>> {
     // Check every request, including keep-alive/pipelined requests, before
     // creating any upstream connection or presenting cloud credentials.
-    if !allowed(&request, address) {
+    if !allowed(&request, authority) {
         return Ok(reply(StatusCode::FORBIDDEN, "Use this app's local URL.\n"));
     }
     let upgrade = websocket(request.headers());
@@ -163,10 +163,7 @@ async fn forward(
     // Connection-nominated headers cannot change the validated authority.
     request.headers_mut().insert(
         header::HOST,
-        address
-            .to_string()
-            .parse()
-            .map_err(|_| connection_error())?,
+        authority.parse().map_err(|_| connection_error())?,
     );
     let (client, upstream) = tokio::io::duplex(65536);
     tasks
@@ -224,7 +221,7 @@ mod tests {
     use crate::Tunnel;
     use std::{
         io::{Read, Write},
-        net::{TcpListener, TcpStream as StdStream},
+        net::{SocketAddr, TcpListener, TcpStream as StdStream},
         sync::{
             atomic::{AtomicUsize, Ordering},
             Arc,
@@ -305,9 +302,40 @@ mod tests {
     fn client() -> reqwest::blocking::Client {
         reqwest::blocking::Client::builder()
             .no_proxy()
+            .resolve("test-app.localhost", "127.0.0.1:0".parse().unwrap())
             .timeout(Duration::from_secs(5))
             .build()
             .unwrap()
+    }
+
+    #[test]
+    fn app_names_are_single_localhost_labels_and_survive_rebinding() {
+        for name in [
+            "",
+            "Uppercase",
+            "two.labels",
+            "bad/name",
+            "x:80",
+            "a b",
+            "-a",
+            "a-",
+            "é",
+        ] {
+            assert!(Tunnel::bind_http(0, name).is_err(), "{name}");
+        }
+        assert!(Tunnel::bind_http(0, &"a".repeat(64)).is_err());
+        let mut first = Tunnel::bind_http(0, "smol-persistent-app").unwrap();
+        let address = first.address();
+        let url = first.browser_url().unwrap().to_owned();
+        assert_eq!(
+            url,
+            format!("http://smol-persistent-app.localhost:{}/", address.port())
+        );
+        assert!(Tunnel::bind_http(address.port(), "smol-other-app").is_err());
+        first.close();
+        let second = Tunnel::bind_http(address.port(), "smol-persistent-app").unwrap();
+        assert_eq!(second.browser_url(), Some(url.as_str()));
+        assert!(Tunnel::bind(0).unwrap().browser_url().is_none());
     }
 
     fn connect(address: SocketAddr) -> StdStream {
@@ -346,9 +374,10 @@ mod tests {
     #[test]
     fn rejects_browser_origin_attacks_before_opening_upstream() {
         let app = App::new();
-        let mut tunnel = Tunnel::bind_http(0).unwrap();
+        let mut tunnel = Tunnel::bind_http(0, "test-app").unwrap();
         tunnel.route_local(app.address).unwrap();
-        let url = format!("http://{}/", tunnel.address());
+        let url = tunnel.browser_url().unwrap().to_owned();
+        let host = format!("test-app.localhost:{}", tunnel.address().port());
         let client = client();
         for (name, value) in [
             ("Host", "rebound.example"),
@@ -370,20 +399,14 @@ mod tests {
         }
         for target in ["http://attacker.example/", "*"] {
             let mut socket = connect(tunnel.address());
-            write!(
-                socket,
-                "GET {target} HTTP/1.1\r\nHost: {}\r\n\r\n",
-                tunnel.address()
-            )
-            .unwrap();
+            write!(socket, "GET {target} HTTP/1.1\r\nHost: {}\r\n\r\n", host).unwrap();
             assert!(read_response(&mut socket).starts_with("HTTP/1.1 403"));
         }
         let mut socket = connect(tunnel.address());
         write!(
             socket,
             "CONNECT {} HTTP/1.1\r\nHost: {}\r\n\r\n",
-            app.address,
-            tunnel.address()
+            app.address, host
         )
         .unwrap();
         assert!(read_response(&mut socket).starts_with("HTTP/1.1 403"));
@@ -405,14 +428,15 @@ mod tests {
     #[test]
     fn validates_each_keep_alive_request_and_duplicate_origins() {
         let app = App::new();
-        let mut tunnel = Tunnel::bind_http(0).unwrap();
+        let mut tunnel = Tunnel::bind_http(0, "test-app").unwrap();
         tunnel.route_local(app.address).unwrap();
         let address = tunnel.address();
+        let host = format!("test-app.localhost:{}", address.port());
         let mut socket = connect(address);
-        write!(socket, "GET / HTTP/1.1\r\nHost: {address}\r\n\r\n").unwrap();
+        write!(socket, "GET / HTTP/1.1\r\nHost: {host}\r\n\r\n").unwrap();
         assert!(read_response(&mut socket).ends_with("local app\n"));
         // Both requests arrive on the already validated TCP connection.
-        write!(socket, "GET / HTTP/1.1\r\nHost: attacker.example\r\n\r\nGET / HTTP/1.1\r\nHost: {address}\r\nOrigin: http://{address}\r\nOrigin: https://attacker.example\r\n\r\n").unwrap();
+        write!(socket, "GET / HTTP/1.1\r\nHost: attacker.example\r\n\r\nGET / HTTP/1.1\r\nHost: {host}\r\nOrigin: http://{host}\r\nOrigin: https://attacker.example\r\n\r\n").unwrap();
         assert!(read_response(&mut socket).starts_with("HTTP/1.1 403"));
         assert!(read_response(&mut socket).starts_with("HTTP/1.1 403"));
         assert_eq!(app.requests.load(Ordering::SeqCst), 1);
@@ -421,9 +445,9 @@ mod tests {
     #[test]
     fn streams_fixed_and_chunked_bodies_larger_than_transport_buffers() {
         let app = App::new();
-        let mut tunnel = Tunnel::bind_http(0).unwrap();
+        let mut tunnel = Tunnel::bind_http(0, "test-app").unwrap();
         tunnel.route_local(app.address).unwrap();
-        let url = format!("http://{}/echo", tunnel.address());
+        let url = format!("{}echo", tunnel.browser_url().unwrap());
         let body: Vec<_> = (0..512 * 1024).map(|i| (i % 251) as u8).collect();
         let client = client();
         let fixed = client
@@ -450,7 +474,7 @@ mod tests {
     fn websocket_echo_is_closed_by_suspension() {
         use tokio_tungstenite::tungstenite::{accept, client, Message};
         let server = TcpListener::bind("127.0.0.1:0").unwrap();
-        let mut tunnel = Tunnel::bind_http(0).unwrap();
+        let mut tunnel = Tunnel::bind_http(0, "test-app").unwrap();
         tunnel.route_local(server.local_addr().unwrap()).unwrap();
         let (closed, observed) = std::sync::mpsc::channel();
         let worker = thread::spawn(move || {
@@ -479,7 +503,10 @@ mod tests {
             closed.send(disconnected).unwrap();
         });
         let (mut ws, _) = client(
-            format!("ws://{}/socket", tunnel.address()),
+            format!(
+                "{}socket",
+                tunnel.browser_url().unwrap().replacen("http:", "ws:", 1)
+            ),
             connect(tunnel.address()),
         )
         .unwrap();
@@ -505,9 +532,9 @@ mod tests {
         .unwrap()
         .with_tenant("app-owner")
         .unwrap();
-        let mut tunnel = Tunnel::bind_http(0).unwrap();
+        let mut tunnel = Tunnel::bind_http(0, "test-app").unwrap();
         let address = tunnel.address();
-        let url = format!("http://{address}/");
+        let url = tunnel.browser_url().unwrap().to_owned();
         let browser = client();
         tunnel.route_local(app.address).unwrap();
         assert_eq!(
@@ -564,7 +591,7 @@ mod tests {
             let request = String::from_utf8(request).unwrap();
             assert!(request
                 .to_ascii_lowercase()
-                .contains(&format!("host: {address}")));
+                .contains(&format!("host: test-app.localhost:{}", address.port())));
             assert!(!request.contains("cloud-secret-token"));
             assert!(!request.to_ascii_lowercase().contains("smol-tenant"));
             ws.send(Message::Binary(
