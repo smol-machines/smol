@@ -1110,6 +1110,11 @@ impl Client {
                 .pending_checkpoint_id
                 .as_deref()
                 .is_some_and(|id| id != checkpoint_id)
+            || receipt
+                .paused_checkpoint_id
+                .as_deref()
+                .is_some_and(|id| id.trim().is_empty())
+            || (receipt.pending_checkpoint_id.is_some() && receipt.paused_checkpoint_id.is_some())
         {
             return Err(Error::new(
                 ErrorKind::Other,
@@ -1117,6 +1122,36 @@ impl Client {
             ));
         }
         Ok(receipt)
+    }
+
+    /// Resume the currently saved execution of a tracked restore. The saved
+    /// checkpoint can differ from the original capture after the guest ran.
+    /// The server claims that exact pause atomically; old servers refuse it.
+    /// Never falls back to ordinary start/resume or retries an ambiguous POST.
+    /// Inspect the receipt and machine state if the response is lost.
+    pub fn resume_checkpoint_restore(
+        &self,
+        checkpoint_id: &str,
+        request_id: &str,
+        paused_checkpoint_id: &str,
+    ) -> Result<Machine> {
+        validate_restore_request_id(request_id)?;
+        if paused_checkpoint_id.trim().is_empty() || paused_checkpoint_id.len() > 256 {
+            return Err(Error::new(
+                ErrorKind::Other,
+                "expected saved checkpoint is required",
+            ));
+        }
+        self.clone().with_max_retries(0).json(
+            reqwest::Method::POST,
+            &format!(
+                "/v1/checkpoints/{}/restores/{}/resume",
+                percent_encode(checkpoint_id),
+                request_id
+            ),
+            Body::Json(serde_json::json!({"checkpointId": paused_checkpoint_id})),
+            START_TIMEOUT,
+        )
     }
 
     /// Observe the guest boot identity of an exact restore without starting or

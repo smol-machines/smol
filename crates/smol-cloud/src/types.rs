@@ -552,6 +552,10 @@ pub struct CheckpointRestore {
     /// The checkpoint still awaiting its first start, if any. This is an
     /// observation, not a lease or proof of the machine's current execution.
     pub pending_checkpoint_id: Option<String>,
+    /// Saved execution after this machine ran and paused. May differ from the
+    /// original checkpoint; resume must atomically claim this observed ID.
+    #[serde(default)]
+    pub paused_checkpoint_id: Option<String>,
 }
 
 /// Guest boot identity observed without starting or resuming the restored machine.

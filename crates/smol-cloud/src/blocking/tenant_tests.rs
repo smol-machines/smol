@@ -947,3 +947,60 @@ fn execution_observation_exposes_actual_or_unknown_idle_policy() {
         assert_eq!(observed.idle_action.as_deref(), idle);
     }
 }
+
+#[test]
+fn guarded_resume_claims_the_new_pause_without_retry_or_fallback() {
+    for status in [200, 404, 409, 503, 0] {
+        let api = Server::new(move |n, request| {
+            assert_eq!(n, 0, "resume is never replayed");
+            scoped(request);
+            assert!(request
+                .starts_with("POST /v1/checkpoints/original%20capture/restores/move_123/resume "));
+            let body: serde_json::Value =
+                serde_json::from_str(request.split_once("\r\n\r\n").unwrap().1).unwrap();
+            assert_eq!(body, serde_json::json!({"checkpointId":"new-pause"}));
+            (
+                status,
+                String::new(),
+                r#"{"id":"owned","state":"started","idleAction":"pause"}"#.into(),
+            )
+        });
+        let result = api.client().with_max_retries(5).resume_checkpoint_restore(
+            "original capture",
+            "move_123",
+            "new-pause",
+        );
+        assert_eq!(result.is_ok(), status == 200);
+        assert_eq!(api.rows().len(), 1);
+    }
+}
+
+#[test]
+fn restore_receipt_distinguishes_later_pause_and_refuses_contradictory_sources() {
+    for (pending, paused, valid) in [
+        (None, None, true),
+        (None, Some("new-pause"), true),
+        (Some("original"), None, true),
+        (Some("original"), Some("new-pause"), false),
+        (None, Some(""), false),
+        (None, Some(" "), false),
+    ] {
+        let api = Server::new(move |_, request| {
+            scoped(request);
+            (200, String::new(), serde_json::json!({"checkpointId":"original","requestId":"move_123","machineId":"owned","pendingCheckpointId":pending,"pausedCheckpointId":paused}).to_string())
+        });
+        let result = api.client().checkpoint_restore("original", "move_123");
+        assert_eq!(result.is_ok(), valid);
+        if valid {
+            assert_eq!(result.unwrap().paused_checkpoint_id.as_deref(), paused);
+        }
+    }
+    let client = Client::new(Credentials::new("http://127.0.0.1:1", "unused")).unwrap();
+    for saved in ["".to_string(), " ".to_string(), "x".repeat(257)] {
+        assert!(client
+            .resume_checkpoint_restore("cp", "move_123", &saved)
+            .unwrap_err()
+            .to_string()
+            .contains("expected saved checkpoint"));
+    }
+}
