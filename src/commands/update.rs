@@ -4,8 +4,8 @@
 //! edits the DB record (mounts, ports, resources, env, net, gpu, workdir) and
 //! expands disk files (expand-only) in a single consistent update.
 
-use super::common::format_bytes;
 use clap::Args;
+use smolvm::cli::vm_common::expand_disks;
 use smolvm::config::RecordState;
 use smolvm::data::network::PortMapping;
 use smolvm::data::storage::HostMount;
@@ -302,60 +302,4 @@ impl UpdateCmd {
         }
         Ok(())
     }
-}
-
-/// Expand a machine's storage/overlay disk files (expand-only). Port of the
-/// engine's vm_common::expand_disks over `smolvm::storage::expand_disk`.
-fn expand_disks(
-    name: &str,
-    record: &smolvm::config::VmRecord,
-    new_storage_gb: Option<u64>,
-    new_overlay_gb: Option<u64>,
-) -> anyhow::Result<Vec<String>> {
-    use smolvm::data::disk::{Overlay, Storage};
-    use smolvm::storage::{expand_disk, DEFAULT_OVERLAY_SIZE_GIB, DEFAULT_STORAGE_SIZE_GIB};
-
-    let cur_storage = record.storage_gb.unwrap_or(DEFAULT_STORAGE_SIZE_GIB);
-    let cur_overlay = record.overlay_gb.unwrap_or(DEFAULT_OVERLAY_SIZE_GIB);
-
-    if let Some(s) = new_storage_gb {
-        if s < cur_storage {
-            anyhow::bail!(
-                "storage disk cannot be shrunk from {cur_storage} GiB to {s} GiB (expand only)"
-            );
-        }
-    }
-    if let Some(o) = new_overlay_gb {
-        if o < cur_overlay {
-            anyhow::bail!(
-                "overlay disk cannot be shrunk from {cur_overlay} GiB to {o} GiB (expand only)"
-            );
-        }
-    }
-
-    let manager = smolvm::agent::AgentManager::for_vm(name)
-        .map_err(|e| anyhow::anyhow!("get agent manager: {e}"))?;
-    let mut changes = Vec::new();
-
-    if let Some(storage_gb) = new_storage_gb {
-        if storage_gb > cur_storage {
-            expand_disk::<Storage>(manager.storage_path(), storage_gb)
-                .map_err(|e| anyhow::anyhow!("expand storage disk: {e}"))?;
-            changes.push(format!(
-                "  storage: {cur_storage} GiB → {storage_gb} GiB ({})",
-                format_bytes(storage_gb * 1024 * 1024 * 1024)
-            ));
-        }
-    }
-    if let Some(overlay_gb) = new_overlay_gb {
-        if overlay_gb > cur_overlay {
-            expand_disk::<Overlay>(manager.overlay_path(), overlay_gb)
-                .map_err(|e| anyhow::anyhow!("expand overlay disk: {e}"))?;
-            changes.push(format!(
-                "  overlay: {cur_overlay} GiB → {overlay_gb} GiB ({})",
-                format_bytes(overlay_gb * 1024 * 1024 * 1024)
-            ));
-        }
-    }
-    Ok(changes)
 }
