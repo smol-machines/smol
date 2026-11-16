@@ -71,6 +71,16 @@ pub struct Network {
     pub hosts: Vec<String>,
 }
 
+/// What happens when a machine reaches its idle timeout.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum IdleAction {
+    /// End its processes and retain its disks.
+    Stop,
+    /// Save memory and disks so processes can resume later.
+    Pause,
+}
+
 /// One machine, as the control plane describes it.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -120,6 +130,10 @@ pub struct Machine {
     #[serde(default)]
     /// Idle seconds before the machine stops on its own.
     pub auto_stop_seconds: Option<u64>,
+    /// Confirmed idle behavior (`stop` or `pause`); absent on older servers.
+    /// An absent or unknown value does not confirm memory preservation.
+    #[serde(default)]
+    pub idle_action: Option<String>,
     #[serde(default)]
     /// When the machine was last used.
     pub last_activity_at: Option<String>,
@@ -553,6 +567,10 @@ pub struct CheckpointExecution {
     pub machine_id: String,
     /// Guest kernel boot UUID, not the host node's boot identity.
     pub boot_id: String,
+    /// Current idle behavior (`stop` or `pause`), observed with this execution.
+    /// Absent when the server cannot confirm it.
+    #[serde(default)]
+    pub idle_action: Option<String>,
 }
 
 /// A machine's current pause association, including a pending upload.

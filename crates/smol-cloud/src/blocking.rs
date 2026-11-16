@@ -19,8 +19,8 @@ use crate::credentials::Credentials;
 use crate::error::{Error, ErrorKind, Result};
 use crate::types::{
     BranchBatch, Checkpoint, CheckpointExecution, CheckpointRestore, CheckpointUpload, Command,
-    CommandOutput, CreateMachine, JobOutput, JobRequest, Machine, MachineCacheDisk, MachineJob,
-    Network, Port, SetCredential, Share, Usage,
+    CommandOutput, CreateMachine, IdleAction, JobOutput, JobRequest, Machine, MachineCacheDisk,
+    MachineJob, Network, Port, SetCredential, Share, Usage,
 };
 
 /// Ordinary calls are short: a hung request must not block a caller forever.
@@ -1033,13 +1033,52 @@ impl Client {
         network: &Network,
         request_id: &str,
     ) -> Result<Machine> {
+        self.restore_checkpoint_tracked_request(checkpoint_id, name, network, request_id, None)
+    }
+
+    /// Restore with a recovery key and an explicit idle policy. `Pause` saves
+    /// memory when the platform idle timeout applies, and requires checkpoint
+    /// storage on the server. It never falls back to a stop policy.
+    ///
+    /// Persist the returned machine ID before checking its `idle_action`:
+    /// older servers may ignore the request field, but still create a machine.
+    /// The idle timeout itself keeps the platform default.
+    pub fn restore_checkpoint_tracked_with_idle_action(
+        &self,
+        checkpoint_id: &str,
+        name: &str,
+        network: &Network,
+        request_id: &str,
+        idle_action: IdleAction,
+    ) -> Result<Machine> {
+        self.restore_checkpoint_tracked_request(
+            checkpoint_id,
+            name,
+            network,
+            request_id,
+            Some(idle_action),
+        )
+    }
+
+    fn restore_checkpoint_tracked_request(
+        &self,
+        checkpoint_id: &str,
+        name: &str,
+        network: &Network,
+        request_id: &str,
+        idle_action: Option<IdleAction>,
+    ) -> Result<Machine> {
         validate_restore_request_id(request_id)?;
+        let mut body = serde_json::json!({
+            "name": name, "network": network, "requestId": request_id
+        });
+        if let Some(action) = idle_action {
+            body["idleAction"] = serde_json::to_value(action).map_err(serialize_error)?;
+        }
         self.json(
             reqwest::Method::POST,
             &format!("/v1/checkpoints/{}/restore", percent_encode(checkpoint_id)),
-            Body::Json(serde_json::json!({
-                "name": name, "network": network, "requestId": request_id
-            })),
+            Body::Json(body),
             CHECKPOINT_TIMEOUT,
         )
     }
