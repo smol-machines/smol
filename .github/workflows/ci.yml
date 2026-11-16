@@ -96,7 +96,7 @@ jobs:
 
       - name: Test
         working-directory: monorepo/smol
-        run: cargo test --bin smol
+        run: cargo test --bin smol --test update_disks
         env:
           LIBRARY_PATH: /usr/local/lib
           LIBKRUN_BUNDLE: /usr/local/lib
