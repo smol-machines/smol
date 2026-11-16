@@ -4,6 +4,7 @@
 //! already async. An async caller can use [`crate::types`] and
 //! [`crate::credentials`] with its own HTTP client.
 
+mod download;
 #[cfg(test)]
 mod tenant_tests;
 mod upload;
@@ -447,6 +448,18 @@ impl Client {
             &format!("/v1/machines/{id}/pause"),
             Body::None,
             START_TIMEOUT,
+        )
+    }
+
+    /// Read the exact checkpoint linked to a machine's pause, without capturing
+    /// new state or guessing from checkpoint timestamps. Older control planes
+    /// can return 405; callers should check support before pausing for a move.
+    pub fn saved_execution(&self, id: &str) -> Result<crate::types::SavedExecution> {
+        self.json(
+            reqwest::Method::GET,
+            &format!("/v1/machines/{}/pause", encode_path(id)),
+            Body::None,
+            REQUEST_TIMEOUT,
         )
     }
 

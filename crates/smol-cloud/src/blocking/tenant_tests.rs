@@ -428,3 +428,247 @@ fn malformed_upload_layout_and_changed_files_fail_before_object_requests() {
     assert!(objects.rows().is_empty());
     assert!(api.rows().is_empty());
 }
+
+fn download_fixture(size: u64) -> Checkpoint {
+    Checkpoint {
+        id: "ckpt-saved".into(),
+        machine_id: "machine-owned".into(),
+        status: "available".into(),
+        size_bytes: size,
+        arch: "amd64".into(),
+        created_at: "2026-11-16T00:00:00Z".into(),
+        download_url: Some("https://not-the-control.invalid/secret?signature=private".into()),
+    }
+}
+
+#[test]
+fn saved_execution_and_download_use_the_selected_account_and_exact_checkpoint() {
+    let server = Server::new(|i, request| {
+        scoped(request);
+        if i == 0 {
+            assert!(request.starts_with("GET /v1/machines/machine-owned/pause "));
+            (200, String::new(), serde_json::json!({"machineId":"machine-owned","state":"paused","checkpoint": download_fixture(4)}).to_string())
+        } else {
+            assert!(request.starts_with("GET /v1/checkpoints/ckpt-saved/download "));
+            (200, String::new(), "data".into())
+        }
+    });
+    let client = server.client();
+    let saved = client.saved_execution("machine-owned").unwrap();
+    assert_eq!(saved.machine_id, "machine-owned");
+    assert_eq!(saved.state, "paused");
+    let checkpoint = saved.checkpoint.unwrap();
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().join("saved.smolcheckpoint");
+    let mut progress = Vec::new();
+    client
+        .download_checkpoint_cancellable(
+            &checkpoint,
+            &path,
+            &mut |a, b| progress.push((a, b)),
+            &StreamCancel::new(),
+        )
+        .unwrap();
+    assert_eq!(std::fs::read(&path).unwrap(), b"data");
+    assert_eq!(progress.last(), Some(&(4, 4)));
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        assert_eq!(
+            std::fs::metadata(&path).unwrap().permissions().mode() & 0o077,
+            0
+        );
+    }
+    assert_eq!(
+        client
+            .download_checkpoint_cancellable(
+                &checkpoint,
+                &path,
+                &mut |_, _| {},
+                &StreamCancel::new()
+            )
+            .unwrap_err()
+            .kind(),
+        ErrorKind::Conflict
+    );
+    assert_eq!(std::fs::read(&path).unwrap(), b"data");
+    assert_eq!(
+        server.rows().len(),
+        2,
+        "an existing destination causes no request"
+    );
+    assert_eq!(std::fs::read_dir(root.path()).unwrap().count(), 1);
+}
+
+#[test]
+fn checkpoint_download_refuses_size_changes_redirects_and_cancelled_publication() {
+    for (size, status, body, stop) in [
+        (5, 200, "data", false),
+        (3, 200, "data", false),
+        (4, 302, "data", false),
+        (4, 200, "data", true),
+    ] {
+        let server = Server::new(move |_, request| {
+            scoped(request);
+            (
+                status,
+                "Location: https://not-the-control.invalid/?token=private\r\n".into(),
+                body.into(),
+            )
+        });
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("saved");
+        let cancel = StreamCancel::new();
+        let error = server
+            .client()
+            .download_checkpoint_cancellable(
+                &download_fixture(size),
+                &path,
+                &mut |received, _| {
+                    if stop && received > 0 {
+                        cancel.cancel();
+                    }
+                },
+                &cancel,
+            )
+            .unwrap_err();
+        if stop {
+            assert_eq!(error.kind(), ErrorKind::Cancelled);
+        }
+        assert!(!error.to_string().contains("private"));
+        assert!(!path.exists());
+        assert_eq!(std::fs::read_dir(root.path()).unwrap().count(), 0);
+        assert_eq!(server.rows().len(), 1);
+    }
+}
+
+#[test]
+fn checkpoint_download_cancels_a_stalled_body_and_removes_partial_bytes() {
+    use std::sync::mpsc;
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = listener.local_addr().unwrap();
+    let (sent, received) = mpsc::channel();
+    let server = std::thread::spawn(move || {
+        let (mut stream, _) = listener.accept().unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        let mut reader = BufReader::new(stream.try_clone().unwrap());
+        let mut request = String::new();
+        loop {
+            let mut line = String::new();
+            reader.read_line(&mut line).unwrap();
+            request.push_str(&line);
+            if line == "\r\n" {
+                break;
+            }
+        }
+        scoped(&request);
+        stream
+            .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 100\r\nConnection: close\r\n\r\nfirst")
+            .unwrap();
+        sent.send(()).unwrap();
+        let mut byte = [0];
+        assert_eq!(
+            stream.read(&mut byte).unwrap_or(0),
+            0,
+            "cancel closes the connection"
+        );
+    });
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().join("saved");
+    let dest = path.clone();
+    let cancel = StreamCancel::new();
+    let stopping = cancel.clone();
+    let worker = std::thread::spawn(move || {
+        let client = Client::new(Credentials::new(format!("http://{address}"), "test-key"))
+            .unwrap()
+            .with_tenant("tenant-selected")
+            .unwrap();
+        client.download_checkpoint_cancellable(
+            &download_fixture(100),
+            &dest,
+            &mut |_, _| {},
+            &stopping,
+        )
+    });
+    received.recv_timeout(Duration::from_secs(5)).unwrap();
+    let start = Instant::now();
+    cancel.cancel();
+    assert_eq!(
+        worker.join().unwrap().unwrap_err().kind(),
+        ErrorKind::Cancelled
+    );
+    assert!(start.elapsed() < Duration::from_secs(2));
+    server.join().unwrap();
+    assert!(!path.exists());
+    assert_eq!(std::fs::read_dir(root.path()).unwrap().count(), 0);
+}
+
+#[test]
+fn checkpoint_download_checks_stream_length_without_content_length() {
+    for body in ["short", "too-many-bytes"] {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_secs(5)))
+                .unwrap();
+            let mut reader = BufReader::new(stream.try_clone().unwrap());
+            loop {
+                let mut line = String::new();
+                assert_ne!(reader.read_line(&mut line).unwrap(), 0);
+                if line == "\r\n" {
+                    break;
+                }
+            }
+            write!(stream, "HTTP/1.1 200 OK\r\nConnection: close\r\n\r\n{body}").unwrap();
+        });
+        let root = tempfile::tempdir().unwrap();
+        let destination = root.path().join("checkpoint");
+        let client =
+            Client::new(Credentials::new(format!("http://{address}"), "test-key")).unwrap();
+        let error = client
+            .download_checkpoint_cancellable(
+                &download_fixture(10),
+                &destination,
+                &mut |_, _| {},
+                &StreamCancel::new(),
+            )
+            .unwrap_err();
+        assert!(error.to_string().contains(if body == "short" {
+            "incomplete"
+        } else {
+            "exceeds"
+        }));
+        server.join().unwrap();
+        assert!(!destination.exists());
+        assert_eq!(std::fs::read_dir(root.path()).unwrap().count(), 0);
+    }
+}
+
+#[test]
+fn checkpoint_download_does_not_replace_a_concurrent_destination() {
+    let server = Server::new(|_, request| {
+        scoped(request);
+        (200, String::new(), "data".into())
+    });
+    let root = tempfile::tempdir().unwrap();
+    let destination = root.path().join("checkpoint");
+    server
+        .client()
+        .download_checkpoint_cancellable(
+            &download_fixture(4),
+            &destination,
+            &mut |received, _| {
+                if received == 4 {
+                    std::fs::write(&destination, b"keep this").unwrap();
+                }
+            },
+            &StreamCancel::new(),
+        )
+        .unwrap_err();
+    assert_eq!(std::fs::read(&destination).unwrap(), b"keep this");
+    assert_eq!(std::fs::read_dir(root.path()).unwrap().count(), 1);
+}

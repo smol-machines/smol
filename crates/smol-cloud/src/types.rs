@@ -518,9 +518,22 @@ pub struct Checkpoint {
     pub arch: String,
     /// When the capture was taken.
     pub created_at: String,
-    /// Pre-signed URL to download the artifact.
+    /// Authenticated download endpoint for the artifact.
     #[serde(default)]
     pub download_url: Option<String>,
+}
+
+/// A machine's current pause association, including a pending upload.
+/// This read is not a lease; recheck before resuming the checkpoint elsewhere.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SavedExecution {
+    /// Stable identity of the machine whose pause was inspected.
+    pub machine_id: String,
+    /// Lifecycle state observed with the pause association.
+    pub state: String,
+    /// The associated capture, including one whose upload is still pending.
+    pub checkpoint: Option<Checkpoint>,
 }
 
 /// Where to send a checkpoint file's bytes, as `POST /v1/checkpoints` returns.
