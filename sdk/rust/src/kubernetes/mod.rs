@@ -8,6 +8,7 @@ mod artifact;
 mod images;
 
 pub use images::ImageImport;
+mod feed;
 
 use crate::{
     ConnectOptions, Error, ErrorKind, ExecOptions, ExecResult, Machine, MachineConfig,
@@ -113,6 +114,8 @@ impl Kubernetes {
                 "Managed Kubernetes cloud provisioning is not available yet",
             ));
         }
+        feed::require_notifications()?;
+        let image_feed = feed::prepare(None, Duration::from_secs(1800), &AtomicBool::new(false))?;
         // Reserve distinct loopback ports until the stopped machine is created.
         // The engine owns the bindings once start succeeds and reports collisions.
         let reservations = [config.api_port, 0, 0]
@@ -147,6 +150,7 @@ impl Kubernetes {
                     ..Resources::default()
                 },
                 ports,
+                mounts: vec![image_feed.mount()],
                 labels: vec![
                     (KIND.into(), "kubernetes".into()),
                     (NAME.into(), config.name.clone()),
@@ -265,7 +269,9 @@ impl Kubernetes {
                 "Kubernetes startup timeout must be positive",
             ));
         }
+        let image_feed = self.prepare_images(timeout, cancelled)?;
         self.machine.start()?;
+        image_feed.verify(self, timeout, cancelled)?;
         check_cancel(cancelled)?;
         self.checked(["sh", "-c", include_str!("preflight.sh")].map(String::from))?;
         let arch = self.checked(["uname", "-m"].map(String::from))?;
@@ -488,7 +494,11 @@ impl Kubernetes {
     /// Permanently delete this managed cluster and its volumes.
     pub fn delete(&self) -> Result<()> {
         self.owned()?;
-        self.machine.delete()
+        self.machine.delete()?;
+        // Reconcile against remaining VM records so deleting the last cluster
+        // releases feed archives immediately, even if no more images are built.
+        feed::prepare(None, Duration::from_secs(1800), &AtomicBool::new(false))?;
+        Ok(())
     }
 }
 
