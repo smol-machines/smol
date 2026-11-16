@@ -6,6 +6,7 @@
 
 #[cfg(test)]
 mod tenant_tests;
+mod upload;
 
 use std::io::{BufRead, BufReader, Read};
 use std::sync::Arc;
@@ -79,7 +80,7 @@ pub struct Client {
     credentials: Credentials,
     tenant: Option<reqwest::header::HeaderValue>,
     http: reqwest::blocking::Client,
-    /// Streams only: async so a read can be raced against a cancel.
+    /// Streams and uploads: async so network waits can be cancelled.
     stream_http: reqwest::Client,
     max_retries: u32,
 }
@@ -1071,85 +1072,6 @@ impl Client {
         )
     }
 
-    /// Send the parts of a previously allocated upload without completing it.
-    /// The file must remain unchanged from allocation through completion.
-    /// This checks its size and the server's part layout before sending bytes.
-    /// On failure the caller still owns the checkpoint id and decides whether
-    /// to retry within the URL lifetime or delete the incomplete upload.
-    pub fn send_checkpoint_upload(
-        &self,
-        path: &std::path::Path,
-        upload: &CheckpointUpload,
-        on_progress: &mut dyn FnMut(u64, u64),
-    ) -> Result<()> {
-        let metadata = std::fs::metadata(path)
-            .map_err(|e| Error::new(ErrorKind::Other, format!("read {}: {e}", path.display())))?;
-        let size = metadata.len();
-        if !metadata.is_file() || size == 0 || size != upload.checkpoint.size_bytes {
-            return Err(Error::new(
-                ErrorKind::Other,
-                "checkpoint file size changed since upload allocation",
-            ));
-        }
-        if upload.part_size_bytes == 0
-            || u64::try_from(upload.upload_urls.len()).ok()
-                != Some(size.div_ceil(upload.part_size_bytes))
-        {
-            return Err(Error::new(
-                ErrorKind::Other,
-                "checkpoint upload has an invalid part layout",
-            ));
-        }
-        let sent = Arc::new(std::sync::atomic::AtomicU64::new(0));
-        let parts: Vec<(usize, u64, u64)> = upload
-            .upload_urls
-            .iter()
-            .enumerate()
-            .map(|(index, _)| {
-                let start = index as u64 * upload.part_size_bytes;
-                (index, start, upload.part_size_bytes.min(size - start))
-            })
-            .collect();
-        let next = std::sync::atomic::AtomicUsize::new(0);
-        let finished = std::sync::atomic::AtomicUsize::new(0);
-        let failure: std::sync::Mutex<Option<Error>> = std::sync::Mutex::new(None);
-        let workers = UPLOAD_PARALLELISM.min(parts.len());
-        std::thread::scope(|scope| {
-            for _ in 0..workers {
-                scope.spawn(|| {
-                    loop {
-                        let index = next.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                        let Some(&(part, start, len)) = parts.get(index) else {
-                            break;
-                        };
-                        if failure.lock().unwrap().is_some() {
-                            break;
-                        }
-                        if let Err(error) =
-                            self.put_part(path, &upload.upload_urls[part], start, len, &sent)
-                        {
-                            failure.lock().unwrap().get_or_insert(error);
-                            break;
-                        }
-                    }
-                    finished.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                });
-            }
-            while finished.load(std::sync::atomic::Ordering::SeqCst) < workers {
-                on_progress(
-                    sent.load(std::sync::atomic::Ordering::SeqCst).min(size),
-                    size,
-                );
-                std::thread::sleep(Duration::from_millis(250));
-            }
-        });
-        if let Some(error) = failure.into_inner().unwrap() {
-            return Err(error);
-        }
-        on_progress(size, size);
-        Ok(())
-    }
-
     /// Validate and finalize a fully uploaded checkpoint. Keep its id if the
     /// response is lost: query the checkpoint before retrying or restoring it.
     /// Use the same account-scoped client as for allocation.
@@ -1165,70 +1087,6 @@ impl Client {
     /// Send one slice of the file to its pre-signed URL, retrying a few times:
     /// a multi-gigabyte upload over a home connection will see a dropped
     /// request now and then.
-    fn put_part(
-        &self,
-        path: &std::path::Path,
-        url: &str,
-        start: u64,
-        len: u64,
-        sent: &Arc<std::sync::atomic::AtomicU64>,
-    ) -> Result<()> {
-        use std::io::Seek;
-        let mut last = None;
-        for attempt in 0..UPLOAD_PART_ATTEMPTS {
-            if attempt > 0 {
-                std::thread::sleep(Duration::from_secs(2 << attempt));
-            }
-            let mut file = std::fs::File::open(path).map_err(|e| {
-                Error::new(ErrorKind::Other, format!("open {}: {e}", path.display()))
-            })?;
-            file.seek(std::io::SeekFrom::Start(start))
-                .map_err(|e| Error::new(ErrorKind::Other, format!("read the checkpoint: {e}")))?;
-            let counted = Arc::new(std::sync::atomic::AtomicU64::new(0));
-            let reader = CountingReader {
-                inner: file.take(len),
-                sent: Arc::clone(sent),
-                counted: Arc::clone(&counted),
-            };
-            let result = self
-                .http
-                .put(url)
-                .header(reqwest::header::CONTENT_LENGTH, len)
-                .body(reqwest::blocking::Body::sized(reader, len))
-                .timeout(UPLOAD_PART_TIMEOUT)
-                .send();
-            // Settle this attempt only once its response is in: the body is
-            // dropped as soon as it is sent, well before the server answers.
-            let counted = counted.load(std::sync::atomic::Ordering::SeqCst);
-            match result {
-                Ok(response) if response.status().is_success() => {
-                    // The reader is capped at `len`, so this tops the part up
-                    // to exactly its size.
-                    sent.fetch_add(len - counted, std::sync::atomic::Ordering::SeqCst);
-                    return Ok(());
-                }
-                Ok(response) => {
-                    // Whatever this attempt sent is resent by the next one.
-                    sent.fetch_sub(counted, std::sync::atomic::Ordering::SeqCst);
-                    let status = response.status();
-                    let body = response.text().unwrap_or_default();
-                    last = Some(Error::new(
-                        ErrorKind::Connection,
-                        format!("upload part at byte {start} failed: {status} {body}"),
-                    ));
-                }
-                Err(e) => {
-                    sent.fetch_sub(counted, std::sync::atomic::Ordering::SeqCst);
-                    last = Some(Error::new(
-                        ErrorKind::Connection,
-                        format!("upload part at byte {start} failed: {e}"),
-                    ));
-                }
-            }
-        }
-        Err(last.expect("at least one attempt"))
-    }
-
     /// Delete a machine and take a final, settled usage reading.
     ///
     /// The control plane samples usage synchronously before the teardown, so
@@ -1862,7 +1720,7 @@ impl Iterator for ResumableEvents {
     }
 }
 
-/// Ends a live [`Client::exec_stream_cancellable`] stream from any thread.
+/// Ends a live stream or checkpoint upload from any thread.
 /// Clones share one token; cancelling twice is harmless.
 #[derive(Debug, Clone)]
 pub struct StreamCancel(Arc<tokio::sync::watch::Sender<bool>>);
@@ -2053,25 +1911,6 @@ fn sse_event(kind: &str, data: &str) -> Option<StreamEvent> {
                 .unwrap_or(0) as i32,
         )),
         _ => None,
-    }
-}
-
-/// Counts bytes as the HTTP client reads them, for upload progress. A retried
-/// part takes back what it had counted.
-struct CountingReader<R> {
-    inner: R,
-    sent: Arc<std::sync::atomic::AtomicU64>,
-    counted: Arc<std::sync::atomic::AtomicU64>,
-}
-
-impl<R: Read> Read for CountingReader<R> {
-    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
-        let n = self.inner.read(buf)?;
-        self.counted
-            .fetch_add(n as u64, std::sync::atomic::Ordering::SeqCst);
-        self.sent
-            .fetch_add(n as u64, std::sync::atomic::Ordering::SeqCst);
-        Ok(n)
     }
 }
 
