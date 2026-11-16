@@ -393,6 +393,7 @@ mod tests {
         .unwrap()
         .with_tenant("team-original")
         .unwrap();
+        let (check_suspended, suspended) = std::sync::mpsc::sync_channel(1);
         let cloud_worker = std::thread::spawn(move || {
             let mut ws = tokio_tungstenite::tungstenite::accept_hdr(
                 accept(&cloud),
@@ -420,6 +421,11 @@ mod tests {
                     other => panic!("unexpected frame: {other:?}"),
                 }
             }
+            suspended.recv_timeout(Duration::from_secs(5)).unwrap();
+            assert_eq!(
+                cloud.accept().unwrap_err().kind(),
+                std::io::ErrorKind::WouldBlock
+            );
         });
         let mut tunnel = Tunnel::bind(0).unwrap();
         let address = tunnel.address();
@@ -439,6 +445,7 @@ mod tests {
         roundtrip(&mut client(&tunnel));
         tunnel.suspend().unwrap();
         assert_eq!(client(&tunnel).read(&mut [0]).unwrap(), 0);
+        check_suspended.send(()).unwrap();
         tunnel.route_local(local_address).unwrap();
         assert_eq!(tunnel.address(), address);
         roundtrip(&mut client(&tunnel));
