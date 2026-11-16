@@ -218,6 +218,7 @@ fn invalid_restore_keys_are_refused_before_network_access() {
     ] {
         assert!(client.checkpoint_restore("ckpt-owned", &key).is_err());
         assert!(client.start_checkpoint_restore("ckpt-owned", &key).is_err());
+        assert!(client.checkpoint_execution("ckpt-owned", &key).is_err());
         assert!(client
             .restore_checkpoint_tracked(
                 "ckpt-owned",
@@ -832,4 +833,40 @@ fn checkpoint_download_does_not_replace_a_concurrent_destination() {
         .unwrap_err();
     assert_eq!(std::fs::read(&destination).unwrap(), b"keep this");
     assert_eq!(std::fs::read_dir(root.path()).unwrap().count(), 1);
+}
+
+#[test]
+fn execution_observation_never_uses_auto_start_and_validates_the_receipt_and_boot() {
+    for status in [200, 403, 404, 409, 502] {
+        let server = Server::new(move |_, request| {
+            scoped(request);
+            assert!(request
+                .starts_with("GET /v1/checkpoints/ckpt%20owned/restores/move_123/execution "));
+            (status, String::new(), serde_json::json!({"checkpointId":"ckpt owned","requestId":"move_123","machineId":"machine-owned","bootId":"7f0f9472-3741-48c6-899b-92817f81bedc"}).to_string())
+        });
+        let result = server
+            .client()
+            .with_max_retries(0)
+            .checkpoint_execution("ckpt owned", "move_123");
+        assert_eq!(result.is_ok(), status == 200);
+        assert_eq!(server.requests.lock().unwrap().len(), 1);
+    }
+    for (field, value) in [
+        ("checkpointId", "other"),
+        ("requestId", "other"),
+        ("machineId", ""),
+        ("bootId", ""),
+        ("bootId", "00000000-0000-0000-0000-000000000000"),
+        ("bootId", "7f0f9472x3741-48c6-899b-92817f81bedc"),
+    ] {
+        let server = Server::new(move |_, _| {
+            let mut reply = serde_json::json!({"checkpointId":"cp","requestId":"move_123","machineId":"machine-owned","bootId":"7f0f9472-3741-48c6-899b-92817f81bedc"});
+            reply[field] = value.into();
+            (200, String::new(), reply.to_string())
+        });
+        assert!(server
+            .client()
+            .checkpoint_execution("cp", "move_123")
+            .is_err());
+    }
 }

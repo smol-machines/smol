@@ -18,9 +18,9 @@ use serde::de::DeserializeOwned;
 use crate::credentials::Credentials;
 use crate::error::{Error, ErrorKind, Result};
 use crate::types::{
-    BranchBatch, Checkpoint, CheckpointRestore, CheckpointUpload, Command, CommandOutput,
-    CreateMachine, JobOutput, JobRequest, Machine, MachineCacheDisk, MachineJob, Network, Port,
-    SetCredential, Share, Usage,
+    BranchBatch, Checkpoint, CheckpointExecution, CheckpointRestore, CheckpointUpload, Command,
+    CommandOutput, CreateMachine, JobOutput, JobRequest, Machine, MachineCacheDisk, MachineJob,
+    Network, Port, SetCredential, Share, Usage,
 };
 
 /// Ordinary calls are short: a hung request must not block a caller forever.
@@ -1078,6 +1078,47 @@ impl Client {
             ));
         }
         Ok(receipt)
+    }
+
+    /// Observe the guest boot identity of an exact restore without starting or
+    /// resuming it. Requires machine:read and machine:exec. Older servers refuse
+    /// the request; there is no fallback to auto-starting exec or file APIs.
+    pub fn checkpoint_execution(
+        &self,
+        checkpoint_id: &str,
+        request_id: &str,
+    ) -> Result<CheckpointExecution> {
+        validate_restore_request_id(request_id)?;
+        let observed: CheckpointExecution = self.json(
+            reqwest::Method::GET,
+            &format!(
+                "/v1/checkpoints/{}/restores/{}/execution",
+                percent_encode(checkpoint_id),
+                request_id
+            ),
+            Body::None,
+            REQUEST_TIMEOUT,
+        )?;
+        let boot = observed.boot_id.as_bytes();
+        if observed.checkpoint_id != checkpoint_id
+            || observed.request_id != request_id
+            || observed.machine_id.is_empty()
+            || boot.len() != 36
+            || !boot.iter().enumerate().all(|(i, b)| {
+                if [8, 13, 18, 23].contains(&i) {
+                    *b == b'-'
+                } else {
+                    b.is_ascii_hexdigit()
+                }
+            })
+            || !boot.iter().any(|b| b.is_ascii_hexdigit() && *b != b'0')
+        {
+            return Err(Error::new(
+                ErrorKind::Other,
+                "cloud returned an invalid restore execution identity",
+            ));
+        }
+        Ok(observed)
     }
 
     /// Start only the saved execution named by a restore receipt. The server

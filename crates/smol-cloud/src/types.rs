@@ -540,6 +540,21 @@ pub struct CheckpointRestore {
     pub pending_checkpoint_id: Option<String>,
 }
 
+/// Guest boot identity observed without starting or resuming the restored machine.
+/// Compare with the identity saved before capture; this observation is not a lease.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CheckpointExecution {
+    /// Capture used by the restore request.
+    pub checkpoint_id: String,
+    /// Caller-generated key identifying the restore request.
+    pub request_id: String,
+    /// Machine whose guest was observed.
+    pub machine_id: String,
+    /// Guest kernel boot UUID, not the host node's boot identity.
+    pub boot_id: String,
+}
+
 /// A machine's current pause association, including a pending upload.
 /// This read is not a lease; recheck before resuming the checkpoint elsewhere.
 #[derive(Debug, Clone, Deserialize, Serialize)]
