@@ -166,6 +166,14 @@ impl Client {
         &self.credentials
     }
 
+    /// The account selected with [`Self::with_tenant`], or the credential's
+    /// default account when absent. Companion transports must retain this scope.
+    pub fn tenant(&self) -> Option<&str> {
+        self.tenant
+            .as_ref()
+            .map(|tenant| tenant.to_str().expect("validated tenant ID"))
+    }
+
     // -- plumbing ----------------------------------------------------------
 
     fn send(

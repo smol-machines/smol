@@ -40,6 +40,9 @@ tokio-tungstenite = { version = "0.28", default-features = false, features = ["c
 futures-util = { version = "0.3", features = ["sink"] }
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 webpki-roots = "1"
+hyper = { version = "1", features = ["client", "server", "http1"] }
+hyper-util = { version = "0.1", features = ["tokio"] }
+http-body-util = "0.1"
 
 [dev-dependencies]
 # The mock control plane in tests/ asserts on the exact JSON the SDK sends.
