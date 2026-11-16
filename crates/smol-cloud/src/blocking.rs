@@ -4,6 +4,9 @@
 //! already async. An async caller can use [`crate::types`] and
 //! [`crate::credentials`] with its own HTTP client.
 
+#[cfg(test)]
+mod tenant_tests;
+
 use std::io::{BufRead, BufReader, Read};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -74,6 +77,7 @@ enum Body<'a> {
 #[derive(Debug, Clone)]
 pub struct Client {
     credentials: Credentials,
+    tenant: Option<reqwest::header::HeaderValue>,
     http: reqwest::blocking::Client,
     /// Streams only: async so a read can be raced against a cancel.
     stream_http: reqwest::Client,
@@ -97,6 +101,7 @@ impl Client {
             })?;
         Ok(Self {
             credentials,
+            tenant: None,
             http,
             stream_http,
             max_retries: DEFAULT_MAX_RETRIES,
@@ -111,6 +116,41 @@ impl Client {
     pub fn with_max_retries(mut self, max_retries: u32) -> Self {
         self.max_retries = max_retries;
         self
+    }
+
+    /// Scope every control-plane call to this account's stable tenant ID.
+    /// Clones and streams keep the selection; a refusal never falls back to
+    /// the credential's personal account. Object-storage uploads carry neither
+    /// this header nor the API credential. Scoped clients refuse redirects so
+    /// account headers cannot follow a response to another origin.
+    pub fn with_tenant(mut self, tenant: &str) -> Result<Self> {
+        if tenant.is_empty()
+            || tenant.len() > 256
+            || !tenant.is_ascii()
+            || tenant
+                .bytes()
+                .any(|b| b.is_ascii_whitespace() || b.is_ascii_control())
+        {
+            return Err(Error::new(ErrorKind::Other, "Invalid cloud tenant ID"));
+        }
+        let value = reqwest::header::HeaderValue::from_str(tenant)
+            .map_err(|_| Error::new(ErrorKind::Other, "Invalid cloud tenant ID"))?;
+        self.http = reqwest::blocking::Client::builder()
+            .redirect(reqwest::redirect::Policy::none())
+            .build()
+            .map_err(|e| {
+                Error::new(ErrorKind::Connection, format!("build the HTTP client: {e}"))
+            })?;
+        self.stream_http = reqwest::Client::builder()
+            .redirect(reqwest::redirect::Policy::none())
+            .connect_timeout(REQUEST_TIMEOUT)
+            .pool_max_idle_per_host(0)
+            .build()
+            .map_err(|e| {
+                Error::new(ErrorKind::Connection, format!("build the HTTP client: {e}"))
+            })?;
+        self.tenant = Some(value);
+        Ok(self)
     }
 
     /// Build a client, resolving credentials from the environment and the CLI
@@ -191,6 +231,9 @@ impl Client {
             )
             .bearer_auth(key)
             .timeout(timeout);
+        if let Some(tenant) = &self.tenant {
+            request = request.header("Smol-Tenant", tenant);
+        }
         match body {
             Body::None => {}
             Body::Json(value) => request = request.json(value),
@@ -621,6 +664,7 @@ impl Client {
             runtime,
             http: self.stream_http.clone(),
             credentials: self.credentials.clone(),
+            tenant: self.tenant.clone(),
             cancelled: cancel.subscribe(),
         };
         let exec_id = crate::resumable::new_exec_id();
@@ -701,12 +745,15 @@ impl Client {
             .build()
             .map_err(|e| Error::new(ErrorKind::Other, format!("start a stream runtime: {e}")))?;
         self.credentials.renew_if_expiring()?;
-        let request = self
+        let mut request = self
             .stream_http
             .post(format!("{}{path}", self.credentials.base_url()))
             .bearer_auth(self.credentials.api_key())
             .header(reqwest::header::ACCEPT, "text/event-stream")
             .json(command);
+        if let Some(tenant) = &self.tenant {
+            request = request.header("Smol-Tenant", tenant);
+        }
         let mut cancelled = cancel.subscribe();
         let sent = runtime.block_on(async {
             tokio::select! {
@@ -1484,6 +1531,7 @@ struct ResumableRun {
     runtime: tokio::runtime::Runtime,
     http: reqwest::Client,
     credentials: Credentials,
+    tenant: Option<reqwest::header::HeaderValue>,
     cancelled: tokio::sync::watch::Receiver<bool>,
 }
 
@@ -1513,6 +1561,9 @@ impl ResumableRun {
                 )
                 .bearer_auth(self.credentials.api_key())
                 .timeout(timeout);
+            if let Some(tenant) = &self.tenant {
+                request = request.header("Smol-Tenant", tenant);
+            }
             if let Some(body) = body {
                 request = request.json(body);
             }
@@ -1644,12 +1695,15 @@ impl ResumableEvents {
     /// Delete the exec once its end was read; it would expire on its own.
     fn forget(&mut self) {
         let path = self.reader.delete_path();
-        let request = self
+        let mut request = self
             .run
             .http
             .delete(format!("{}{path}", self.run.credentials.base_url()))
             .bearer_auth(self.run.credentials.api_key())
             .timeout(Duration::from_secs(10));
+        if let Some(tenant) = &self.run.tenant {
+            request = request.header("Smol-Tenant", tenant);
+        }
         // `send` arms the request's timeout, which needs the runtime.
         let _ = self
             .run
