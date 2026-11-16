@@ -126,6 +126,8 @@ mod config;
 mod connect;
 mod error;
 mod exec;
+/// Managed Kubernetes clusters backed by persistent Smol machines.
+pub mod kubernetes;
 mod machine;
 mod transport;
 mod tunnel;
@@ -164,6 +166,12 @@ pub use tunnel::Tunnel;
 /// machine's lifecycle.
 pub fn engine_cli() -> Result<std::path::PathBuf> {
     transport::local::resolve_cli()
+}
+
+/// A native command for the local engine, including any bundled CLI prefix.
+/// Add engine arguments before spawning; no shell wrapper is required.
+pub fn engine_command() -> Result<std::process::Command> {
+    Ok(transport::local::resolve_engine()?.command())
 }
 
 /// The shared control-plane crate, re-exported so a caller can reach the raw

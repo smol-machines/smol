@@ -72,22 +72,51 @@ fn forward_output(
     }
 }
 
-/// Find the engine binary this transport drives.
-///
-/// `SMOLVM` wins so a caller can pin a specific build. Otherwise the engine
-/// inside an installed `smol` CLI is used when its version matches this SDK's
-/// engine: the CLI carries the engine (`smol _engine …` runs it as the
-/// `smolvm` binary would), and a machine `smol` started and a branch this SDK
-/// asks for then come from one install. Failing that, an installed `smolvm`
-/// of a matching version is used. An older or newer release would silently
-/// drop or change features, so it is skipped, and when nothing installed
-/// matches, the engine release this SDK was built against is fetched once and
-/// cached. Each choice, and each candidate passed over, is logged at `debug`.
+/// A native engine invocation, preserving the bundled CLI argument prefix.
+#[derive(Clone, Debug)]
+pub(crate) struct Engine {
+    path: PathBuf,
+    bundled: bool,
+}
+
+impl Engine {
+    pub(crate) fn command(&self) -> Command {
+        let mut command = Command::new(&self.path);
+        if self.bundled {
+            command.arg("_engine");
+        }
+        command
+    }
+
+    fn display(&self) -> std::path::Display<'_> {
+        self.path.display()
+    }
+}
+
 pub(crate) fn resolve_cli() -> Result<PathBuf> {
+    let engine = resolve_engine()?;
+    if engine.bundled {
+        #[cfg(not(unix))]
+        return Err(Error::new(
+            ErrorKind::NotSupported,
+            "Use engine_command() to launch the bundled engine on this platform",
+        ));
+        #[cfg(unix)]
+        return engine_shim_for(&engine.path);
+    }
+    Ok(engine.path)
+}
+
+/// Prefer an explicit engine, then a matching CLI, then a matching engine
+/// installation, and finally the cached release. Never silently mix versions.
+pub(crate) fn resolve_engine() -> Result<Engine> {
     if let Some(explicit) = std::env::var_os("SMOLVM").map(PathBuf::from) {
         let cli = explicit_cli(explicit)?;
         log::debug!("engine: {} (SMOLVM is set)", cli.display());
-        return Ok(cli);
+        return Ok(Engine {
+            path: cli,
+            bundled: false,
+        });
     }
     let wanted = crate::bootstrap::engine_version();
     let (choice, skipped) = choose_engine(
@@ -100,20 +129,24 @@ pub(crate) fn resolve_cli() -> Result<PathBuf> {
     log_skipped(&skipped, &wanted);
     match choice {
         EngineChoice::Smol(smol) => {
-            let shim = engine_shim_for(&smol)?;
             log::debug!(
-                "engine: {} (the engine inside the installed smol CLI {}, version {wanted})",
-                shim.display(),
+                "engine: {} _engine (installed CLI, version {wanted})",
                 smol.display()
             );
-            Ok(shim)
+            Ok(Engine {
+                path: smol,
+                bundled: true,
+            })
         }
         EngineChoice::Smolvm(cli) => {
             log::debug!(
                 "engine: {} (an installed smolvm of version {wanted}; no smol CLI of that version)",
                 cli.display()
             );
-            Ok(cli)
+            Ok(Engine {
+                path: cli,
+                bundled: false,
+            })
         }
         EngineChoice::Fetch => {
             // Nothing usable installed: fetch the engine this SDK was built
@@ -122,25 +155,30 @@ pub(crate) fn resolve_cli() -> Result<PathBuf> {
             log::debug!(
                 "engine: no installed smol or smolvm of version {wanted}; using the cached release"
             );
-            crate::bootstrap::ensure_engine().map_err(|e| {
-                if skipped.is_empty() {
-                    return e;
-                }
-                let found: Vec<String> = skipped
-                    .iter()
-                    .map(|(path, version)| {
-                        let version = version.as_deref().unwrap_or("an unknown version");
-                        format!("{} ({version})", path.display())
-                    })
-                    .collect();
-                Error::new(
-                    e.kind(),
-                    format!(
+            crate::bootstrap::ensure_engine()
+                .map(|path| Engine {
+                    path,
+                    bundled: false,
+                })
+                .map_err(|e| {
+                    if skipped.is_empty() {
+                        return e;
+                    }
+                    let found: Vec<String> = skipped
+                        .iter()
+                        .map(|(path, version)| {
+                            let version = version.as_deref().unwrap_or("an unknown version");
+                            format!("{} ({version})", path.display())
+                        })
+                        .collect();
+                    Error::new(
+                        e.kind(),
+                        format!(
                         "{e}; installed CLIs skipped because this SDK needs engine {wanted}: {}",
                         found.join(", ")
                     ),
-                )
-            })
+                    )
+                })
         }
     }
 }
@@ -197,9 +235,19 @@ fn log_skipped(skipped: &[(PathBuf, Option<String>)], wanted: &str) {
 /// default location, then `~/.local/bin`.
 fn smol_candidates() -> Vec<PathBuf> {
     let mut candidates = Vec::new();
+    // When the CLI embeds this SDK, prefer its own engine, including when
+    // invoked by absolute path outside PATH. Probe it normally before use.
+    if let Ok(path) = std::env::current_exe() {
+        if matches!(
+            path.file_stem().and_then(|s| s.to_str()),
+            Some("smol" | "smol-bin")
+        ) {
+            candidates.push(path);
+        }
+    }
     if let Some(path) = std::env::var_os("PATH") {
         for dir in std::env::split_paths(&path) {
-            let candidate = dir.join("smol");
+            let candidate = dir.join(format!("smol{}", std::env::consts::EXE_SUFFIX));
             if candidate.is_file() && !candidates.contains(&candidate) {
                 candidates.push(candidate);
             }
@@ -207,7 +255,7 @@ fn smol_candidates() -> Vec<PathBuf> {
     }
     if let Some(home) = std::env::var_os("HOME").map(PathBuf::from) {
         for suffix in [".smol/smol", ".local/bin/smol"] {
-            let candidate = home.join(suffix);
+            let candidate = home.join(format!("{suffix}{}", std::env::consts::EXE_SUFFIX));
             if candidate.is_file() && !candidates.contains(&candidate) {
                 candidates.push(candidate);
             }
@@ -239,10 +287,12 @@ pub(crate) fn smol_engine_version_of(smol: &Path) -> Option<String> {
 /// as a binary taking `machine …` arguments, so the passthrough is wrapped in
 /// a one-line script under the SDK's cache, one per `smol` path, rewritten
 /// only when its contents would change.
+#[cfg(unix)]
 pub(crate) fn engine_shim_for(smol: &Path) -> Result<PathBuf> {
     engine_shim_in(&crate::bootstrap::cache_root()?, smol)
 }
 
+#[cfg(unix)]
 fn engine_shim_in(cache_root: &Path, smol: &Path) -> Result<PathBuf> {
     use std::hash::{Hash, Hasher};
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
@@ -250,7 +300,7 @@ fn engine_shim_in(cache_root: &Path, smol: &Path) -> Result<PathBuf> {
     let dir = cache_root
         .join("smol-engine")
         .join(format!("{:016x}", hasher.finish()));
-    let shim = dir.join("smolvm");
+    let shim = dir.join(format!("smolvm{}", std::env::consts::EXE_SUFFIX));
     let wanted = format!(
         "#!/bin/sh\n\
          # Written by the smolmachines crate: the engine inside the installed smol CLI.\n\
@@ -284,6 +334,7 @@ fn engine_shim_in(cache_root: &Path, smol: &Path) -> Result<PathBuf> {
 }
 
 /// `path` as one POSIX shell word.
+#[cfg(unix)]
 fn shell_quote(path: &Path) -> String {
     format!("'{}'", path.to_string_lossy().replace('\'', r"'\''"))
 }
@@ -293,7 +344,7 @@ fn installed_candidates() -> Vec<PathBuf> {
     let mut candidates = Vec::new();
     if let Some(path) = std::env::var_os("PATH") {
         for dir in std::env::split_paths(&path) {
-            let candidate = dir.join("smolvm");
+            let candidate = dir.join(format!("smolvm{}", std::env::consts::EXE_SUFFIX));
             if candidate.is_file() {
                 candidates.push(candidate);
             }
@@ -301,7 +352,7 @@ fn installed_candidates() -> Vec<PathBuf> {
     }
     if let Some(home) = std::env::var_os("HOME").map(PathBuf::from) {
         for suffix in [".local/bin/smolvm", ".smolvm/smolvm"] {
-            let candidate = home.join(suffix);
+            let candidate = home.join(format!("{suffix}{}", std::env::consts::EXE_SUFFIX));
             if candidate.is_file() && !candidates.contains(&candidate) {
                 candidates.push(candidate);
             }
@@ -492,10 +543,10 @@ fn machine_rows(out: &[u8]) -> Result<Vec<serde_json::Value>> {
 
 /// Every machine the local engine knows, as `machine ls --json` rows.
 pub(crate) fn list_rows() -> Result<Vec<serde_json::Value>> {
-    let cli = resolve_cli()?;
+    let cli = resolve_engine()?;
     let args = ["machine", "ls", "--json"];
     let output = retry_text_busy(|| {
-        Command::new(&cli)
+        cli.command()
             .args(args)
             .stdin(Stdio::null())
             .env_remove("SMOLVM_BOOT_BINARY")
@@ -563,12 +614,11 @@ impl Drop for TempSmolfile {
 #[derive(Debug)]
 pub(crate) struct LocalTransport {
     name: String,
-    cli: PathBuf,
+    cli: Engine,
     /// Credential values this SDK supplied, applied to every engine call so
     /// any start resolves them.
     credential_env: CredentialEnv,
-    /// Ports this SDK published for the machine. The CLI reports only a count,
-    /// so a machine the SDK did not create cannot be asked for its mapping.
+    /// Ports selected at creation; attached handles query the engine's mappings.
     ports: Vec<Port>,
     interceptor: std::sync::Mutex<Option<EgressInterceptor>>,
 }
@@ -577,17 +627,10 @@ impl LocalTransport {
     pub(crate) fn new(name: impl Into<String>) -> Result<Self> {
         Ok(Self {
             name: name.into(),
-            cli: resolve_cli()?,
+            cli: resolve_engine()?,
             credential_env: CredentialEnv::default(),
             ports: Vec::new(),
             interceptor: std::sync::Mutex::new(None),
-        })
-    }
-
-    pub(crate) fn with_ports(name: impl Into<String>, ports: Vec<Port>) -> Result<Self> {
-        Ok(Self {
-            ports,
-            ..Self::new(name)?
         })
     }
 
@@ -610,7 +653,7 @@ impl LocalTransport {
         args: &[&str],
         token: Option<&str>,
     ) -> Result<(i32, Vec<u8>, Vec<u8>)> {
-        let mut command = Command::new(&self.cli);
+        let mut command = self.cli.command();
         command
             .args(args)
             .stdin(Stdio::null())
@@ -655,6 +698,35 @@ impl LocalTransport {
             .into_iter()
             .find(|row| row.get("name").and_then(|n| n.as_str()) == Some(&self.name))
             .ok_or_else(|| Error::new(ErrorKind::NotFound, format!("VM not found: {}", self.name)))
+    }
+
+    fn published_ports(&self) -> Result<Vec<Port>> {
+        if !self.ports.is_empty() {
+            return Ok(self.ports.clone());
+        }
+        let row = self.record()?;
+        let ports = row.get("port_mappings").and_then(|p| p.as_array()).ok_or_else(|| {
+            Error::new(ErrorKind::NotSupported, "This engine does not expose published port mappings; update Smol before reconnecting to a service")
+        })?;
+        ports
+            .iter()
+            .filter(|p| p["protocol"].as_str() == Some("tcp"))
+            .map(|p| {
+                let port = |key: &str| {
+                    p[key]
+                        .as_u64()
+                        .and_then(|v| u16::try_from(v).ok())
+                        .filter(|v| *v != 0)
+                        .ok_or_else(|| {
+                            Error::new(
+                                ErrorKind::Other,
+                                "The engine returned an invalid published port",
+                            )
+                        })
+                };
+                Ok(Port::new(port("host")?, port("guest")?))
+            })
+            .collect()
     }
 
     /// Check that the machine is running or starting, for a connect that must
@@ -977,7 +1049,7 @@ impl Transport for LocalTransport {
         if !options.tty {
             args.insert(2, "--stream".into());
         }
-        let mut command = Command::new(&self.cli);
+        let mut command = self.cli.command();
         command
             .args(&args)
             // Give the child no stdin unless asked. Inheriting the caller's
@@ -1203,17 +1275,19 @@ impl Transport for LocalTransport {
     }
 
     fn host_port(&self, guest_port: u16) -> Result<Option<u16>> {
-        // The CLI reports only how many ports a machine publishes, not the
-        // mapping, so this answers from what the SDK itself asked for.
         Ok(self
-            .ports
+            .published_ports()?
             .iter()
             .find(|port| port.guest == guest_port)
             .map(|port| port.host))
     }
 
     fn guest_ports(&self) -> Result<Vec<u16>> {
-        Ok(self.ports.iter().map(|port| port.guest).collect())
+        Ok(self
+            .published_ports()?
+            .iter()
+            .map(|port| port.guest)
+            .collect())
     }
 
     fn endpoint(&self, port: u16, path: &str) -> Result<PortEndpoint> {
@@ -1440,13 +1514,13 @@ impl Transport for LocalTransport {
 
 /// Create a machine on this host and return a handle to it.
 pub(crate) fn create(
-    cli: &Path,
+    cli: &Engine,
     args: Vec<String>,
     name: &str,
     ports: Vec<Port>,
     credential_env: CredentialEnv,
 ) -> Result<LocalTransport> {
-    let mut command = Command::new(cli);
+    let mut command = cli.command();
     command
         .args(&args)
         .stdin(Stdio::null())
@@ -1459,8 +1533,11 @@ pub(crate) fn create(
         return Err(cli_error(&borrowed, &output.stderr, &output.stdout));
     }
     Ok(LocalTransport {
+        cli: cli.clone(),
+        name: name.into(),
+        ports,
+        interceptor: std::sync::Mutex::new(None),
         credential_env,
-        ..LocalTransport::with_ports(name, ports)?
     })
 }
 
@@ -1662,10 +1739,13 @@ mod engine_selection_tests {
         let shim = engine_shim_in(&cache, &smol).unwrap();
         assert_eq!(shim.file_name().unwrap(), "smolvm");
         assert!(shim.starts_with(cache.join("smol-engine")));
-        let out = Command::new(&shim)
-            .args(["machine", "ls", "--json"])
-            .output()
-            .unwrap();
+        // Use the transport's bounded ETXTBSY handling for a freshly installed executable.
+        let out = retry_text_busy(|| {
+            Command::new(&shim)
+                .args(["machine", "ls", "--json"])
+                .output()
+        })
+        .unwrap();
         assert!(out.status.success());
         assert_eq!(
             String::from_utf8_lossy(&out.stdout).trim(),
@@ -1714,13 +1794,57 @@ mod io_tests {
     use super::*;
     use std::os::unix::fs::PermissionsExt;
 
+    #[test]
+    fn bundled_engine_preserves_literal_arguments_without_a_shell() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("smol 'with spaces'");
+        std::fs::write(&path, "#!/bin/sh\nprintf '%s\\0' \"$@\"\n").unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let engine = Engine {
+            path,
+            bundled: true,
+        };
+        let output = retry_text_busy(|| {
+            engine
+                .command()
+                .args(["machine", "exec", "--", "$(not-a-command)"])
+                .output()
+        })
+        .unwrap();
+        assert!(output.status.success());
+        assert_eq!(
+            output.stdout,
+            b"_engine\0machine\0exec\0--\0$(not-a-command)\0"
+        );
+    }
+
+    #[test]
+    fn attached_machines_read_tcp_mappings_and_report_malformed_ports() {
+        let root = tempfile::tempdir().unwrap();
+        let transport = cli(
+            root.path(),
+            r#"echo '[{"name":"test","port_mappings":[{"host":32080,"guest":80,"protocol":"tcp"},{"host":32053,"guest":53,"protocol":"udp"}]}]'"#,
+        );
+        assert_eq!(transport.host_port(80).unwrap(), Some(32080));
+        assert_eq!(transport.host_port(53).unwrap(), None);
+        assert_eq!(transport.guest_ports().unwrap(), vec![80]);
+        let transport = cli(
+            root.path(),
+            r#"echo '[{"name":"test","port_mappings":[{"host":65536,"guest":80,"protocol":"tcp"}]}]'"#,
+        );
+        assert!(transport.host_port(80).is_err());
+    }
+
     fn cli(root: &Path, script: &str) -> LocalTransport {
         let path = root.join("cli");
         std::fs::write(&path, format!("#!/bin/sh\nset -eu\n{script}\n")).unwrap();
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o700)).unwrap();
         LocalTransport {
             name: "test".into(),
-            cli: path,
+            cli: Engine {
+                path,
+                bundled: false,
+            },
             credential_env: CredentialEnv::default(),
             ports: vec![],
             interceptor: std::sync::Mutex::new(None),

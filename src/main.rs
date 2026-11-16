@@ -48,6 +48,9 @@ enum Commands {
     /// Manage machines: create, start, stop, rm, ls, status, exec, shell, logs, cp, fork
     Machine(commands::machine::MachineCmd),
 
+    /// Manage persistent development Kubernetes clusters
+    Kubernetes(commands::kubernetes::KubernetesCmd),
+
     /// Work with a Smolfile: init, up, down
     File(commands::file::FileCmd),
 
@@ -234,6 +237,7 @@ fn main() {
         Commands::Run(cmd) => cmd.run(),
         Commands::New(cmd) => cmd.run(),
         Commands::Machine(cmd) => cmd.run(),
+        Commands::Kubernetes(cmd) => cmd.run(),
         Commands::File(cmd) => cmd.run(),
         Commands::Pack(cmd) => cmd.run(),
         Commands::Registry(cmd) => cmd.run(),

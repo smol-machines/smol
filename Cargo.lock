@@ -2612,6 +2612,7 @@ dependencies = [
  "serde_json",
  "sha2",
  "smol-cloud",
+ "smolmachines",
  "smolvm",
  "smolvm-pack",
  "smolvm-protocol",
@@ -2647,6 +2648,28 @@ dependencies = [
  "smolvm-protocol",
  "thiserror 1.0.69",
  "toml",
+]
+
+[[package]]
+name = "smolmachines"
+version = "1.35.0"
+dependencies = [
+ "flate2",
+ "futures-util",
+ "http-body-util",
+ "hyper",
+ "hyper-util",
+ "log",
+ "reqwest",
+ "rustls",
+ "serde_json",
+ "sha2",
+ "smol-cloud",
+ "tar",
+ "tempfile",
+ "tokio",
+ "tokio-tungstenite",
+ "webpki-roots 1.0.10",
 ]
 
 [[package]]
