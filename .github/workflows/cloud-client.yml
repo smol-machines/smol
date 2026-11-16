@@ -1,0 +1,47 @@
+name: Cloud client
+
+on:
+  push:
+    branches: [main]
+    paths: ["crates/smol-cloud/**", ".github/workflows/cloud-client.yml"]
+  pull_request:
+    paths: ["crates/smol-cloud/**", ".github/workflows/cloud-client.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cloud-client-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  client:
+    name: Client (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    defaults:
+      run:
+        shell: bash
+        working-directory: crates/smol-cloud
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      # This pure HTTP client is independently publishable; detach it from
+      # the CLI workspace so these checks never require an engine checkout.
+      - name: Use the standalone crate
+        run: printf '\n[workspace]\n' >> Cargo.toml
+      - name: Format
+        run: cargo fmt --check
+      - name: Wire types without the blocking client
+        run: cargo check --no-default-features
+      - name: Client tests
+        run: cargo test --all-features
+      - name: Clippy
+        run: cargo clippy --all-targets --all-features -- -D warnings
