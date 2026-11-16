@@ -220,7 +220,7 @@ impl ExecCmd {
         // Streaming mode
         if self.stream {
             let mut exit_code = 0;
-            let mut on_event = |event: ExecEvent| match event {
+            let on_event = |event: ExecEvent| match event {
                 ExecEvent::Stdout(data) => {
                     use std::io::Write;
                     let _ = std::io::stdout().write_all(&data);
@@ -252,11 +252,13 @@ impl ExecCmd {
                 client.run_streaming_with(config, on_event)?;
             } else {
                 // Bare VM: stream directly against the guest.
-                for event in
-                    client.vm_exec_streaming(command.clone(), env, self.workdir.clone(), timeout)?
-                {
-                    on_event(event);
-                }
+                client.vm_exec_streaming_with(
+                    command.clone(),
+                    env,
+                    self.workdir.clone(),
+                    timeout,
+                    on_event,
+                )?;
             }
             manager.detach();
             std::process::exit(exit_code);
