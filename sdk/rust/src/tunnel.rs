@@ -13,6 +13,8 @@ use tokio_tungstenite::tungstenite::{
 
 use crate::{Error, ErrorKind, Result};
 
+mod http;
+
 #[derive(Clone)]
 pub(crate) enum Target {
     Local(SocketAddr),
@@ -91,17 +93,30 @@ pub struct Tunnel {
 
 impl Tunnel {
     pub(crate) fn open(target: Target) -> Result<Self> {
-        Self::open_at(0, Some(target))
+        Self::open_at(0, Some(target), false)
     }
 
     /// Reserve a loopback port, initially with traffic suspended. Pass zero
     /// to allocate a port, or a saved port to retain an app's address after a
     /// restart. An occupied port fails without choosing a different address.
     pub fn bind(port: u16) -> Result<Self> {
-        Self::open_at(port, None)
+        Self::open_at(port, None, false)
     }
 
-    fn open_at(port: u16, mut target: Option<Target>) -> Result<Self> {
+    /// Reserve a browser-facing HTTP address, initially suspended. Requests
+    /// must use this listener's exact `127.0.0.1:port` Host and, when present,
+    /// same-origin Origin/Fetch Metadata headers. HTTP bodies stream without
+    /// buffering in full; WebSocket upgrades are supported. CONNECT, forward
+    /// proxy requests, and other upgrade protocols are rejected.
+    ///
+    /// Use `http://{address}/` in the browser. The address remains private to
+    /// this computer and exists only while this handle is alive. This does not
+    /// authenticate other local processes or publish a public cloud URL.
+    pub fn bind_http(port: u16) -> Result<Self> {
+        Self::open_at(port, None, true)
+    }
+
+    fn open_at(port: u16, mut target: Option<Target>, http: bool) -> Result<Self> {
         let listener = TcpListener::bind(("127.0.0.1", port)).map_err(|_| connection_error())?;
         listener
             .set_nonblocking(true)
@@ -152,7 +167,14 @@ impl Tunnel {
                                 let Ok((socket, _)) = accepted else { break; };
                                 if let Some(target) = &target {
                                     if clients.len() < 64 {
-                                        clients.spawn(relay(socket, target.clone()));
+                                        let target = target.clone();
+                                        clients.spawn(async move {
+                                            if http {
+                                                http::serve(socket, target, address).await
+                                            } else {
+                                                relay(socket, target).await
+                                            }
+                                        });
                                     }
                                 }
                             }
@@ -256,7 +278,10 @@ fn connection_error() -> Error {
     )
 }
 
-async fn relay(mut socket: tokio::net::TcpStream, target: Target) -> Result<()> {
+async fn relay<S>(mut socket: S, target: Target) -> Result<()>
+where
+    S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
+{
     match target {
         Target::Local(address) => {
             let mut remote = tokio::time::timeout(
@@ -296,7 +321,7 @@ async fn relay(mut socket: tokio::net::TcpStream, target: Target) -> Result<()> 
                 .map_err(|_| connection_error())?
                 .map_err(|_| connection_error())?;
             let (mut sink, mut stream) = ws.split();
-            let (mut reader, mut writer) = socket.split();
+            let (mut reader, mut writer) = tokio::io::split(socket);
             let (ping, mut pong) = mpsc::channel(1);
             let upload = async {
                 let mut buffer = [0u8; 32768];

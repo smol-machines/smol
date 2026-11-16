@@ -263,10 +263,21 @@ mod tests {
 
     #[test]
     fn an_unsupported_platform_says_so_instead_of_guessing_an_artifact() {
-        // The host running these tests is one of the three released targets,
-        // so this asserts the mapping rather than the error path.
-        let slug = platform_slug().expect("this platform has a release");
-        assert!(["darwin-arm64", "linux-arm64", "linux-x86_64"].contains(&slug));
+        let platform = (std::env::consts::OS, std::env::consts::ARCH);
+        if matches!(
+            platform,
+            ("macos", "aarch64") | ("linux", "aarch64" | "x86_64")
+        ) {
+            let slug = platform_slug().expect("this platform has a release");
+            assert!(["darwin-arm64", "linux-arm64", "linux-x86_64"].contains(&slug));
+        } else {
+            let error = platform_slug().unwrap_err();
+            assert_eq!(error.kind(), ErrorKind::NotSupported);
+            assert!(error
+                .message()
+                .contains(&format!("{}/{}", platform.0, platform.1)));
+            assert!(error.message().contains("set SMOLVM"));
+        }
     }
 
     #[test]
