@@ -1080,6 +1080,31 @@ impl Client {
         Ok(receipt)
     }
 
+    /// Start only the saved execution named by a restore receipt. The server
+    /// atomically claims the pending checkpoint and refuses a fresh boot if it
+    /// was consumed or replaced. Older servers return 404; there is deliberately
+    /// no fallback to the ordinary machine start endpoint.
+    ///
+    /// If the response is lost, inspect [`Self::checkpoint_restore`] and the
+    /// machine's state. An accepted boot continues after disconnection.
+    pub fn start_checkpoint_restore(
+        &self,
+        checkpoint_id: &str,
+        request_id: &str,
+    ) -> Result<Machine> {
+        validate_restore_request_id(request_id)?;
+        self.clone().with_max_retries(0).json(
+            reqwest::Method::POST,
+            &format!(
+                "/v1/checkpoints/{}/restores/{}/start",
+                percent_encode(checkpoint_id),
+                request_id
+            ),
+            Body::None,
+            START_TIMEOUT,
+        )
+    }
+
     /// Create a machine from a stored capture whose machine was created with a
     /// cache slot, with `cache_disk` mounted in that slot in place of the one
     /// it was captured with. The cache must be no larger than the slot and

@@ -217,6 +217,7 @@ fn invalid_restore_keys_are_refused_before_network_access() {
         "a\r\nb".into(),
     ] {
         assert!(client.checkpoint_restore("ckpt-owned", &key).is_err());
+        assert!(client.start_checkpoint_restore("ckpt-owned", &key).is_err());
         assert!(client
             .restore_checkpoint_tracked(
                 "ckpt-owned",
@@ -231,6 +232,35 @@ fn invalid_restore_keys_are_refused_before_network_access() {
             .is_err());
     }
     assert!(api.rows().is_empty());
+}
+
+#[test]
+fn guarded_restore_start_never_falls_back_to_an_ordinary_start() {
+    for status in [0, 200, 403, 404, 409, 503] {
+        let api = Server::new(move |n, request| {
+            assert_eq!(n, 0, "a failure must not fall back to a cold start");
+            scoped(request);
+            assert!(
+                request.starts_with("POST /v1/checkpoints/ckpt%20owned/restores/move_123/start ")
+            );
+            (
+                status,
+                String::new(),
+                r#"{"id":"mach-owned","state":"started"}"#.into(),
+            )
+        });
+        let result = api
+            .client()
+            .start_checkpoint_restore("ckpt owned", "move_123");
+        if status == 200 {
+            assert_eq!(result.unwrap().id, "mach-owned");
+        } else if status == 0 {
+            assert!(result.is_err());
+        } else {
+            assert_eq!(result.unwrap_err().status(), Some(status));
+        }
+        assert_eq!(api.rows().len(), 1);
+    }
 }
 
 #[test]
