@@ -31,6 +31,9 @@ impl Server {
                     }
                     Err(e) => panic!("accept: {e}"),
                 };
+                // macOS inherits O_NONBLOCK from the listening socket; the
+                // request reader below is intentionally blocking with a deadline.
+                stream.set_nonblocking(false).unwrap();
                 stream
                     .set_read_timeout(Some(Duration::from_secs(5)))
                     .unwrap();
@@ -87,7 +90,10 @@ impl Drop for Server {
     fn drop(&mut self) {
         self.stop.store(true, Ordering::SeqCst);
         if let Some(worker) = self.worker.take() {
-            worker.join().unwrap();
+            let result = worker.join();
+            if !std::thread::panicking() {
+                result.unwrap();
+            }
         }
     }
 }
@@ -107,7 +113,7 @@ fn checkpoint_upload_restore_and_cleanup_keep_the_account_off_object_storage() {
         (200, String::new(), String::new())
     });
     let part = format!("{}/part", objects.url);
-    let checkpoint = serde_json::json!({"id":"ckpt-owned","machineId":"source","status":"ready","sizeBytes":4,"arch":"arm64","createdAt":"now"});
+    let checkpoint = serde_json::json!({"id":"ckpt-owned","machineId":"source","status":"available","sizeBytes":4,"arch":"arm64","createdAt":"now"});
     let api = Server::new(move |n, request| {
         scoped(request);
         match n {
@@ -268,4 +274,157 @@ fn plain_and_resumable_streams_keep_the_account_through_cleanup() {
         .collect();
     assert_eq!(events, vec![StreamEvent::Exit(0)]);
     assert_eq!(resumable.rows().len(), 3);
+}
+
+#[test]
+fn staged_upload_records_ownership_before_sending_parts_and_reconciles_completion() {
+    let objects = Server::new(|_, request| {
+        let (headers, body) = request.split_once("\r\n\r\n").unwrap();
+        let headers = headers.to_lowercase();
+        assert!(!headers.contains("authorization:"));
+        assert!(!headers.contains("smol-tenant:"));
+        if request.starts_with("PUT /0 ") {
+            assert_eq!(body, "abcd");
+        } else if request.starts_with("PUT /1 ") {
+            assert_eq!(body, "efgh");
+        } else {
+            assert!(request.starts_with("PUT /2 "));
+            assert_eq!(body, "ij");
+        }
+        (200, String::new(), String::new())
+    });
+    let urls: Vec<_> = (0..3).map(|n| format!("{}/{n}", objects.url)).collect();
+    let checkpoint = serde_json::json!({"id":"ckpt-owned","machineId":"source","status":"available","sizeBytes":10,"arch":"arm64","createdAt":"now"});
+    let api = Server::new(move |n, request| {
+        scoped(request);
+        match n {
+            0 => {
+                assert!(request.starts_with("POST /v1/checkpoints "));
+                assert!(request.contains("\"sizeBytes\":10"));
+                assert!(request.contains("\"image\":\"alpine\""));
+                (201, String::new(), serde_json::json!({"checkpoint":checkpoint,"partSizeBytes":4,"uploadUrls":urls,"expiresAt":"later"}).to_string())
+            }
+            1 => {
+                assert!(request.starts_with("POST /v1/checkpoints/ckpt-owned/complete "));
+                // A proxy can fail after the server committed completion.
+                (502, String::new(), "gateway failed".into())
+            }
+            2 => {
+                assert!(request.starts_with("GET /v1/checkpoints/ckpt-owned "));
+                (200, String::new(), checkpoint.to_string())
+            }
+            3 => {
+                assert!(request.starts_with("DELETE /v1/checkpoints/ckpt-owned "));
+                (204, String::new(), String::new())
+            }
+            _ => panic!("unexpected request"),
+        }
+    });
+    let path = std::env::temp_dir().join(format!(
+        "staged-upload-{}",
+        api.url.rsplit(':').next().unwrap()
+    ));
+    std::fs::write(&path, b"abcdefghij").unwrap();
+    let client = api.client().with_max_retries(0);
+    let upload = client
+        .begin_checkpoint_upload(&path, Some("alpine"))
+        .unwrap();
+    // The desktop can durably record ownership here, before any part is sent.
+    assert_eq!(upload.checkpoint.id, "ckpt-owned");
+    assert!(objects.rows().is_empty());
+    assert_eq!(api.rows().len(), 1);
+    let mut last = (0, 0);
+    client
+        .send_checkpoint_upload(&path, &upload, &mut |sent, total| {
+            assert!(sent <= total);
+            last = (sent, total);
+        })
+        .unwrap();
+    assert_eq!(last, (10, 10));
+    assert_eq!(objects.rows().len(), 3);
+    assert_eq!(api.rows().len(), 1, "sending does not finalize");
+    assert_eq!(
+        client
+            .complete_checkpoint_upload(&upload.checkpoint.id)
+            .unwrap_err()
+            .status(),
+        Some(502)
+    );
+    let recovered = client.get_checkpoint(&upload.checkpoint.id).unwrap();
+    assert_eq!(recovered.status, "available");
+    client.delete_checkpoint(&upload.checkpoint.id).unwrap();
+    std::fs::remove_file(path).unwrap();
+}
+
+#[test]
+fn incomplete_upload_can_be_cleaned_up_after_source_disappears() {
+    let objects = Server::new(|_, _| panic!("no file data should be sent"));
+    let part = format!("{}/part", objects.url);
+    let checkpoint = serde_json::json!({"id":"ckpt-owned","machineId":"source","status":"uploading","sizeBytes":4,"arch":"arm64","createdAt":"now"});
+    let api = Server::new(move |n, request| {
+        scoped(request);
+        match n {
+            0 => (201, String::new(), serde_json::json!({"checkpoint":checkpoint,"partSizeBytes":4,"uploadUrls":[part],"expiresAt":"later"}).to_string()),
+            1 => {
+                assert!(request.starts_with("DELETE /v1/checkpoints/ckpt-owned "));
+                (204, String::new(), String::new())
+            }
+            _ => panic!("a failed send must not complete or allocate again"),
+        }
+    });
+    let path = std::env::temp_dir().join(format!(
+        "lost-upload-{}",
+        api.url.rsplit(':').next().unwrap()
+    ));
+    std::fs::write(&path, b"data").unwrap();
+    let client = api.client();
+    let upload = client.begin_checkpoint_upload(&path, None).unwrap();
+    std::fs::remove_file(&path).unwrap();
+    assert!(client
+        .send_checkpoint_upload(&path, &upload, &mut |_, _| {})
+        .is_err());
+    client.delete_checkpoint(&upload.checkpoint.id).unwrap();
+    assert_eq!(api.rows().len(), 2);
+    assert!(objects.rows().is_empty());
+}
+
+#[test]
+fn malformed_upload_layout_and_changed_files_fail_before_object_requests() {
+    let objects = Server::new(|_, _| panic!("invalid layout must not send bytes"));
+    let api = Server::new(|_, _| panic!("validation does not call the control plane"));
+    let path = std::env::temp_dir().join(format!(
+        "bad-upload-{}",
+        api.url.rsplit(':').next().unwrap()
+    ));
+    std::fs::write(&path, b"data").unwrap();
+    let mut upload: CheckpointUpload = serde_json::from_value(serde_json::json!({
+        "checkpoint":{"id":"ckpt-owned","machineId":"source","status":"uploading","sizeBytes":4,"arch":"arm64","createdAt":"now"},
+        "partSizeBytes":4,"uploadUrls":[format!("{}/part",objects.url)],"expiresAt":"later"
+    })).unwrap();
+    let client = api.client();
+    for (size, urls) in [(0, 1), (1, 1), (4, 0), (4, 2), (u64::MAX, 2)] {
+        upload.part_size_bytes = size;
+        upload.upload_urls = vec![format!("{}/part", objects.url); urls];
+        assert!(client
+            .send_checkpoint_upload(&path, &upload, &mut |_, _| {})
+            .unwrap_err()
+            .message()
+            .contains("part layout"));
+    }
+    upload.part_size_bytes = 4;
+    upload.upload_urls.truncate(1);
+    std::fs::write(&path, b"changed").unwrap();
+    assert!(client
+        .send_checkpoint_upload(&path, &upload, &mut |_, _| {})
+        .unwrap_err()
+        .message()
+        .contains("size changed"));
+    std::fs::write(&path, []).unwrap();
+    assert!(client.begin_checkpoint_upload(&path, None).is_err());
+    assert!(client
+        .begin_checkpoint_upload(&std::env::temp_dir(), None)
+        .is_err());
+    std::fs::remove_file(path).unwrap();
+    assert!(objects.rows().is_empty());
+    assert!(api.rows().is_empty());
 }

@@ -509,7 +509,7 @@ pub struct Checkpoint {
     pub id: String,
     /// The machine this captures.
     pub machine_id: String,
-    /// Capture status, `ready` once it can be restored from.
+    /// Capture status, `available` once it can be restored from.
     pub status: String,
     /// Size of the stored artifact.
     pub size_bytes: u64,

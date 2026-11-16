@@ -942,6 +942,17 @@ impl Client {
         )
     }
 
+    /// Inspect a stored capture or an upload, including after an interrupted
+    /// transfer or a completion request whose response was lost.
+    pub fn get_checkpoint(&self, checkpoint_id: &str) -> Result<Checkpoint> {
+        self.json(
+            reqwest::Method::GET,
+            &format!("/v1/checkpoints/{}", encode_path(checkpoint_id)),
+            Body::None,
+            REQUEST_TIMEOUT,
+        )
+    }
+
     /// Delete a stored capture. The control plane refuses one that a machine
     /// was restored from, or that holds a paused machine's saved execution,
     /// until that machine is gone.
@@ -1026,15 +1037,69 @@ impl Client {
         image: Option<&str>,
         on_progress: &mut dyn FnMut(u64, u64),
     ) -> Result<Checkpoint> {
-        let size = std::fs::metadata(path)
-            .map_err(|e| Error::new(ErrorKind::Other, format!("read {}: {e}", path.display())))?
-            .len();
-        let upload: CheckpointUpload = self.json(
+        let upload = self.begin_checkpoint_upload(path, image)?;
+        self.send_checkpoint_upload(path, &upload, on_progress)?;
+        self.complete_checkpoint_upload(&upload.checkpoint.id)
+    }
+
+    /// Allocate an upload before sending any file data. Persist the returned
+    /// checkpoint id with the selected account before calling
+    /// [`Self::send_checkpoint_upload`], so an interrupted transfer can be
+    /// inspected or removed with [`Self::delete_checkpoint`].
+    ///
+    /// The returned URLs are temporary credentials; keep them in memory, not
+    /// logs or a durable operation journal. Allocation itself can have an
+    /// ambiguous outcome if the server's response is lost.
+    pub fn begin_checkpoint_upload(
+        &self,
+        path: &std::path::Path,
+        image: Option<&str>,
+    ) -> Result<CheckpointUpload> {
+        let metadata = std::fs::metadata(path)
+            .map_err(|e| Error::new(ErrorKind::Other, format!("read {}: {e}", path.display())))?;
+        if !metadata.is_file() || metadata.len() == 0 {
+            return Err(Error::new(
+                ErrorKind::Other,
+                "checkpoint must be a nonempty file",
+            ));
+        }
+        self.json(
             reqwest::Method::POST,
             "/v1/checkpoints",
-            Body::Json(serde_json::json!({ "sizeBytes": size, "image": image })),
+            Body::Json(serde_json::json!({ "sizeBytes": metadata.len(), "image": image })),
             REQUEST_TIMEOUT,
-        )?;
+        )
+    }
+
+    /// Send the parts of a previously allocated upload without completing it.
+    /// The file must remain unchanged from allocation through completion.
+    /// This checks its size and the server's part layout before sending bytes.
+    /// On failure the caller still owns the checkpoint id and decides whether
+    /// to retry within the URL lifetime or delete the incomplete upload.
+    pub fn send_checkpoint_upload(
+        &self,
+        path: &std::path::Path,
+        upload: &CheckpointUpload,
+        on_progress: &mut dyn FnMut(u64, u64),
+    ) -> Result<()> {
+        let metadata = std::fs::metadata(path)
+            .map_err(|e| Error::new(ErrorKind::Other, format!("read {}: {e}", path.display())))?;
+        let size = metadata.len();
+        if !metadata.is_file() || size == 0 || size != upload.checkpoint.size_bytes {
+            return Err(Error::new(
+                ErrorKind::Other,
+                "checkpoint file size changed since upload allocation",
+            ));
+        }
+        if upload.part_size_bytes == 0
+            || u64::try_from(upload.upload_urls.len()).ok()
+                != Some(size.div_ceil(upload.part_size_bytes))
+        {
+            return Err(Error::new(
+                ErrorKind::Other,
+                "checkpoint upload has an invalid part layout",
+            ));
+        }
         let sent = Arc::new(std::sync::atomic::AtomicU64::new(0));
         let parts: Vec<(usize, u64, u64)> = upload
             .upload_urls
@@ -1082,12 +1147,16 @@ impl Client {
             return Err(error);
         }
         on_progress(size, size);
+        Ok(())
+    }
+
+    /// Validate and finalize a fully uploaded checkpoint. Keep its id if the
+    /// response is lost: query the checkpoint before retrying or restoring it.
+    /// Use the same account-scoped client as for allocation.
+    pub fn complete_checkpoint_upload(&self, checkpoint_id: &str) -> Result<Checkpoint> {
         self.json(
             reqwest::Method::POST,
-            &format!(
-                "/v1/checkpoints/{}/complete",
-                encode_path(&upload.checkpoint.id)
-            ),
+            &format!("/v1/checkpoints/{}/complete", encode_path(checkpoint_id)),
             Body::None,
             CHECKPOINT_TIMEOUT,
         )
