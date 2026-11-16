@@ -16,6 +16,16 @@ env:
 # required, and fork PRs build the same as same-repo PRs.
 
 jobs:
+  runtime-assets:
+    name: Runtime assets (${{ matrix.os }})
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 -m unittest discover -s scripts -p 'test_disk_templates.py'
+
   test:
     name: Clippy & Test
     runs-on: ubuntu-latest

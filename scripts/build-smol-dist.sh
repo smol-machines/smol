@@ -10,8 +10,8 @@
 #     lib/                    libkrun/libkrunfw/... reused from the smolvm release
 #     agent-rootfs/           guest rootfs reused from the SAME smolvm release
 #     init.krun               Linux guest init (from the release; absent on macOS)
-#     storage-template.ext4   pre-formatted disk templates (from the release)
-#     overlay-template.ext4
+#     storage-template.ext4.zst   compressed disk templates (from the release)
+#     overlay-template.ext4.zst
 #
 # Why reuse the release assets: building `smol` against smolvm vX.Y.Z's crates AND
 # bundling vX.Y.Z's agent-rootfs guarantees the host CLI and guest agent speak the
@@ -131,9 +131,7 @@ cp -a "$ENGINE_EXTRACT/agent-rootfs" "$DIST/agent-rootfs"   # preserves busybox 
 if [ -f "$ENGINE_EXTRACT/init.krun" ]; then
   cp "$ENGINE_EXTRACT/init.krun" "$DIST/"; chmod +x "$DIST/init.krun"
 fi
-for t in storage-template.ext4 overlay-template.ext4; do
-  if [ -f "$ENGINE_EXTRACT/$t" ]; then cp "$ENGINE_EXTRACT/$t" "$DIST/"; fi
-done
+"$SCRIPT_DIR/copy-disk-templates.sh" "$ENGINE_EXTRACT" "$DIST"
 
 cat > "$DIST/README.txt" <<EOF
 smol ${VERSION} — self-contained CLI for Smol Machines (${PLATFORM})

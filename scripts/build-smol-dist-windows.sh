@@ -74,9 +74,7 @@ cp "$EXE" "$DIST/smol.exe"
 cp "$ENGINE_EXTRACT/krun.dll" "$DIST/krun.dll"
 cp "$ENGINE_EXTRACT/libkrunfw.dll" "$DIST/libkrunfw.dll"
 cp "$ENGINE_EXTRACT/agent-rootfs.tar.gz" "$DIST/agent-rootfs.tar.gz"
-for t in storage-template.ext4 overlay-template.ext4; do
-  [ -f "$ENGINE_EXTRACT/$t" ] && cp "$ENGINE_EXTRACT/$t" "$DIST/"
-done
+"$SCRIPT_DIR/copy-disk-templates.sh" "$ENGINE_EXTRACT" "$DIST"
 
 cat > "$DIST/README.txt" <<EOF
 smol ${VERSION} — self-contained CLI for Smol Machines (Windows x86_64)
