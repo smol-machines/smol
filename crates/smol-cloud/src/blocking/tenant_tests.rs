@@ -220,6 +220,19 @@ fn invalid_restore_keys_are_refused_before_network_access() {
         assert!(client.start_checkpoint_restore("ckpt-owned", &key).is_err());
         assert!(client.checkpoint_execution("ckpt-owned", &key).is_err());
         assert!(client
+            .restore_checkpoint_tracked_with_idle_action(
+                "ckpt-owned",
+                "copy",
+                &Network {
+                    mode: Some("blocked".into()),
+                    cidrs: vec![],
+                    hosts: vec![]
+                },
+                &key,
+                IdleAction::Pause
+            )
+            .is_err());
+        assert!(client
             .restore_checkpoint_tracked(
                 "ckpt-owned",
                 "copy",
@@ -868,5 +881,69 @@ fn execution_observation_never_uses_auto_start_and_validates_the_receipt_and_boo
             .client()
             .checkpoint_execution("cp", "move_123")
             .is_err());
+    }
+}
+
+#[test]
+fn tracked_idle_pause_preserves_the_created_id_and_never_retries_with_stop() {
+    for (status, idle) in [
+        (200, Some("pause")),
+        (200, Some("stop")),
+        (200, None),
+        (422, None),
+        (503, None),
+        (0, None),
+    ] {
+        let api = Server::new(move |n, request| {
+            assert_eq!(n, 0, "no retry or stop-policy fallback");
+            scoped(request);
+            assert!(request.starts_with("POST /v1/checkpoints/ckpt%20owned/restore "));
+            let body: serde_json::Value =
+                serde_json::from_str(request.split_once("\r\n\r\n").unwrap().1).unwrap();
+            assert_eq!(
+                body,
+                serde_json::json!({"name":"my app","network":{"mode":"blocked"},"requestId":"move_123","idleAction":"pause"})
+            );
+            (
+                status,
+                String::new(),
+                serde_json::json!({"id":"mach-committed","state":"stopped","idleAction":idle})
+                    .to_string(),
+            )
+        });
+        let result = api.client().restore_checkpoint_tracked_with_idle_action(
+            "ckpt owned",
+            "my app",
+            &Network {
+                mode: Some("blocked".into()),
+                cidrs: vec![],
+                hosts: vec![],
+            },
+            "move_123",
+            IdleAction::Pause,
+        );
+        if status == 200 {
+            let machine = result.unwrap();
+            assert_eq!(
+                machine.id, "mach-committed",
+                "callers must retain ownership even if a server ignored the policy"
+            );
+            assert_eq!(machine.idle_action.as_deref(), idle);
+        } else {
+            assert!(result.is_err());
+        }
+        assert_eq!(api.rows().len(), 1);
+    }
+}
+
+#[test]
+fn execution_observation_exposes_actual_or_unknown_idle_policy() {
+    for idle in [None, Some("stop"), Some("pause"), Some("future-policy")] {
+        let api = Server::new(move |_, request| {
+            scoped(request);
+            (200,String::new(),serde_json::json!({"checkpointId":"cp","requestId":"move_123","machineId":"machine-owned","bootId":"7f0f9472-3741-48c6-899b-92817f81bedc","idleAction":idle}).to_string())
+        });
+        let observed = api.client().checkpoint_execution("cp", "move_123").unwrap();
+        assert_eq!(observed.idle_action.as_deref(), idle);
     }
 }
