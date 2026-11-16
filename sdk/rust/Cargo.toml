@@ -24,6 +24,7 @@ categories = ["virtualization", "api-bindings"]
 # owns the choice of runtime.
 smol-cloud = { path = "../../crates/smol-cloud", version = "1.35.0", features = ["blocking"] }
 serde_json = "1"
+serde = { version = "1", features = ["derive"] }
 # Which engine was chosen, and why, at `debug`; a library logs through the facade.
 log = "0.4"
 # Fetching an engine on first local use, so `cargo add` is all a caller needs.

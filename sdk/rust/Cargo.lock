@@ -1021,6 +1021,7 @@ dependencies = [
  "log",
  "reqwest",
  "rustls",
+ "serde",
  "serde_json",
  "sha2",
  "smol-cloud",

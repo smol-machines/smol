@@ -43,6 +43,8 @@ enum Operation {
     List,
     /// Inspect one cluster without starting it
     Status { name: String },
+    /// Inspect local image tags and their availability in this cluster
+    Images { name: String },
     /// Stop compute while retaining cluster data
     Stop { name: String },
     /// Permanently delete a cluster and its persistent volumes
@@ -176,6 +178,11 @@ impl KubernetesCmd {
                 let mut status = cluster.status()?;
                 status["endpoints"] = cluster.endpoints()?;
                 output(status)
+            }
+            Operation::Images { name } => {
+                let cluster = Kubernetes::attach(&name)?;
+                let images = with_cancel(false, move |cancelled| cluster.local_images(cancelled))?;
+                output(serde_json::to_value(images)?)
             }
             Operation::Stop { name } => Ok(Kubernetes::attach(&name)?.stop()?),
             Operation::Delete { name, yes } => {

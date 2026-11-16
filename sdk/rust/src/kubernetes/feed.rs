@@ -210,7 +210,11 @@ impl Kubernetes {
     }
 }
 
-fn engine(args: &[String], timeout: Duration, cancelled: &AtomicBool) -> Result<Vec<u8>> {
+pub(super) fn engine(
+    args: &[String],
+    timeout: Duration,
+    cancelled: &AtomicBool,
+) -> Result<Vec<u8>> {
     let mut command = crate::engine_command()?;
     command.args(args).env_remove("SMOLVM_BOOT_BINARY");
     capture(command, timeout, cancelled)

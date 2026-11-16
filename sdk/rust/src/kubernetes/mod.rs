@@ -5,8 +5,10 @@
 //! No host service is installed. Dropping a handle leaves the cluster running.
 
 mod artifact;
+mod availability;
 mod images;
 
+pub use availability::{LocalImage, LocalImageMode, LocalImageState, LocalImages};
 pub use images::ImageImport;
 mod feed;
 
