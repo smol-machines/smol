@@ -523,6 +523,23 @@ pub struct Checkpoint {
     pub download_url: Option<String>,
 }
 
+/// Receipt of a committed checkpoint restore, scoped to the selected account.
+/// The receipt survives consumption of the checkpoint and soft deletion of the
+/// machine; it is retained only as long as the machine's deletion history.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CheckpointRestore {
+    /// Capture used to create the machine.
+    pub checkpoint_id: String,
+    /// Caller-generated recovery key supplied on creation.
+    pub request_id: String,
+    /// Immutable identity of the machine created by that request.
+    pub machine_id: String,
+    /// The checkpoint still awaiting its first start, if any. This is an
+    /// observation, not a lease or proof of the machine's current execution.
+    pub pending_checkpoint_id: Option<String>,
+}
+
 /// A machine's current pause association, including a pending upload.
 /// This read is not a lease; recheck before resuming the checkpoint elsewhere.
 #[derive(Debug, Clone, Deserialize, Serialize)]

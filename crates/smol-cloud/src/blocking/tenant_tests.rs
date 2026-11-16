@@ -66,6 +66,10 @@ impl Server {
                     index
                 };
                 let (status, headers, body) = reply(index, &request);
+                if status == 0 {
+                    // Model a committed request whose response is lost.
+                    continue;
+                }
                 write!(stream, "HTTP/1.1 {status} Test\r\nContent-Length: {}\r\nConnection: close\r\n{headers}\r\n{body}", body.len()).unwrap();
             }
         });
@@ -101,6 +105,132 @@ fn scoped(request: &str) {
     let headers = request.split("\r\n\r\n").next().unwrap().to_lowercase();
     assert!(headers.contains("\r\nsmol-tenant: tenant-selected"));
     assert!(headers.contains("\r\nauthorization: bearer test-key"));
+}
+
+#[test]
+fn tracked_restore_lost_reply_is_looked_up_without_replaying_creation() {
+    for status in [0, 503] {
+        let api = Server::new(move |n, request| {
+            scoped(request);
+            match n {
+                0 => {
+                    assert!(request.starts_with("POST /v1/checkpoints/ckpt%20owned/restore "));
+                    let body: serde_json::Value =
+                        serde_json::from_str(request.split_once("\r\n\r\n").unwrap().1).unwrap();
+                    assert_eq!(
+                        body,
+                        serde_json::json!({"name":"my app", "network":{"mode":"open"}, "requestId":"move_123-abc"})
+                    );
+                    (status, "Retry-After: 0\r\n".into(), String::new())
+                }
+                1 => {
+                    assert!(request
+                        .starts_with("GET /v1/checkpoints/ckpt%20owned/restores/move_123-abc "));
+                    (200, String::new(), serde_json::json!({"checkpointId":"ckpt owned","requestId":"move_123-abc","machineId":"mach-committed","pendingCheckpointId":"ckpt owned"}).to_string())
+                }
+                _ => panic!("recovery must not repeat creation or start the machine"),
+            }
+        });
+        let client = api.client();
+        assert!(client
+            .restore_checkpoint_tracked(
+                "ckpt owned",
+                "my app",
+                &Network {
+                    mode: Some("open".into()),
+                    cidrs: vec![],
+                    hosts: vec![]
+                },
+                "move_123-abc"
+            )
+            .is_err());
+        assert_eq!(api.rows().len(), 1);
+        let receipt = client
+            .checkpoint_restore("ckpt owned", "move_123-abc")
+            .unwrap();
+        assert_eq!(receipt.machine_id, "mach-committed");
+        assert_eq!(receipt.pending_checkpoint_id.as_deref(), Some("ckpt owned"));
+        assert_eq!(api.rows().len(), 2);
+    }
+}
+
+#[test]
+fn restore_receipt_errors_never_adopt_inventory_or_submit_a_restore() {
+    let other = Server::new(|_, _| panic!("must not forward account credentials"));
+    let location = format!("Location: {}/receipt\r\n", other.url);
+    let api = Server::new(move |n, request| {
+        scoped(request);
+        assert!(request.starts_with("GET /v1/checkpoints/ckpt-owned/restores/move_123 "));
+        ([404, 403, 302][n], location.clone(), String::new())
+    });
+    let client = api.client();
+    for status in [404, 403, 302] {
+        assert_eq!(
+            client
+                .checkpoint_restore("ckpt-owned", "move_123")
+                .unwrap_err()
+                .status(),
+            Some(status)
+        );
+    }
+    assert_eq!(api.rows().len(), 3);
+    assert!(other.rows().is_empty());
+}
+
+#[test]
+fn restore_receipts_check_identity_and_preserve_consumed_checkpoint_state() {
+    let api = Server::new(|n, request| {
+        scoped(request);
+        let (checkpoint, key, machine, pending) = match n {
+            0 => ("ckpt-other", "move_123", "mach-owned", Some("ckpt-owned")),
+            1 => ("ckpt-owned", "move_other", "mach-owned", Some("ckpt-owned")),
+            2 => ("ckpt-owned", "move_123", "", Some("ckpt-owned")),
+            3 => ("ckpt-owned", "move_123", "mach-owned", Some("ckpt-other")),
+            4 => ("ckpt-owned", "move_123", "mach-owned", None),
+            _ => panic!("unexpected request"),
+        };
+        (200, String::new(), serde_json::json!({"checkpointId":checkpoint,"requestId":key,"machineId":machine,"pendingCheckpointId":pending}).to_string())
+    });
+    let client = api.client();
+    for _ in 0..4 {
+        assert!(client
+            .checkpoint_restore("ckpt-owned", "move_123")
+            .unwrap_err()
+            .to_string()
+            .contains("mismatched"));
+    }
+    let consumed = client.checkpoint_restore("ckpt-owned", "move_123").unwrap();
+    assert!(consumed.pending_checkpoint_id.is_none());
+    assert_eq!(consumed.machine_id, "mach-owned");
+}
+
+#[test]
+fn invalid_restore_keys_are_refused_before_network_access() {
+    let api = Server::new(|_, _| panic!("invalid key must not be sent"));
+    let client = api.client();
+    for key in [
+        "".to_string(),
+        "x".repeat(129),
+        "wrong/key".into(),
+        "a b".into(),
+        "é".into(),
+        "a\r\nb".into(),
+    ] {
+        assert!(client.checkpoint_restore("ckpt-owned", &key).is_err());
+        assert!(client
+            .restore_checkpoint_tracked(
+                "ckpt-owned",
+                "copy",
+                &Network {
+                    mode: Some("blocked".into()),
+                    cidrs: vec![],
+                    hosts: vec![]
+                },
+                &key
+            )
+            .is_err());
+    }
+    assert!(api.rows().is_empty());
 }
 
 #[test]

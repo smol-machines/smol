@@ -18,8 +18,9 @@ use serde::de::DeserializeOwned;
 use crate::credentials::Credentials;
 use crate::error::{Error, ErrorKind, Result};
 use crate::types::{
-    BranchBatch, Checkpoint, CheckpointUpload, Command, CommandOutput, CreateMachine, JobOutput,
-    JobRequest, Machine, MachineCacheDisk, MachineJob, Network, Port, SetCredential, Share, Usage,
+    BranchBatch, Checkpoint, CheckpointRestore, CheckpointUpload, Command, CommandOutput,
+    CreateMachine, JobOutput, JobRequest, Machine, MachineCacheDisk, MachineJob, Network, Port,
+    SetCredential, Share, Usage,
 };
 
 /// Ordinary calls are short: a hung request must not block a caller forever.
@@ -1017,6 +1018,68 @@ impl Client {
         )
     }
 
+    /// Restore with an account-scoped recovery key persisted by the caller
+    /// before this call. Keys contain 1–128 ASCII letters, digits, `-` or `_`.
+    ///
+    /// A lost response is ambiguous: use [`Self::checkpoint_restore`] to find
+    /// the committed machine instead of submitting another restore. A reused
+    /// key returns a conflict while its machine or deletion history exists.
+    /// Servers predating recovery receipts may ignore the key; an unavailable
+    /// receipt must never be treated as proof that creation did not happen.
+    pub fn restore_checkpoint_tracked(
+        &self,
+        checkpoint_id: &str,
+        name: &str,
+        network: &Network,
+        request_id: &str,
+    ) -> Result<Machine> {
+        validate_restore_request_id(request_id)?;
+        self.json(
+            reqwest::Method::POST,
+            &format!("/v1/checkpoints/{}/restore", percent_encode(checkpoint_id)),
+            Body::Json(serde_json::json!({
+                "name": name, "network": network, "requestId": request_id
+            })),
+            CHECKPOINT_TIMEOUT,
+        )
+    }
+
+    /// Find a committed restore by the exact checkpoint and recovery key in
+    /// this client's selected account. This does not create or start a machine.
+    /// A 404 can mean the original request is still in flight, so it does not
+    /// authorize retrying creation or resuming the source elsewhere.
+    pub fn checkpoint_restore(
+        &self,
+        checkpoint_id: &str,
+        request_id: &str,
+    ) -> Result<CheckpointRestore> {
+        validate_restore_request_id(request_id)?;
+        let receipt: CheckpointRestore = self.json(
+            reqwest::Method::GET,
+            &format!(
+                "/v1/checkpoints/{}/restores/{}",
+                percent_encode(checkpoint_id),
+                request_id
+            ),
+            Body::None,
+            REQUEST_TIMEOUT,
+        )?;
+        if receipt.checkpoint_id != checkpoint_id
+            || receipt.request_id != request_id
+            || receipt.machine_id.is_empty()
+            || receipt
+                .pending_checkpoint_id
+                .as_deref()
+                .is_some_and(|id| id != checkpoint_id)
+        {
+            return Err(Error::new(
+                ErrorKind::Other,
+                "cloud returned a mismatched checkpoint restore receipt",
+            ));
+        }
+        Ok(receipt)
+    }
+
     /// Create a machine from a stored capture whose machine was created with a
     /// cache slot, with `cache_disk` mounted in that slot in place of the one
     /// it was captured with. The cache must be no larger than the slot and
@@ -1375,6 +1438,21 @@ fn retry_after(headers: &reqwest::header::HeaderMap) -> Option<Duration> {
         .and_then(|value| value.to_str().ok())
         .and_then(|value| value.trim().parse::<u64>().ok())
         .map(Duration::from_secs)
+}
+
+fn validate_restore_request_id(request_id: &str) -> Result<()> {
+    if request_id.is_empty()
+        || request_id.len() > 128
+        || !request_id
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_'))
+    {
+        return Err(Error::new(
+            ErrorKind::Other,
+            "restore request ID must contain 1–128 ASCII letters, digits, '-' or '_'",
+        ));
+    }
+    Ok(())
 }
 
 fn retryable_status(status: u16) -> bool {
