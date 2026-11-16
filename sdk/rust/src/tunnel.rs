@@ -21,6 +21,12 @@ pub(crate) enum Target {
 
 impl Target {
     pub(crate) fn cloud(base: &str, id: &str, port: u16, key: &str) -> Result<Self> {
+        if id.is_empty() || port == 0 {
+            return Err(Error::new(
+                ErrorKind::Config,
+                "Machine ID and port are required",
+            ));
+        }
         let mut url = reqwest::Url::parse(base)
             .map_err(|_| Error::new(ErrorKind::Config, "Invalid cloud URL"))?;
         let scheme = match url.scheme() {
@@ -53,6 +59,23 @@ impl Target {
         );
         Ok(Self::Cloud(request))
     }
+
+    fn from_client(client: &smol_cloud::blocking::Client, id: &str, port: u16) -> Result<Self> {
+        let credentials = client.credentials();
+        credentials.renew_if_expiring()?;
+        let Self::Cloud(mut request) =
+            Self::cloud(credentials.base_url(), id, port, &credentials.api_key())?
+        else {
+            unreachable!()
+        };
+        if let Some(tenant) = client.tenant() {
+            request.headers_mut().insert(
+                "Smol-Tenant",
+                tenant.parse().map_err(|_| connection_error())?,
+            );
+        }
+        Ok(Self::Cloud(request))
+    }
 }
 
 /// A scoped loopback listener forwarding raw TCP to a published machine port.
@@ -60,6 +83,7 @@ impl Target {
 #[derive(Debug)]
 pub struct Tunnel {
     address: SocketAddr,
+    routes: mpsc::Sender<(Option<Target>, std::sync::mpsc::SyncSender<()>)>,
     stop: Option<oneshot::Sender<()>>,
     worker: Option<JoinHandle<()>>,
     error: Arc<Mutex<Option<Error>>>,
@@ -67,7 +91,18 @@ pub struct Tunnel {
 
 impl Tunnel {
     pub(crate) fn open(target: Target) -> Result<Self> {
-        let listener = TcpListener::bind(("127.0.0.1", 0)).map_err(|_| connection_error())?;
+        Self::open_at(0, Some(target))
+    }
+
+    /// Reserve a loopback port, initially with traffic suspended. Pass zero
+    /// to allocate a port, or a saved port to retain an app's address after a
+    /// restart. An occupied port fails without choosing a different address.
+    pub fn bind(port: u16) -> Result<Self> {
+        Self::open_at(port, None)
+    }
+
+    fn open_at(port: u16, mut target: Option<Target>) -> Result<Self> {
+        let listener = TcpListener::bind(("127.0.0.1", port)).map_err(|_| connection_error())?;
         listener
             .set_nonblocking(true)
             .map_err(|_| connection_error())?;
@@ -77,6 +112,8 @@ impl Tunnel {
             .build()
             .map_err(|_| connection_error())?;
         let (stop, mut stopped) = oneshot::channel();
+        let (routes, mut changes) =
+            mpsc::channel::<(Option<Target>, std::sync::mpsc::SyncSender<()>)>(1);
         let (ready, started) = std::sync::mpsc::sync_channel(1);
         let error = Arc::new(Mutex::new(None));
         let last_error = Arc::clone(&error);
@@ -97,6 +134,15 @@ impl Tunnel {
                         tokio::select! {
                             biased;
                             _ = &mut stopped => break,
+                            Some((destination, applied)) = changes.recv() => {
+                                // No old connection may keep writing to the previous
+                                // machine after a move or an account change.
+                                clients.abort_all();
+                                while clients.join_next().await.is_some() {}
+                                target = destination;
+                                *last_error.lock().unwrap() = None;
+                                let _ = applied.send(());
+                            }
                             result = clients.join_next(), if !clients.is_empty() => {
                                 if let Some(Ok(Err(error))) = result {
                                     *last_error.lock().unwrap() = Some(error);
@@ -104,8 +150,10 @@ impl Tunnel {
                             }
                             accepted = listener.accept() => {
                                 let Ok((socket, _)) = accepted else { break; };
-                                if clients.len() < 64 {
-                                    clients.spawn(relay(socket, target.clone()));
+                                if let Some(target) = &target {
+                                    if clients.len() < 64 {
+                                        clients.spawn(relay(socket, target.clone()));
+                                    }
                                 }
                             }
                         }
@@ -117,6 +165,7 @@ impl Tunnel {
             .map_err(|_| connection_error())?;
         let mut tunnel = Self {
             address,
+            routes,
             stop: Some(stop),
             worker: Some(worker),
             error,
@@ -130,6 +179,47 @@ impl Tunnel {
             return Err(error);
         }
         Ok(tunnel)
+    }
+
+    /// Keep the listener's address and forward new connections to a local
+    /// published port. Existing connections are closed before this returns.
+    /// Only loopback targets are accepted; this does not publish an app publicly.
+    pub fn route_local(&mut self, address: SocketAddr) -> Result<()> {
+        if !address.ip().is_loopback() || address.port() == 0 || address == self.address {
+            return Err(Error::new(
+                ErrorKind::Config,
+                "Choose a different loopback app port",
+            ));
+        }
+        self.route(Some(Target::Local(address)))
+    }
+
+    /// Keep the listener's address and forward new connections through the
+    /// cloud's authenticated TCP bridge, preserving the client's selected account.
+    /// Existing connections close before this returns. Call again to refresh
+    /// credentials or change destinations; this never starts a machine itself.
+    pub fn route_cloud(
+        &mut self,
+        client: &smol_cloud::blocking::Client,
+        machine_id: &str,
+        port: u16,
+    ) -> Result<()> {
+        self.route(Some(Target::from_client(client, machine_id, port)?))
+    }
+
+    /// Disconnect clients and stop forwarding while retaining the local port.
+    /// Incoming connections close until a new route is supplied, so a paused
+    /// transfer source cannot be woken by traffic through this tunnel.
+    pub fn suspend(&mut self) -> Result<()> {
+        self.route(None)
+    }
+
+    fn route(&mut self, target: Option<Target>) -> Result<()> {
+        let (applied, result) = std::sync::mpsc::sync_channel(1);
+        self.routes
+            .try_send((target, applied))
+            .map_err(|_| connection_error())?;
+        result.recv().map_err(|_| connection_error())
     }
 
     /// The local address to give an SSH client or another TCP client.
@@ -176,13 +266,9 @@ async fn relay(mut socket: tokio::net::TcpStream, target: Target) -> Result<()> 
             .await
             .map_err(|_| connection_error())?
             .map_err(|_| connection_error())?;
-            let (mut input, mut output) = socket.split();
-            let (mut upstream_input, mut upstream_output) = remote.split();
-            tokio::select! {
-                r = tokio::io::copy(&mut input, &mut upstream_output) => r,
-                r = tokio::io::copy(&mut upstream_input, &mut output) => r,
-            }
-            .map_err(|_| connection_error())?;
+            tokio::io::copy_bidirectional(&mut socket, &mut remote)
+                .await
+                .map_err(|_| connection_error())?;
         }
         Target::Cloud(request) => {
             let tls = rustls::ClientConfig::builder_with_provider(Arc::new(
@@ -254,6 +340,153 @@ mod tests {
     use super::*;
     use std::io::{Read, Write};
     use std::net::TcpStream;
+
+    fn accept(listener: &TcpListener) -> TcpStream {
+        listener.set_nonblocking(true).unwrap();
+        let until = std::time::Instant::now() + Duration::from_secs(5);
+        loop {
+            match listener.accept() {
+                Ok((stream, _)) => {
+                    stream.set_nonblocking(false).unwrap();
+                    stream
+                        .set_read_timeout(Some(Duration::from_secs(5)))
+                        .unwrap();
+                    stream
+                        .set_write_timeout(Some(Duration::from_secs(5)))
+                        .unwrap();
+                    return stream;
+                }
+                Err(error)
+                    if error.kind() == std::io::ErrorKind::WouldBlock
+                        && std::time::Instant::now() < until =>
+                {
+                    std::thread::sleep(Duration::from_millis(5));
+                }
+                Err(error) => panic!("accept failed: {error}"),
+            }
+        }
+    }
+
+    #[test]
+    #[allow(clippy::result_large_err)]
+    fn address_survives_local_cloud_and_return_with_account_scope() {
+        let local = TcpListener::bind("127.0.0.1:0").unwrap();
+        let local_address = local.local_addr().unwrap();
+        let local_worker = std::thread::spawn(move || {
+            for _ in 0..2 {
+                let mut stream = accept(&local);
+                let mut buf = [0; 32768];
+                loop {
+                    let n = stream.read(&mut buf).unwrap();
+                    if n == 0 {
+                        break;
+                    }
+                    stream.write_all(&buf[..n]).unwrap();
+                }
+            }
+        });
+        let cloud = TcpListener::bind("127.0.0.1:0").unwrap();
+        let cloud_client = smol_cloud::blocking::Client::new(smol_cloud::Credentials::new(
+            format!("http://{}", cloud.local_addr().unwrap()),
+            "private-account-token",
+        ))
+        .unwrap()
+        .with_tenant("team-original")
+        .unwrap();
+        let cloud_worker = std::thread::spawn(move || {
+            let mut ws = tokio_tungstenite::tungstenite::accept_hdr(
+                accept(&cloud),
+                |request: &Request<()>, response| {
+                    assert_eq!(
+                        request.uri().path(),
+                        "/v1/machines/moved-machine/tunnel/8080"
+                    );
+                    assert_eq!(
+                        request.headers()["authorization"],
+                        "Bearer private-account-token"
+                    );
+                    assert_eq!(request.headers()["smol-tenant"], "team-original");
+                    Ok(response)
+                },
+            )
+            .unwrap();
+            let mut bytes = 0;
+            while bytes < 1024 * 1024 {
+                match ws.read().unwrap() {
+                    Message::Binary(data) => {
+                        bytes += data.len();
+                        ws.send(Message::Binary(data)).unwrap();
+                    }
+                    other => panic!("unexpected frame: {other:?}"),
+                }
+            }
+        });
+        let mut tunnel = Tunnel::bind(0).unwrap();
+        let address = tunnel.address();
+        assert_eq!(client(&tunnel).read(&mut [0]).unwrap(), 0);
+        tunnel.route_local(local_address).unwrap();
+        let mut old = client(&tunnel);
+        roundtrip(&mut old);
+        assert!(tunnel.route_local(address).is_err());
+        assert!(tunnel.route_cloud(&cloud_client, "", 8080).is_err());
+        roundtrip(&mut old);
+        tunnel
+            .route_cloud(&cloud_client, "moved-machine", 8080)
+            .unwrap();
+        assert_eq!(old.read(&mut [0]).unwrap(), 0);
+        assert_eq!(tunnel.address(), address);
+        assert!(!format!("{tunnel:?}").contains("private-account-token"));
+        roundtrip(&mut client(&tunnel));
+        tunnel.suspend().unwrap();
+        assert_eq!(client(&tunnel).read(&mut [0]).unwrap(), 0);
+        tunnel.route_local(local_address).unwrap();
+        assert_eq!(tunnel.address(), address);
+        roundtrip(&mut client(&tunnel));
+        tunnel.close();
+        assert!(tunnel.suspend().is_err());
+        local_worker.join().unwrap();
+        cloud_worker.join().unwrap();
+    }
+
+    #[test]
+    fn reserved_port_refuses_collisions_and_invalid_routes_leave_it_usable() {
+        let mut tunnel = Tunnel::bind(0).unwrap();
+        let address = tunnel.address();
+        assert!(Tunnel::bind(address.port()).is_err());
+        for target in [
+            address,
+            "127.0.0.1:0".parse().unwrap(),
+            "192.0.2.1:80".parse().unwrap(),
+        ] {
+            assert!(tunnel.route_local(target).is_err());
+        }
+        assert_eq!(tunnel.address(), address);
+        tunnel.suspend().unwrap();
+        tunnel.close();
+        let rebound = Tunnel::bind(address.port()).unwrap();
+        assert_eq!(rebound.address(), address);
+    }
+
+    #[test]
+    fn local_half_close_keeps_the_response_readable() {
+        let server = TcpListener::bind("127.0.0.1:0").unwrap();
+        let worker_address = server.local_addr().unwrap();
+        let worker = std::thread::spawn(move || {
+            let mut peer = accept(&server);
+            let mut request = Vec::new();
+            peer.read_to_end(&mut request).unwrap();
+            assert_eq!(request, b"request");
+            peer.write_all(b"complete response").unwrap();
+        });
+        let tunnel = Tunnel::open(Target::Local(worker_address)).unwrap();
+        let mut peer = client(&tunnel);
+        peer.write_all(b"request").unwrap();
+        peer.shutdown(std::net::Shutdown::Write).unwrap();
+        let mut response = Vec::new();
+        peer.read_to_end(&mut response).unwrap();
+        assert_eq!(response, b"complete response");
+        worker.join().unwrap();
+    }
 
     fn client(tunnel: &Tunnel) -> TcpStream {
         let stream = TcpStream::connect(tunnel.address()).unwrap();
