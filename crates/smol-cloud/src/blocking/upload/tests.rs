@@ -23,7 +23,12 @@ fn accept(listener: &TcpListener) -> TcpStream {
     let deadline = Instant::now() + Duration::from_secs(5);
     loop {
         match listener.accept() {
-            Ok((stream, _)) => return stream,
+            Ok((stream, _)) => {
+                // macOS inherits O_NONBLOCK from the listener. The test peer
+                // deliberately uses blocking reads with bounded timeouts.
+                stream.set_nonblocking(false).unwrap();
+                return stream;
+            }
             Err(e) if e.kind() == std::io::ErrorKind::WouldBlock && Instant::now() < deadline => {
                 thread::sleep(Duration::from_millis(5))
             }
