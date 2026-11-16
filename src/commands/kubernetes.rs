@@ -58,6 +58,16 @@ enum Operation {
         #[arg(long)]
         output: PathBuf,
     },
+    /// Stream a host Docker or OCI archive into a running cluster without a registry
+    ImportImages {
+        name: String,
+        archive: PathBuf,
+        #[arg(long, default_value_t = 1800)]
+        timeout: u64,
+        /// Cancel when the owning desktop closes the control pipe
+        #[arg(long, hide = true)]
+        cancellation_stdin: bool,
+    },
     /// Read recent server logs
     Logs {
         name: String,
@@ -84,17 +94,35 @@ fn start(cluster: Kubernetes, timeout: u64) -> Result<()> {
         bail!("Startup timeout must be positive");
     }
     let name = cluster.name().to_owned();
+    let result = with_cancel(false, move |cancelled| {
+        let mut status = cluster.start(Duration::from_secs(timeout), cancelled)?;
+        status["endpoints"] = cluster.endpoints()?;
+        Ok(status)
+    });
+    output(result.map_err(|error| anyhow::anyhow!(
+        "Cluster {name} failed to start: {error:#}; it was retained, so use 'smol kubernetes logs {name}' to inspect it or 'smol kubernetes stop {name}' to stop compute"
+    ))?)
+}
+
+fn with_cancel<T: Send + 'static>(
+    cancellation_stdin: bool,
+    operation: impl FnOnce(&AtomicBool) -> smolmachines::Result<T> + Send + 'static,
+) -> Result<T> {
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()?;
     let cancelled = Arc::new(AtomicBool::new(false));
-    let worker_cancelled = cancelled.clone();
-    let result = runtime.block_on(async move {
-        let mut worker = tokio::task::spawn_blocking(move || {
-            let mut status = cluster.start(Duration::from_secs(timeout), &worker_cancelled)?;
-            status["endpoints"] = cluster.endpoints()?;
-            Ok::<_, smolmachines::Error>(status)
+    if cancellation_stdin {
+        let cancelled = cancelled.clone();
+        std::thread::spawn(move || {
+            use std::io::Read;
+            let _ = std::io::stdin().read(&mut [0_u8; 1]);
+            cancelled.store(true, Ordering::Release);
         });
+    }
+    let worker_cancelled = cancelled.clone();
+    runtime.block_on(async move {
+        let mut worker = tokio::task::spawn_blocking(move || operation(&worker_cancelled));
         tokio::select! {
             result = &mut worker => result?,
             signal = tokio::signal::ctrl_c() => {
@@ -104,10 +132,7 @@ fn start(cluster: Kubernetes, timeout: u64) -> Result<()> {
             }
         }
         .map_err(anyhow::Error::from)
-    });
-    output(result.map_err(|error| anyhow::anyhow!(
-        "Cluster {name} failed to start: {error:#}; it was retained, so use 'smol kubernetes logs {name}' to inspect it or 'smol kubernetes stop {name}' to stop compute"
-    ))?)
+    })
 }
 
 impl KubernetesCmd {
@@ -161,6 +186,21 @@ impl KubernetesCmd {
             }
             Operation::Kubeconfig { name, output } => {
                 Ok(Kubernetes::attach(&name)?.write_kubeconfig(output)?)
+            }
+            Operation::ImportImages {
+                name,
+                archive,
+                timeout,
+                cancellation_stdin,
+            } => {
+                if timeout == 0 {
+                    bail!("Image import timeout must be positive");
+                }
+                let cluster = Kubernetes::attach(&name)?;
+                let imported = with_cancel(cancellation_stdin, move |cancelled| {
+                    cluster.import_images(archive, Duration::from_secs(timeout), cancelled)
+                })?;
+                output(serde_json::json!({"bytes": imported.bytes, "output": imported.output}))
             }
             Operation::Logs { name, lines } => {
                 let result = Kubernetes::attach(&name)?.logs(lines)?;

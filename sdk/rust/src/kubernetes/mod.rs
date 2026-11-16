@@ -5,6 +5,9 @@
 //! No host service is installed. Dropping a handle leaves the cluster running.
 
 mod artifact;
+mod images;
+
+pub use images::ImageImport;
 
 use crate::{
     ConnectOptions, Error, ErrorKind, ExecOptions, ExecResult, Machine, MachineConfig,
