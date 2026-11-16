@@ -532,6 +532,9 @@ pub struct SavedExecution {
     pub machine_id: String,
     /// Lifecycle state observed with the pause association.
     pub state: String,
+    /// Whether ingress may resume this pause automatically. A manual pause
+    /// returns false even when the machine is configured to pause when idle.
+    pub wake_on_request: bool,
     /// The associated capture, including one whose upload is still pending.
     pub checkpoint: Option<Checkpoint>,
 }

@@ -447,7 +447,7 @@ fn saved_execution_and_download_use_the_selected_account_and_exact_checkpoint() 
         scoped(request);
         if i == 0 {
             assert!(request.starts_with("GET /v1/machines/machine-owned/pause "));
-            (200, String::new(), serde_json::json!({"machineId":"machine-owned","state":"paused","checkpoint": download_fixture(4)}).to_string())
+            (200, String::new(), serde_json::json!({"machineId":"machine-owned","state":"paused","wakeOnRequest":false,"checkpoint": download_fixture(4)}).to_string())
         } else {
             assert!(request.starts_with("GET /v1/checkpoints/ckpt-saved/download "));
             (200, String::new(), "data".into())
@@ -457,6 +457,7 @@ fn saved_execution_and_download_use_the_selected_account_and_exact_checkpoint() 
     let saved = client.saved_execution("machine-owned").unwrap();
     assert_eq!(saved.machine_id, "machine-owned");
     assert_eq!(saved.state, "paused");
+    assert!(!saved.wake_on_request);
     let checkpoint = saved.checkpoint.unwrap();
     let root = tempfile::tempdir().unwrap();
     let path = root.path().join("saved.smolcheckpoint");
