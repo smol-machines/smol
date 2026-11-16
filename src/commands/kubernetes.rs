@@ -112,6 +112,9 @@ fn start(cluster: Kubernetes, timeout: u64) -> Result<()> {
 
 impl KubernetesCmd {
     pub fn run(self) -> Result<()> {
+        // Keep SDK operations in this exact installation, including a renamed
+        // binary selected by Studio or a CLI launched outside PATH.
+        smolmachines::set_local_cli(std::env::current_exe()?)?;
         match self.command {
             Operation::Create {
                 name,

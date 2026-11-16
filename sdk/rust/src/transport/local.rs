@@ -79,6 +79,34 @@ pub(crate) struct Engine {
     bundled: bool,
 }
 
+static SELECTED_CLI: std::sync::OnceLock<Engine> = std::sync::OnceLock::new();
+
+pub(crate) fn set_local_cli(path: &Path) -> Result<()> {
+    let path = path
+        .canonicalize()
+        .map_err(|e| Error::new(ErrorKind::Config, format!("locate Smol CLI: {e}")))?;
+    let wanted = crate::bootstrap::engine_version();
+    if !smol_engine_version_of(&path)
+        .is_some_and(|version| crate::bootstrap::is_compatible_engine(&version, &wanted))
+    {
+        return Err(Error::new(
+            ErrorKind::Config,
+            format!("The selected Smol CLI must provide engine {wanted}"),
+        ));
+    }
+    let selected = SELECTED_CLI.get_or_init(|| Engine {
+        path: path.clone(),
+        bundled: true,
+    });
+    if selected.path != path {
+        return Err(Error::new(
+            ErrorKind::Conflict,
+            "The local CLI is already fixed for this process",
+        ));
+    }
+    Ok(())
+}
+
 impl Engine {
     pub(crate) fn command(&self) -> Command {
         let mut command = Command::new(&self.path);
@@ -110,6 +138,9 @@ pub(crate) fn resolve_cli() -> Result<PathBuf> {
 /// Prefer an explicit engine, then a matching CLI, then a matching engine
 /// installation, and finally the cached release. Never silently mix versions.
 pub(crate) fn resolve_engine() -> Result<Engine> {
+    if let Some(engine) = SELECTED_CLI.get() {
+        return Ok(engine.clone());
+    }
     if let Some(explicit) = std::env::var_os("SMOLVM").map(PathBuf::from) {
         let cli = explicit_cli(explicit)?;
         log::debug!("engine: {} (SMOLVM is set)", cli.display());

@@ -174,6 +174,13 @@ pub fn engine_command() -> Result<std::process::Command> {
     Ok(transport::local::resolve_engine()?.command())
 }
 
+/// Fix the CLI used by this process before creating local machine handles.
+/// This overrides environment and PATH discovery, checks engine compatibility,
+/// and refuses to switch to another CLI once set. Existing handles are unchanged.
+pub fn set_local_cli(path: impl AsRef<std::path::Path>) -> Result<()> {
+    transport::local::set_local_cli(path.as_ref())
+}
+
 /// The shared control-plane crate, re-exported so a caller can reach the raw
 /// API without taking a second dependency on it.
 pub use smol_cloud;
