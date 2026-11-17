@@ -75,6 +75,9 @@ type ResourceSpec struct {
 	GPUVRAMMiB int
 	// CUDA remotes guest CUDA Driver-API calls to the host NVIDIA GPU. Local only.
 	CUDA bool
+	// Rosetta runs x86_64 binaries through Rosetta 2 on Apple Silicon, and
+	// pulls the image for linux/amd64. Local only.
+	Rosetta bool
 	// NetworkBackend is NetworkBackendTSI or NetworkBackendVirtioNet. Choose
 	// virtio-net for a machine you will checkpoint and restore with a
 	// different network policy. Local only.

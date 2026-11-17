@@ -18,6 +18,8 @@ pub mod error;
 #[path = "../../shared/exec_stream_utf8.rs"]
 mod exec_stream_utf8;
 pub mod machine;
+#[path = "../../shared/rosetta_pull.rs"]
+mod rosetta_pull;
 pub mod types;
 
 use napi_derive::napi;
