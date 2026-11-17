@@ -2,7 +2,6 @@
 
 use clap::{builder::TypedValueParser, Args};
 use smolvm::agent::AgentManager;
-use smolvm::config::RecordState;
 use smolvm::db::SmolvmDb;
 
 #[derive(Args, Debug)]
@@ -80,12 +79,6 @@ impl StartCmd {
             }
         };
 
-        // Check state
-        if record.actual_state() == RecordState::Running {
-            println!("Machine '{}' already running", name);
-            return Ok(());
-        }
-
         let interceptor = self
             .egress_interceptor
             .map(|addr| {
@@ -110,222 +103,28 @@ impl StartCmd {
             );
         }
 
-        // A machine whose guest cannot reach its registry (no network, an
-        // inbound-only network, or an allow list that does not name the
-        // registry) has its image fetched on the host and pinned as a local
-        // archive the guest flattens offline, exactly as the engine's
-        // `machine start` does. The record then names a `local:` ref, which the
-        // pull below skips; later starts keep the pinned image.
-        let record = smolvm::image_store::pin_for_start(
-            &db,
+        // Use the engine's persistent lifecycle for image preparation, init,
+        // workload launch and checkpoint recovery. In particular, init belongs
+        // inside the image's filesystem and runs only until it succeeds once.
+        let proxy_options = smolvm::cli::proxy_opts::ProxyOpts::default();
+        let proxy = proxy_options.resolved_proxy()?;
+        let no_proxy = proxy_options.no_proxy();
+        let fork = if self.forkable {
+            smolvm::cli::vm_common::forkable_launch()
+        } else {
+            smolvm::cli::vm_common::ForkLaunch::default()
+        };
+        smolvm::cli::vm_common::start_vm_named(
             &name,
-            record,
-            &smolvm::registry::PullAuth::FromConfig,
-        )?;
-
-        let mounts = record.host_mounts();
-        let ports = record.port_mappings();
-        let mut resources = record.vm_resources();
-
-        // Re-resolve --allow-host egress hosts to fresh CIDRs at start (IPs
-        // rotate for CDN-backed services), merging with the stored allowlist.
-        if let Some(ref hosts) = record.dns_filter_hosts {
-            if !hosts.is_empty() {
-                let cidrs = resources.allowed_cidrs.get_or_insert_with(Vec::new);
-                for h in hosts {
-                    match smolvm::smolfile::resolve_host_to_cidrs(h) {
-                        Ok(c) => cidrs.extend(c),
-                        Err(e) => {
-                            eprintln!("Warning: could not resolve '{h}' for egress policy: {e}")
-                        }
-                    }
-                }
-            }
-        }
-
-        let manager = AgentManager::for_vm_with_sizes(&name, record.storage_gb, record.overlay_gb)?;
-
-        println!("Starting machine '{}'...", name);
-
-        let mut features = smolvm::agent::LaunchFeatures {
-            external_interceptor: interceptor,
-            ssh_agent_socket: if record.ssh_agent {
-                Some(std::path::PathBuf::from(
-                    std::env::var("SSH_AUTH_SOCK")
-                        .map_err(|_| anyhow::anyhow!("SSH_AUTH_SOCK not set"))?,
-                ))
-            } else {
-                None
+            proxy.as_deref(),
+            no_proxy.as_deref(),
+            false,
+            fork,
+            smolvm::cli::vm_common::StartOptions {
+                external_interceptor: interceptor,
+                ..Default::default()
             },
-            dns_filter_hosts: record.dns_filter_hosts.clone(),
-            ..Default::default()
-        }
-        // For a machine created with `--from`, use the .smolmachine's
-        // pre-extracted layers instead of pulling. No-op when unset.
-        .with_packed_layers(
-            &smolvm::agent::machine_layers_cache_dir(&name),
-            record.source_smolmachine.as_deref(),
         )?;
-        // A host-fetched registry image (pinned above) or a locally sourced one
-        // persists as a `local:…` ref whose layers live on the host; point the
-        // launcher at them so the guest assembles its rootfs from the virtiofs
-        // mount instead of pulling, as the engine's `machine start` does.
-        if features.packed_layers_dir.is_none() {
-            if let Some(dir) = record
-                .image
-                .as_deref()
-                .and_then(smolvm::data::image_source::packed_layers_dir_for_ref)
-            {
-                features.packed_layers_dir = Some(dir);
-            }
-        }
-
-        // Fork base: memfd-back guest RAM + expose a control socket so `smol machine fork`
-        // can later freeze it as a CoW base. These MUST go on the launch features
-        // — the manager forwards SMOLVM_FORKABLE / SMOLVM_CONTROL_SOCKET to the
-        // boot subprocess from `features`, not from a (non-inherited) process env.
-        if self.forkable {
-            features.forkable = true;
-            features.control_socket = Some(smolvm::agent::fork::control_socket_path(&name));
-        }
-
-        // `smol` sets SMOLVM_BOOT_BINARY (its own exe can't serve `_boot-vm`), but
-        // `start` DETACHES the machine to persist after we exit. Opt out of the
-        // boot subprocess's parent-death watchdog, or the VM would die the moment
-        // this command returns (and `smol machine exec`/`fork` would then fail).
-        features.watch_parent = Some(false);
-
-        manager.ensure_running_with_full_config(mounts, ports, resources, features)?;
-
-        let pid = manager.child_pid();
-
-        // Run init commands with a per-command timeout. Init sees the record's
-        // env plus its resolved secrets (resolved once, host-side; never stored).
-        const INIT_TIMEOUT_SECS: u64 = 120;
-        if !record.init.is_empty() {
-            let mut init_env = record.env.clone();
-            init_env.extend(super::common::resolve_record_secrets(&record.secret_refs)?);
-            println!("Running {} init command(s)...", record.init.len());
-            for (i, cmd) in record.init.iter().enumerate() {
-                // Fresh connection per command — thread takes ownership and we reconnect each time.
-                let mut client = smolvm::AgentClient::connect_with_retry(manager.vsock_socket())?;
-                let argv = vec!["sh".into(), "-c".into(), cmd.clone()];
-                let env = init_env.clone();
-                let workdir = record.workdir.clone();
-                let (tx, rx) = std::sync::mpsc::channel();
-
-                // Run exec on a separate thread so we can enforce a timeout.
-                let cmd_clone = cmd.clone();
-                std::thread::spawn(move || {
-                    let result = client.vm_exec(argv, env, workdir, None, None);
-                    // Ignore send error — receiver may have timed out.
-                    let _ = tx.send(result);
-                });
-
-                let result = rx
-                    .recv_timeout(std::time::Duration::from_secs(INIT_TIMEOUT_SECS))
-                    .map_err(|_| {
-                        if let Err(e) = manager.stop() {
-                            eprintln!("Warning: failed to stop machine after init timeout: {}", e);
-                        }
-                        anyhow::anyhow!(
-                            "init[{}] timed out after {}s: {:?}",
-                            i,
-                            INIT_TIMEOUT_SECS,
-                            cmd_clone
-                        )
-                    })?
-                    .inspect_err(|_| {
-                        if let Err(stop_err) = manager.stop() {
-                            eprintln!(
-                                "Warning: failed to stop machine after init error: {}",
-                                stop_err
-                            );
-                        }
-                    })?;
-
-                let (exit_code, _stdout, stderr) = result;
-                if exit_code != 0 {
-                    if let Err(e) = manager.stop() {
-                        eprintln!("Warning: failed to stop machine after init failure: {}", e);
-                    }
-                    let stderr_str = String::from_utf8_lossy(&stderr);
-                    anyhow::bail!(
-                        "init[{}] failed (exit {}): {}",
-                        i,
-                        exit_code,
-                        stderr_str.trim()
-                    );
-                }
-            }
-        }
-
-        // Pull image if configured — unless its layers are already on the host:
-        // a machine created `--from` a .smolmachine has them extracted, and an
-        // image the host fetched above is a `local:` ref the guest reads offline.
-        let image_is_local = record
-            .image
-            .as_deref()
-            .is_some_and(smolvm::data::image_source::is_local_ref);
-        if record.source_smolmachine.is_none() && !image_is_local {
-            if let Some(ref image) = record.image {
-                let mut client = smolvm::AgentClient::connect_with_retry(manager.vsock_socket())?;
-                println!("Pulling {}...", image);
-                client.pull_with_registry_config(image)?;
-            }
-        }
-
-        // Launch the machine's workload, mirroring the engine's `machine start`:
-        // an image machine runs its (entrypoint, cmd) as a detached container
-        // (empty command → the agent resolves the image's own ENTRYPOINT+CMD);
-        // a bare machine execs it directly. Without this, a golden created with
-        // `smol machine create ... -- <workload>` silently never ran it — which
-        // also left CUDA fork goldens with nothing to fork.
-        {
-            let mut exec_env = record.env.clone();
-            exec_env.extend(super::common::resolve_record_secrets(&record.secret_refs)?);
-            let mut cmd = record.entrypoint.clone();
-            cmd.extend(record.cmd.clone());
-            if record.image.is_some() {
-                let mut client = smolvm::AgentClient::connect_with_retry(manager.vsock_socket())?;
-                if let Err(e) =
-                    smolvm::workload::launch_image_workload(&mut client, &name, &record, exec_env)
-                {
-                    if let Err(stop_err) = manager.stop() {
-                        eprintln!(
-                            "Warning: failed to stop machine after workload launch failure: {}",
-                            stop_err
-                        );
-                    }
-                    anyhow::bail!("start workload: {}", e);
-                }
-            } else if !cmd.is_empty() {
-                let mut client = smolvm::AgentClient::connect_with_retry(manager.vsock_socket())?;
-                let (exit_code, _stdout, stderr) =
-                    client.vm_exec(cmd, exec_env, record.workdir.clone(), None, None)?;
-                if exit_code != 0 {
-                    eprintln!(
-                        "workload exited with code {}: {}",
-                        exit_code,
-                        String::from_utf8_lossy(&stderr).trim()
-                    );
-                }
-            }
-        }
-
-        println!("Machine '{}' running (PID: {})", name, pid.unwrap_or(0));
-
-        // Persist running state
-        let pid_start_time = pid.and_then(smolvm::process::process_start_time);
-        if let Err(e) = db.update_vm(&name, |r| {
-            r.state = RecordState::Running;
-            r.pid = pid;
-            r.pid_start_time = pid_start_time;
-        }) {
-            eprintln!("Warning: failed to persist VM state: {}", e);
-        }
-
-        manager.detach();
         Ok(())
     }
 
