@@ -5,8 +5,10 @@ only when `verifiers` is installed (otherwise the stub-raises path is verified),
 so this passes on a stock runner without verifiers.
 """
 
+import asyncio
 import os
 import sys
+from types import SimpleNamespace
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "python"))
 
@@ -63,6 +65,24 @@ def main() -> int:
         check("constructs and carries config", rt.config.image == "python:3.12-slim" and rt.config.golden == "mach-abc")
         check("info reflects the config", rt.info.image == "python:3.12-slim")
         check("is a remote runtime", rt.is_local is False)
+
+        class _Machine:
+            async def exec(self, argv, opts):
+                self.env = opts.env
+                return SimpleNamespace(exit_code=0, stdout="", stderr="")
+
+            async def read_file(self, path):
+                return b"data:" + path.encode()
+
+        rt._machine = machine = _Machine()
+        check("read returns the machine's file", asyncio.run(rt.read("/f")) == b"data:/f")
+        # verifiers 0.3.1+ sets the task's env on the runtime, not on each run call.
+        expected = {"CALL": "2"}
+        if hasattr(rt, "process_env"):
+            rt.env = {"TASK": "1"}
+            expected = {"TASK": "1", "CALL": "2"}
+        asyncio.run(rt.run(["true"], {"CALL": "2"}))
+        check("run passes the task and call env", machine.env == expected, f"{machine.env}")
     else:
         print("  (verifiers not installed — Runtime-subclass checks skipped)")
         check(

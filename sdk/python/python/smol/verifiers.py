@@ -135,15 +135,26 @@ if _HAS_VERIFIERS:
 
         async def run(self, argv: list[str], env: dict[str, str]) -> "ProgramResult":
             assert self._machine is not None, "runtime not started"
+            if hasattr(self, "process_env"):
+                # verifiers 0.3.1+ keeps the task's env on the runtime; merge it in.
+                env = self.process_env(env or {})
             r = await self._machine.exec(
                 list(argv),
                 ExecOptions(env=dict(env or {}), workdir=self.config.workdir),
             )
             return ProgramResult(exit_code=r.exit_code, stdout=r.stdout, stderr=r.stderr)
 
-        async def read(self, path: str) -> bytes:
+        async def _read(self, path: str, max_bytes: int | None = None) -> bytes:
+            if max_bytes is not None:
+                # verifiers 0.4 caps a read inside the machine, through `run`.
+                return await super()._read(path, max_bytes)
             assert self._machine is not None, "runtime not started"
             return await self._machine.read_file(path)
+
+        if "read" in Runtime.__abstractmethods__:
+            # verifiers 0.2.x has no `_read`: its abstract `read` is the contract.
+            async def read(self, path: str) -> bytes:
+                return await self._read(path)
 
         async def write(self, path: str, data: bytes) -> None:
             assert self._machine is not None, "runtime not started"
