@@ -368,7 +368,7 @@ export interface ListOptions {
   labels?: Record<string, string>;
 }
 
-/** An outbound network policy that can replace a stopped machine's own.
+/** An outbound network policy, for `Machine.setNetworkPolicy` and restores.
  *  `allowHosts` entries are exact host names (`api.github.com`) or subdomain
  *  wildcards (`*.github.com`, which does not match `github.com` itself). An
  *  allow list that names no hosts and no CIDRs allows nothing. */

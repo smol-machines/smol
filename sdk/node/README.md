@@ -307,8 +307,10 @@ const session = await Machine.restoreCheckpoint('prepared.smolcheckpoint', 'sess
 
 - `allowHosts` entries are exact names or `*.` subdomain wildcards, which don't
   match the bare domain.
-- A stopped machine's policy can be replaced with
-  `machine.setNetworkPolicy(policy)`.
+- An existing machine's policy can be replaced with
+  `machine.setNetworkPolicy(policy)`. Locally the machine must be stopped. On
+  the cloud a running machine takes a new allow list at once; switching it to
+  or from `'allow-all'` needs it stopped first.
 - The prepared machine must use `networkBackend: 'virtio-net'`, which enforces
   allow lists on the host. A restored machine keeps its checkpoint's backend, so
   an allow list on a TSI checkpoint is refused rather than left unenforced.

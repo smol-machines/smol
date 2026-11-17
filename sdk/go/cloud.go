@@ -832,8 +832,16 @@ func (t *cloudTransport) sync(context.Context) error {
 	return notSupported("Sync is local-only because cloud machines cannot carry host-directory mounts.")
 }
 
-func (t *cloudTransport) setNetworkPolicy(context.Context, NetworkPolicy) error {
-	return notSupported("SetNetworkPolicy is local-only.")
+// setNetworkPolicy replaces the machine's egress policy. A running machine takes
+// a new allow list at once; switching it to or from allow-all needs it stopped
+// first (409). Deny-all on a machine that has run leaves it loopback only.
+func (t *cloudTransport) setNetworkPolicy(ctx context.Context, p NetworkPolicy) error {
+	n, err := cloudNetwork(p)
+	if err != nil {
+		return err
+	}
+	_, err = cloudDo(ctx, t.conn, "PUT", t.path("/network"), fetchOpts{json: map[string]any{"network": n}})
+	return err
 }
 
 func (t *cloudTransport) stop(ctx context.Context) error {

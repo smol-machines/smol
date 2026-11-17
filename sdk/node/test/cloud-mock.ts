@@ -395,6 +395,10 @@ const server = createServer(async (req, res) => {
   }
   if (method === "GET" && url === "/v1/machines/m1")
     return json(200, { ...readinessResponse("m1", 2), ports: m1Ports });
+  if (method === "PUT" && url === "/v1/machines/m1/network") {
+    seen.networkBodies = [...(seen.networkBodies ?? []), JSON.parse((await readBody(req)).toString() || "{}")];
+    return json(200, { id: "m1", name: "golden", state: "started", network: seen.networkBodies.at(-1).network });
+  }
   if (method === "PUT" && url === "/v1/machines/m1/ports") {
     seen.portsBodies = [...(seen.portsBodies ?? []), JSON.parse((await readBody(req)).toString() || "{}")];
     const asked: { port: number }[] = seen.portsBodies.at(-1).ports;
@@ -1050,6 +1054,19 @@ async function main(): Promise<void> {
     JSON.stringify(seen.portsBodies?.at(-1)) === JSON.stringify({ ports: [{ port: 8080 }] }),
     JSON.stringify(seen.portsBodies?.at(-1)),
   );
+
+  // --- network policy: replace what an existing machine may reach ---
+  await m.setNetworkPolicy({ allowHosts: ["api.github.com"], allowCidrs: ["10.0.0.0/8"] });
+  check(
+    "setNetworkPolicy sends an allow list to PUT /network",
+    JSON.stringify(seen.networkBodies?.at(-1)) ===
+      JSON.stringify({ network: { mode: "allowCidrs", cidrs: ["10.0.0.0/8"], hosts: ["api.github.com"] } }),
+    JSON.stringify(seen.networkBodies),
+  );
+  await m.setNetworkPolicy("allow-all");
+  check("allow-all is the open mode", JSON.stringify(seen.networkBodies?.at(-1)) === JSON.stringify({ network: { mode: "open" } }));
+  await m.setNetworkPolicy("deny-all");
+  check("deny-all is the blocked mode", JSON.stringify(seen.networkBodies?.at(-1)) === JSON.stringify({ network: { mode: "blocked" } }));
 
   // --- branch batch: fan out N children in one transactional call ---
   const batch = await m.branchBatch({ count: 3, namePrefix: "rollout" });

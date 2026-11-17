@@ -464,6 +464,70 @@ server.registerTool(
 );
 
 server.registerTool(
+  "smol_set_network",
+  {
+    title: "Set a machine's network policy",
+    description:
+      "Change what an existing machine may reach outbound, without creating a new one. `allow-all` opens egress, `deny-all` blocks everything but loopback, and an allow list limits it to `allowHosts` (exact names, or `*.domain` for subdomains only) and `allowCidrs`. On the cloud a running machine takes a new allow list at once; switching it to or from allow-all needs it stopped first. Locally the machine must be stopped.",
+    inputSchema: {
+      machine: z.string(),
+      policy: z.union([
+        z.enum(["allow-all", "deny-all"]),
+        z.object({
+          allowHosts: z.array(z.string()).optional(),
+          allowCidrs: z.array(z.string()).optional(),
+        }),
+      ]),
+    },
+  },
+  async (args) => {
+    try {
+      const m = await machine(args.machine);
+      await m.setNetworkPolicy(args.policy);
+      return text({ machine: args.machine, network: args.policy });
+    } catch (error) {
+      return failure(error);
+    }
+  },
+);
+
+server.registerTool(
+  "smol_publish_port",
+  {
+    title: "Publish a port",
+    description:
+      "Expose a guest TCP port of an existing machine, running or stopped, without creating a new one or restarting it. Returns the mapping in effect; on the cloud the machine's node picks the host port, and the port is reached through the machine's URL.",
+    inputSchema: { machine: z.string(), guest: z.number().int().min(1).max(65535) },
+  },
+  async (args) => {
+    try {
+      const m = await machine(args.machine);
+      return text(await m.publish({ guest: args.guest }));
+    } catch (error) {
+      return failure(error);
+    }
+  },
+);
+
+server.registerTool(
+  "smol_unpublish_port",
+  {
+    title: "Unpublish a port",
+    description: "Stop exposing a guest TCP port of an existing machine. Connections already open carry on.",
+    inputSchema: { machine: z.string(), guest: z.number().int().min(1).max(65535) },
+  },
+  async (args) => {
+    try {
+      const m = await machine(args.machine);
+      await m.unpublish({ guest: args.guest });
+      return text({ machine: args.machine, ports: await m.ports() });
+    } catch (error) {
+      return failure(error);
+    }
+  },
+);
+
+server.registerTool(
   "smol_delete",
   {
     title: "Delete a machine",

@@ -909,6 +909,26 @@ impl Machine {
             .map_err(err)
     }
 
+    /// Replace this stopped machine's outbound network policy: networking off,
+    /// or on with an allow list of `cidrs` and `hosts` (both empty allows any
+    /// host).
+    fn set_egress_policy(
+        &self,
+        py: Python<'_>,
+        network: bool,
+        cidrs: Vec<String>,
+        hosts: Vec<String>,
+    ) -> PyResult<()> {
+        let runtime = runtime().map_err(err)?;
+        let policy = smolvm::data::network::EgressPolicy {
+            network,
+            cidrs,
+            hosts,
+        };
+        py.allow_threads(|| runtime.set_egress_policy(&self.name, &policy))
+            .map_err(err)
+    }
+
     /// Publish a new loopback TCP listener with no free-port probe/rebind gap.
     fn publish_atomic(&self, py: Python<'_>, guest: u16) -> PyResult<u16> {
         let runtime = runtime().map_err(err)?;

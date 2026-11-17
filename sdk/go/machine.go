@@ -197,9 +197,11 @@ func (m *Machine) ListImages(ctx context.Context) ([]ImageInfo, error) { return 
 // Sync copies staged mounts back to their host directories without stopping.
 func (m *Machine) Sync(ctx context.Context) error { return m.t.sync(ctx) }
 
-// SetNetworkPolicy replaces this stopped machine's outbound network policy. A
-// machine that resumes saved memory keeps its network backend, so a policy
-// needing a different one is refused. Local only.
+// SetNetworkPolicy replaces this machine's outbound network policy. Locally the
+// machine must be stopped, and one that resumes saved memory keeps its network
+// backend, so a policy needing a different one is refused. On the cloud a
+// running machine takes a new allow list at once; switching it to or from
+// allow-all needs it stopped first.
 func (m *Machine) SetNetworkPolicy(ctx context.Context, policy NetworkPolicy) error {
 	return m.t.setNetworkPolicy(ctx, policy)
 }

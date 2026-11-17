@@ -2122,8 +2122,13 @@ class CloudTransport implements Transport {
     throw new NotSupportedError("pack() is local-only; use checkpoint() on the cloud.");
   }
 
-  async setNetworkPolicy(): Promise<void> {
-    throw new NotSupportedError("setNetworkPolicy() is local-only.");
+  async setNetworkPolicy(policy: NetworkPolicy): Promise<void> {
+    // A running machine takes a new allow list at once; switching it to or from
+    // "allow-all" needs it stopped first (409). "deny-all" on a machine that
+    // has run leaves it loopback only.
+    await cloudFetch<MachineInfo>(this.conn, "PUT", `/v1/machines/${this.id}/network`, {
+      json: { network: cloudNetwork(policy) },
+    });
   }
 
   async stop(opts?: StopOptions): Promise<void> {

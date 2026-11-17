@@ -32,7 +32,8 @@ import urllib.parse
 import urllib.request
 import weakref
 from concurrent.futures import ThreadPoolExecutor
-from typing import Any, Callable, Iterable, Iterator, Optional, Protocol
+from collections.abc import Mapping, Sequence
+from typing import Any, Callable, Iterable, Iterator, Optional, Protocol, Union
 from urllib.parse import quote
 
 from .errors import InvalidConfigError, NotSupportedError, SmolError, wrap_native_error
@@ -161,6 +162,7 @@ class Transport(Protocol):
     def stop(self, drain_secs: Optional[float] = None, timeout_secs: Optional[float] = None) -> None: ...
     def ports(self) -> "list[PublishedPort]": ...
     def set_ports(self, ports: "list[PublishedPort]") -> None: ...
+    def set_network_policy(self, policy: "NetworkPolicy") -> None: ...
     def pack(self, output: str) -> str: ...
     def pause(self) -> None: ...
     def resume(self, wait_until_ready: bool = True) -> None: ...
@@ -884,6 +886,15 @@ class LocalTransport:
         except Exception as e:  # noqa: BLE001
             raise wrap_native_error(e) from e
 
+    def set_network_policy(self, policy: "NetworkPolicy") -> None:
+        network, cidrs, hosts = egress_policy(policy)
+        try:
+            self._inner.set_egress_policy(network, cidrs, hosts)
+        except AttributeError:
+            raise NotSupportedError("reinstall a smolmachines wheel with set_network_policy") from None
+        except Exception as e:  # noqa: BLE001
+            raise wrap_native_error(e) from e
+
     def pack(self, output: str) -> str:
         try:
             return self._inner.pack(os.path.abspath(output))
@@ -1542,6 +1553,18 @@ class CloudTransport:
             "PUT",
             f"/v1/machines/{self._id}/ports",
             json_body={"ports": [{"port": g} for g in guests]},
+        )
+
+    def set_network_policy(self, policy: "NetworkPolicy") -> None:
+        # A running machine takes a new allow list at once; switching it to or
+        # from "allow-all" needs it stopped first (409). "deny-all" on a machine
+        # that has run leaves it loopback only.
+        _cloud_fetch(
+            self._base,
+            self._key,
+            "PUT",
+            f"/v1/machines/{self._id}/network",
+            json_body={"network": cloud_network(policy)},
         )
 
     def pack(self, output: str) -> str:
@@ -3447,3 +3470,47 @@ def _generate_name() -> str:
     import secrets
 
     return f"smol-{secrets.token_hex(4)}"
+
+
+# An outbound network policy: "allow-all", "deny-all", or a mapping with
+# "allow_hosts" (exact names, or "*.domain" for subdomains only) and
+# "allow_cidrs". An allow list that names nothing allows nothing.
+NetworkPolicy = Union[str, Mapping[str, Sequence[str]]]
+
+
+def _allow_lists(policy: Any) -> "tuple[list[str], list[str]]":
+    if not isinstance(policy, Mapping):
+        raise InvalidConfigError(
+            'network policy must be "allow-all", "deny-all" or {"allow_hosts": [...], "allow_cidrs": [...]}'
+        )
+    unknown = set(policy) - {"allow_hosts", "allow_cidrs"}
+    if unknown:
+        raise InvalidConfigError(f"unknown network policy keys: {sorted(unknown)}")
+    return list(policy.get("allow_cidrs") or []), list(policy.get("allow_hosts") or [])
+
+
+def egress_policy(policy: Any) -> "tuple[bool, list[str], list[str]]":
+    """The local engine's form of a network policy: (network, cidrs, hosts)."""
+    if policy == "allow-all":
+        return True, [], []
+    # Loopback only keeps the network device a checkpointed machine expects,
+    # unlike turning networking off.
+    if policy == "deny-all":
+        return True, ["127.0.0.0/8", "::1/128"], []
+    cidrs, hosts = _allow_lists(policy)
+    if not cidrs and not hosts:
+        return egress_policy("deny-all")
+    return True, cidrs, hosts
+
+
+def cloud_network(policy: Any) -> "dict[str, Any]":
+    """The cloud API's form of a network policy."""
+    if policy == "allow-all":
+        return {"mode": "open"}
+    if policy == "deny-all":
+        return {"mode": "blocked"}
+    cidrs, hosts = _allow_lists(policy)
+    if not cidrs and not hosts:
+        return {"mode": "blocked"}
+    return {"mode": "allowCidrs", "cidrs": cidrs, "hosts": hosts}
+
