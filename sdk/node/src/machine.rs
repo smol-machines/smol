@@ -1037,6 +1037,7 @@ fn create_spec(
         gpu_vram_mib,
         disk_durability,
         cuda,
+        rosetta,
         network_backend,
     } = resources;
     let (credentials, credential_values) = credential_policy(credentials.unwrap_or_default());
@@ -1065,6 +1066,7 @@ fn create_spec(
         gpu: gpu.unwrap_or(false),
         gpu_vram_mib,
         cuda: cuda.unwrap_or(false),
+        rosetta: rosetta.unwrap_or(false),
         forkable: forkable.unwrap_or(false),
         ephemeral: !persistent.unwrap_or(false),
         detached: detached.unwrap_or(false),

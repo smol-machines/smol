@@ -492,6 +492,7 @@ export function toNativeConfig(
             gpuVramMib: config.resources?.gpuVramMib,
             diskDurability: config.resources?.diskDurability,
             cuda: config.resources?.cuda,
+            rosetta: config.resources?.rosetta,
             networkBackend: config.resources?.networkBackend,
           }
         : undefined,

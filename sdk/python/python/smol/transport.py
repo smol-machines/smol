@@ -553,6 +553,8 @@ def _native_config(name: str, config: MachineConfig) -> dict:
                 res["disk_durability"] = r.disk_durability
             if r.cuda is not None:
                 res["cuda"] = r.cuda
+            if r.rosetta is not None:
+                res["rosetta"] = r.rosetta
         cfg["resources"] = res
     return cfg
 

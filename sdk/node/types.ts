@@ -58,6 +58,11 @@ export interface ResourceSpec {
    * backend. Local target only. Default: false.
    */
   cuda?: boolean;
+  /**
+   * Run x86_64 binaries through Rosetta 2 on Apple Silicon, and pull the image
+   * for `linux/amd64`. Local target only. Default: false.
+   */
+  rosetta?: boolean;
   /** Network backend: `"tsi"` (outbound-only; the default for plain network
    *  access) or `"virtio-net"` (the default when a port, allow list or
    *  credential needs it). Choose `"virtio-net"` for a machine you will

@@ -595,6 +595,11 @@ fn create_spec_from_config(
                     spec.cuda = v.extract()?;
                 }
             }
+            if let Some(v) = rd.get_item("rosetta")? {
+                if !v.is_none() {
+                    spec.rosetta = v.extract()?;
+                }
+            }
         }
     }
     // Map the Python `mounts` list (dicts of {source, target, read_only, staged})

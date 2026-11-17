@@ -264,6 +264,9 @@ pub struct VmResourcesConfig {
     /// remoting CUDA calls over vsock (distinct from `gpu`, which is Vulkan; no
     /// CUDA toolkit needed in the image). Local target only (default: false).
     pub cuda: Option<bool>,
+    /// Run x86_64 binaries through Rosetta 2 on Apple Silicon, and pull the image
+    /// for `linux/amd64`. Local target only (default: false).
+    pub rosetta: Option<bool>,
     /// Network backend: `"tsi"` (outbound-only, the default for plain network
     /// access) or `"virtio-net"`. A machine that will be checkpointed and have
     /// its egress policy changed later needs virtio-net, since the policy is

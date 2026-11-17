@@ -50,6 +50,7 @@ export interface NativeResources {
   gpuVramMib?: number | undefined;
   diskDurability?: "full" | "deferred" | undefined;
   cuda?: boolean | undefined;
+  rosetta?: boolean | undefined;
   networkBackend?: string | undefined;
 }
 
