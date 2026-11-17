@@ -304,6 +304,7 @@ struct ResourcesConfig {
     gpu: Option<bool>,
     gpu_vram_mib: Option<u32>,
     cuda: Option<bool>,
+    rosetta: Option<bool>,
     network_backend: Option<String>,
     disk_durability: Option<String>,
 }
@@ -500,6 +501,7 @@ fn vm_resources(r: &ResourcesConfig) -> Result<VmResources, CallError> {
         gpu: r.gpu.unwrap_or(false),
         gpu_vram_mib: r.gpu_vram_mib,
         cuda: r.cuda.unwrap_or(false),
+        rosetta: r.rosetta.unwrap_or(false),
         ..Default::default()
     })
 }
@@ -711,6 +713,11 @@ fn create(c: MachineConfig) -> CallResult {
         ..Default::default()
     };
     let env = c.env.into_iter().map(|v| (v.key, v.value)).collect();
+    crate::rosetta_pull::refuse_rosetta_host_fetch(
+        &spec.name,
+        spec.image.as_deref(),
+        &spec.to_create_spec(),
+    )?;
     rt()?.create_machine_with_workload(spec, env, c.workdir, c.user)?;
     Ok(Value::Null)
 }
