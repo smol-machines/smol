@@ -64,7 +64,7 @@ pub struct ExecCmd {
     pub workdir: Option<String>,
 
     /// Run as this user (a name from the image or a numeric `uid[:gid]`),
-    /// overriding the image's USER.
+    /// overriding the machine's configured user or the image's USER.
     #[arg(short = 'u', long, value_name = "USER")]
     pub user: Option<String>,
 
@@ -175,6 +175,13 @@ impl ExecCmd {
         let record = SmolvmDb::open()
             .ok()
             .and_then(|db| db.get_vm(&name).ok().flatten());
+        // Keep the machine's identity for every execution mode. Passing None
+        // here would revert a configured user to the image's USER (often root)
+        // and could also change the persistent overlay's upload ownership.
+        let user = self
+            .user
+            .clone()
+            .or_else(|| record.as_ref().and_then(|r| r.user.clone()));
 
         let mut env = smolvm::util::parse_env_list(&self.env);
         // Machine's stored secrets first, then per-exec --secret-env/--secret-file.
@@ -245,7 +252,7 @@ impl ExecCmd {
                 let config = RunConfig::new(image, command.clone())
                     .with_env(env)
                     .with_workdir(self.workdir.clone())
-                    .with_user(self.user.clone())
+                    .with_user(user.clone())
                     .with_timeout(timeout)
                     .with_mounts(mount_bindings.clone())
                     .with_persistent_overlay(Some(overlay_owner.clone()));
@@ -269,7 +276,7 @@ impl ExecCmd {
                 let config = RunConfig::new(image, command.clone())
                     .with_env(env)
                     .with_workdir(self.workdir.clone())
-                    .with_user(self.user.clone())
+                    .with_user(user.clone())
                     .with_timeout(timeout)
                     .with_tty(self.tty)
                     .with_mounts(mount_bindings.clone())
@@ -282,7 +289,7 @@ impl ExecCmd {
             let config = RunConfig::new(image, command.clone())
                 .with_env(env)
                 .with_workdir(self.workdir.clone())
-                .with_user(self.user.clone())
+                .with_user(user)
                 .with_timeout(timeout)
                 .with_mounts(mount_bindings)
                 .with_persistent_overlay(Some(overlay_owner));
