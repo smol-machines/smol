@@ -44,6 +44,8 @@ no local virtualization is needed.
 | `smol_read_file`, `smol_write_file` | Move text in and out of a machine. |
 | `smol_export` | Copy a directory from a machine to the host, for results you decided to keep. |
 | `smol_list` | List machines and their states. |
+| `smol_set_network` | Change what an existing machine may reach outbound: `allow-all`, `deny-all`, or an allow list of hosts and CIDRs. |
+| `smol_publish_port`, `smol_unpublish_port` | Expose or stop exposing a guest TCP port of an existing machine, without restarting it. |
 
 ## The flow an agent follows
 

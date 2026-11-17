@@ -418,6 +418,11 @@ class Handler(BaseHTTPRequestHandler):
         if self.path.startswith(f"/v1/machines/{MACHINE_ID}/files/"):
             captured["file"] = self._read()
             return self._send(200, b"{}")
+        if self.path == f"/v1/machines/{MACHINE_ID}/network":
+            asked = json.loads(self._read() or b"{}")
+            captured.setdefault("network_bodies", []).append(asked)
+            return self._send(200, json.dumps({"id": MACHINE_ID, "state": "started",
+                                               "network": asked}).encode())
         if self.path == f"/v1/machines/{MACHINE_ID}/ports":
             asked = json.loads(self._read() or b"{}")
             captured.setdefault("ports_bodies", []).append(asked)
@@ -655,6 +660,24 @@ def main() -> int:
         m.unpublish(guest=3000)
         check("unpublish sends the remaining set",
               captured["ports_bodies"][-1] == {"ports": [{"port": 8080}]}, str(captured["ports_bodies"][-1]))
+
+        # --- network policy: replace what an existing machine may reach ---
+        m.set_network_policy({"allow_hosts": ["api.github.com"], "allow_cidrs": ["10.0.0.0/8"]})
+        check("set_network_policy sends an allow list to PUT /network",
+              captured["network_bodies"][-1] == {"mode": "allowCidrs", "cidrs": ["10.0.0.0/8"], "hosts": ["api.github.com"]},
+              str(captured.get("network_bodies")))
+        m.set_network_policy("allow-all")
+        check("allow-all is the open mode", captured["network_bodies"][-1] == {"mode": "open"})
+        m.set_network_policy("deny-all")
+        check("deny-all is the blocked mode", captured["network_bodies"][-1] == {"mode": "blocked"})
+        m.set_network_policy({"allow_hosts": []})
+        check("an allow list that names nothing allows nothing",
+              captured["network_bodies"][-1] == {"mode": "blocked"})
+        try:
+            m.set_network_policy({"allowHosts": ["x.com"]})
+            check("set_network_policy refuses unknown keys", False, "did not raise")
+        except SmolError:
+            check("set_network_policy refuses unknown keys", True)
 
         # --- port links: a login-free URL per published port ---
         links = m.port_links()

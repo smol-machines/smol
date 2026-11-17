@@ -455,9 +455,12 @@ export class Machine {
     return this.transport.sync();
   }
 
-  /** Replace this stopped machine's outbound network policy. A machine that
-   *  resumes saved memory (restored or paused) keeps its network backend, so a
-   *  policy that would need a different one is refused. (local) */
+  /** Replace this machine's outbound network policy (what it may reach).
+   *  Locally the machine must be stopped, and one that resumes saved memory
+   *  (restored or paused) keeps its network backend, so a policy that would
+   *  need a different one is refused. On the cloud a running machine takes a
+   *  new allow list at once; switching it to or from `"allow-all"` needs it
+   *  stopped first, and `"deny-all"` is refused once the machine has run. */
   setNetworkPolicy(policy: NetworkPolicy): Promise<void> {
     return this.transport.setNetworkPolicy(policy);
   }

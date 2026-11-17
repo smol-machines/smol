@@ -438,6 +438,21 @@ class Machine:
         finish; new ones are refused while the stop runs. (options: local)"""
         self._t.stop(drain_secs, timeout_secs)
 
+    def set_network_policy(self, policy: Any) -> None:
+        """Replace this machine's outbound network policy (what it may reach):
+        ``"allow-all"``, ``"deny-all"``, or ``{"allow_hosts": [...],
+        "allow_cidrs": [...]}``. Host names are exact (``api.github.com``) or
+        ``*.domain`` for subdomains only; an allow list that names nothing
+        allows nothing.
+
+        Locally the machine must be stopped. On the cloud a running machine
+        takes a new allow list at once; switching it to or from
+        ``"allow-all"`` needs it stopped first, and ``"deny-all"`` is refused
+        once the machine has run."""
+        if not hasattr(self._t, "set_network_policy"):
+            raise NotSupportedError("set_network_policy is not supported on this target")
+        self._t.set_network_policy(policy)
+
     def ports(self) -> "list[PublishedPort]":
         """The machine's published ports, whether or not it runs. On the cloud
         each host port is the node's, and a port not placed yet reports host 0."""

@@ -324,6 +324,10 @@ class AsyncMachine:
         """Stop the machine; see :meth:`Machine.stop`."""
         await asyncio.to_thread(self._m.stop, drain_secs, timeout_secs)
 
+    async def set_network_policy(self, policy: Any) -> None:
+        """Replace the machine's outbound network policy; see :meth:`Machine.set_network_policy`."""
+        await asyncio.to_thread(self._m.set_network_policy, policy)
+
     async def ports(self) -> "list[PublishedPort]":
         """The machine's published ports, whether or not it runs; see :meth:`Machine.ports`."""
         return await asyncio.to_thread(self._m.ports)

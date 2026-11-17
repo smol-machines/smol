@@ -319,8 +319,8 @@ type ListOptions struct {
 	Labels map[string]string
 }
 
-// NetworkPolicy is an outbound network policy that can replace a stopped
-// machine's own. Build one with AllowAll, DenyAll or AllowList.
+// NetworkPolicy is an outbound network policy, for Machine.SetNetworkPolicy and
+// restores. Build one with AllowAll, DenyAll or AllowList.
 type NetworkPolicy struct {
 	mode  string
 	hosts []string

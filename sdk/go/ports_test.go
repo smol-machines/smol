@@ -18,6 +18,7 @@ type portsCloud struct {
 	mu        sync.Mutex
 	ports     []int
 	puts      []map[string]any
+	networks  []string
 	linkCalls int
 	revoked   bool
 }
@@ -50,6 +51,10 @@ func (c *portsCloud) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				c.ports = append(c.ports, port)
 			}
 		}
+		reply(map[string]any{"id": "mp", "state": "started"})
+	case r.Method == "PUT" && r.URL.Path == "/v1/machines/mp/network":
+		raw, _ := io.ReadAll(r.Body)
+		c.networks = append(c.networks, string(raw))
 		reply(map[string]any{"id": "mp", "state": "started"})
 	case r.Method == "POST" && r.URL.Path == "/v1/machines/mp/port-links":
 		c.linkCalls++
@@ -139,5 +144,34 @@ func TestLocalPortLinksNotSupported(t *testing.T) {
 	}
 	if err := m.RevokePortLinks(context.Background()); !errors.Is(err, ErrNotSupported) {
 		t.Fatalf("local RevokePortLinks = %v", err)
+	}
+}
+
+// SetNetworkPolicy replaces an existing cloud machine's egress through
+// PUT /network, in the cloud's network form.
+func TestCloudSetNetworkPolicy(t *testing.T) {
+	isolateCloudEnv(t)
+	mock := &portsCloud{}
+	srv := httptest.NewServer(mock)
+	defer srv.Close()
+	ctx := context.Background()
+	m, err := Connect(ctx, "mp", &ConnectOptions{Target: TargetCloud, BaseURL: srv.URL, APIKey: "smk_test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct {
+		policy NetworkPolicy
+		want   string
+	}{
+		{AllowList([]string{"api.github.com"}, []string{"10.0.0.0/8"}), `{"cidrs":["10.0.0.0/8"],"hosts":["api.github.com"],"mode":"allowCidrs"}`},
+		{AllowAll(), `{"mode":"open"}`},
+		{DenyAll(), `{"mode":"blocked"}`},
+	} {
+		if err := m.SetNetworkPolicy(ctx, c.policy); err != nil {
+			t.Fatal(err)
+		}
+		if got := mock.networks[len(mock.networks)-1]; got != c.want {
+			t.Fatalf("PUT /network = %s, want %s", got, c.want)
+		}
 	}
 }
