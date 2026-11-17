@@ -319,6 +319,57 @@ merely reusing image layers. The initial implementation supports Linux
 single-container tasks with a published `docker_image`; Docker Compose and
 Dockerfile-only tasks fail clearly instead of silently changing semantics.
 
+### mini-swe-agent environment
+
+Run each [mini-swe-agent](https://github.com/SWE-agent/mini-swe-agent) task in
+its own machine. mini-swe-agent loads an environment by dotted path, so it needs
+no change:
+
+```bash
+pip install 'smolmachines[mini-swe-agent]'
+```
+
+```yaml
+environment:
+  environment_class: smol.mini_swe_agent.SmolEnvironment
+  image: python:3.12-slim
+  rosetta: true  # x86_64 images on Apple silicon
+```
+
+`SmolEnvironment` takes the options of mini-swe-agent's `DockerEnvironment`
+(`image`, `cwd`, `env`, `forward_env`, `timeout`, `interpreter`,
+`pull_timeout`) plus `cpus`, `memory_mb`, `network` and `rosetta`.
+
+mini-swe-agent's SWE-bench runner sets each instance's image only for its
+built-in environments, so a dotted-path environment would boot the config's one
+image for every instance. Wrap the runner to pass the instance's image:
+
+```python
+# run_swebench_smol.py
+from minisweagent.run.benchmarks import swebench
+
+get_instance_environment = swebench.get_sb_environment
+
+
+def get_sb_environment(config, instance):
+    image = swebench.get_swebench_docker_image_name(instance)
+    environment = {**config["environment"], "image": image}
+    return get_instance_environment({**config, "environment": environment}, instance)
+
+
+swebench.get_sb_environment = get_sb_environment
+swebench.app()
+```
+
+```bash
+python run_swebench_smol.py --subset lite --split dev --slice 0:5 -m <model> \
+  -c swebench.yaml -c environment.rosetta=true \
+  --environment-class smol.mini_swe_agent.SmolEnvironment
+```
+
+SWE-bench images are `linux/amd64`: `rosetta` runs them on Apple silicon, and an
+x86_64 Linux host runs them natively.
+
 ### Ray Sandboxes backend
 
 Run `ray.experimental.sandbox` (Ray 2.58+) on smol machines instead of gVisor
