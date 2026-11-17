@@ -460,7 +460,7 @@ export class Machine {
    *  (restored or paused) keeps its network backend, so a policy that would
    *  need a different one is refused. On the cloud a running machine takes a
    *  new allow list at once; switching it to or from `"allow-all"` needs it
-   *  stopped first. */
+   *  stopped first, and `"deny-all"` is refused once the machine has run. */
   setNetworkPolicy(policy: NetworkPolicy): Promise<void> {
     return this.transport.setNetworkPolicy(policy);
   }

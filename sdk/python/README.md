@@ -429,7 +429,7 @@ connections may need to reconnect. Both methods are awaitable on `AsyncMachine`.
 - `machine.pull_image(image)` / `machine.list_images()`  *(local)*
 - `machine.resize(cpus=None, memory_mb=None, storage_gb=None, overlay_gb=None)` → `MachineResources`  *(local)* — add CPUs, RAM or disk to a running machine without rebooting it; sizes are totals
 - `machine.ports()` / `machine.publish(guest, host=None, protocol="tcp")` / `machine.unpublish(guest=None, host=None)` — expose a guest port of an existing machine, running or stopped, without a restart. On the cloud the machine's node picks the host port.
-- `machine.set_network_policy(policy)` — change what an existing machine may reach outbound: `"allow-all"`, `"deny-all"`, or `{"allow_hosts": [...], "allow_cidrs": [...]}`. Locally the machine must be stopped; on the cloud a running machine takes a new allow list at once, and switching it to or from `"allow-all"` needs it stopped first.
+- `machine.set_network_policy(policy)` — change what an existing machine may reach outbound: `"allow-all"`, `"deny-all"`, or `{"allow_hosts": [...], "allow_cidrs": [...]}`. Locally the machine must be stopped; on the cloud a running machine takes a new allow list at once, switching it to or from `"allow-all"` needs it stopped first, and `"deny-all"` is refused once the machine has run.
 - `machine.stop()` / `machine.delete()` / `machine.state()`
 - Use it as a context manager to auto-`delete()` on exit.
 - Errors are typed: `SmolError` (with `.code`), `ExecutionError`,

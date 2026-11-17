@@ -201,7 +201,7 @@ func (m *Machine) Sync(ctx context.Context) error { return m.t.sync(ctx) }
 // machine must be stopped, and one that resumes saved memory keeps its network
 // backend, so a policy needing a different one is refused. On the cloud a
 // running machine takes a new allow list at once; switching it to or from
-// allow-all needs it stopped first.
+// allow-all needs it stopped first, and deny-all is refused once it has run.
 func (m *Machine) SetNetworkPolicy(ctx context.Context, policy NetworkPolicy) error {
 	return m.t.setNetworkPolicy(ctx, policy)
 }

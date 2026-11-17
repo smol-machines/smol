@@ -422,7 +422,7 @@ class Handler(BaseHTTPRequestHandler):
             asked = json.loads(self._read() or b"{}")
             captured.setdefault("network_bodies", []).append(asked)
             return self._send(200, json.dumps({"id": MACHINE_ID, "state": "started",
-                                               "network": asked.get("network")}).encode())
+                                               "network": asked}).encode())
         if self.path == f"/v1/machines/{MACHINE_ID}/ports":
             asked = json.loads(self._read() or b"{}")
             captured.setdefault("ports_bodies", []).append(asked)
@@ -664,15 +664,15 @@ def main() -> int:
         # --- network policy: replace what an existing machine may reach ---
         m.set_network_policy({"allow_hosts": ["api.github.com"], "allow_cidrs": ["10.0.0.0/8"]})
         check("set_network_policy sends an allow list to PUT /network",
-              captured["network_bodies"][-1] == {"network": {"mode": "allowCidrs", "cidrs": ["10.0.0.0/8"], "hosts": ["api.github.com"]}},
+              captured["network_bodies"][-1] == {"mode": "allowCidrs", "cidrs": ["10.0.0.0/8"], "hosts": ["api.github.com"]},
               str(captured.get("network_bodies")))
         m.set_network_policy("allow-all")
-        check("allow-all is the open mode", captured["network_bodies"][-1] == {"network": {"mode": "open"}})
+        check("allow-all is the open mode", captured["network_bodies"][-1] == {"mode": "open"})
         m.set_network_policy("deny-all")
-        check("deny-all is the blocked mode", captured["network_bodies"][-1] == {"network": {"mode": "blocked"}})
+        check("deny-all is the blocked mode", captured["network_bodies"][-1] == {"mode": "blocked"})
         m.set_network_policy({"allow_hosts": []})
         check("an allow list that names nothing allows nothing",
-              captured["network_bodies"][-1] == {"network": {"mode": "blocked"}})
+              captured["network_bodies"][-1] == {"mode": "blocked"})
         try:
             m.set_network_policy({"allowHosts": ["x.com"]})
             check("set_network_policy refuses unknown keys", False, "did not raise")

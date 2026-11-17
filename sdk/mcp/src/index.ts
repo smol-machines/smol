@@ -468,7 +468,7 @@ server.registerTool(
   {
     title: "Set a machine's network policy",
     description:
-      "Change what an existing machine may reach outbound, without creating a new one. `allow-all` opens egress, `deny-all` blocks everything but loopback, and an allow list limits it to `allowHosts` (exact names, or `*.domain` for subdomains only) and `allowCidrs`. On the cloud a running machine takes a new allow list at once; switching it to or from allow-all needs it stopped first. Locally the machine must be stopped.",
+      "Change what an existing machine may reach outbound, without creating a new one. `allow-all` opens egress, `deny-all` blocks it, and an allow list limits it to `allowHosts` (exact names, or `*.domain` for subdomains only) and `allowCidrs`. On the cloud a running machine takes a new allow list at once; switching it to or from allow-all needs it stopped first, and deny-all is refused once the machine has run (use an allow list instead). Locally the machine must be stopped.",
     inputSchema: {
       machine: z.string(),
       policy: z.union([

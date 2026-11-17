@@ -2124,10 +2124,10 @@ class CloudTransport implements Transport {
 
   async setNetworkPolicy(policy: NetworkPolicy): Promise<void> {
     // A running machine takes a new allow list at once; switching it to or from
-    // "allow-all" needs it stopped first (409). "deny-all" on a machine that
-    // has run leaves it loopback only.
+    // "allow-all" needs it stopped first (409). "deny-all" is refused on a
+    // machine that has run (422): restrict it to an allow list instead.
     await cloudFetch<MachineInfo>(this.conn, "PUT", `/v1/machines/${this.id}/network`, {
-      json: { network: cloudNetwork(policy) },
+      json: cloudNetwork(policy),
     });
   }
 

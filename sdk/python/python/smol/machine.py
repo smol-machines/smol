@@ -447,7 +447,8 @@ class Machine:
 
         Locally the machine must be stopped. On the cloud a running machine
         takes a new allow list at once; switching it to or from
-        ``"allow-all"`` needs it stopped first."""
+        ``"allow-all"`` needs it stopped first, and ``"deny-all"`` is refused
+        once the machine has run."""
         if not hasattr(self._t, "set_network_policy"):
             raise NotSupportedError("set_network_policy is not supported on this target")
         self._t.set_network_policy(policy)

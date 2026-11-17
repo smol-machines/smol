@@ -163,9 +163,9 @@ func TestCloudSetNetworkPolicy(t *testing.T) {
 		policy NetworkPolicy
 		want   string
 	}{
-		{AllowList([]string{"api.github.com"}, []string{"10.0.0.0/8"}), `{"network":{"cidrs":["10.0.0.0/8"],"hosts":["api.github.com"],"mode":"allowCidrs"}}`},
-		{AllowAll(), `{"network":{"mode":"open"}}`},
-		{DenyAll(), `{"network":{"mode":"blocked"}}`},
+		{AllowList([]string{"api.github.com"}, []string{"10.0.0.0/8"}), `{"cidrs":["10.0.0.0/8"],"hosts":["api.github.com"],"mode":"allowCidrs"}`},
+		{AllowAll(), `{"mode":"open"}`},
+		{DenyAll(), `{"mode":"blocked"}`},
 	} {
 		if err := m.SetNetworkPolicy(ctx, c.policy); err != nil {
 			t.Fatal(err)

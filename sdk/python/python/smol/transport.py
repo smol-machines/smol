@@ -1557,14 +1557,14 @@ class CloudTransport:
 
     def set_network_policy(self, policy: "NetworkPolicy") -> None:
         # A running machine takes a new allow list at once; switching it to or
-        # from "allow-all" needs it stopped first (409). "deny-all" on a machine
-        # that has run leaves it loopback only.
+        # from "allow-all" needs it stopped first (409). "deny-all" is refused on
+        # a machine that has run (422).
         _cloud_fetch(
             self._base,
             self._key,
             "PUT",
             f"/v1/machines/{self._id}/network",
-            json_body={"network": cloud_network(policy)},
+            json_body=cloud_network(policy),
         )
 
     def pack(self, output: str) -> str:

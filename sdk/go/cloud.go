@@ -834,13 +834,13 @@ func (t *cloudTransport) sync(context.Context) error {
 
 // setNetworkPolicy replaces the machine's egress policy. A running machine takes
 // a new allow list at once; switching it to or from allow-all needs it stopped
-// first (409). Deny-all on a machine that has run leaves it loopback only.
+// first (409). Deny-all is refused on a machine that has run (422).
 func (t *cloudTransport) setNetworkPolicy(ctx context.Context, p NetworkPolicy) error {
 	n, err := cloudNetwork(p)
 	if err != nil {
 		return err
 	}
-	_, err = cloudDo(ctx, t.conn, "PUT", t.path("/network"), fetchOpts{json: map[string]any{"network": n}})
+	_, err = cloudDo(ctx, t.conn, "PUT", t.path("/network"), fetchOpts{json: n})
 	return err
 }
 
