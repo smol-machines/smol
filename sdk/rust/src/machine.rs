@@ -14,6 +14,17 @@ const READY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(120);
 /// How often a restore looks.
 const READY_INTERVAL: std::time::Duration = std::time::Duration::from_secs(1);
 
+/// A private, machine-specific configuration for standard SSH clients.
+/// Pass `config` to `ssh -F` and connect to `host`. The connection starts or
+/// resumes the environment on demand without a listening host daemon.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+pub struct SshConnection {
+    /// Host alias in the generated configuration.
+    pub host: String,
+    /// Absolute path to the generated OpenSSH configuration.
+    pub config: PathBuf,
+}
+
 /// Where a machine is in its lifecycle.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
@@ -762,6 +773,15 @@ impl Machine {
     /// Where this machine runs.
     pub fn target(&self) -> Target {
         self.transport.target()
+    }
+
+    /// Prepare SSH access for an editor or another standard SSH client.
+    ///
+    /// This does not start the environment, change the user's SSH configuration,
+    /// or access their SSH agent. The client starts or resumes the machine when
+    /// it connects. Currently local-only; cloud returns `NotSupported`.
+    pub fn ssh_connection(&self) -> Result<SshConnection> {
+        self.transport.ssh_connection()
     }
 
     /// The VM process id. Always `None` for a cloud machine, whose process

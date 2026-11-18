@@ -43,6 +43,7 @@ pub mod run;
 pub mod saved_execution;
 pub mod scale;
 pub mod smolfile_mounts;
+pub mod ssh;
 pub mod start;
 pub mod status;
 pub mod stop;

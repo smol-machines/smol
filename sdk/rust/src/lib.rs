@@ -144,7 +144,8 @@ pub use exec::{ExecEvent, ExecOptions, ExecResult, ExecStream, KillHandle};
 pub use machine::{
     list_cloud_machines, BranchOptions, CacheDisk, Checkpoint, CheckpointOptions, CheckpointResult,
     CloudCheckpoint, CostBreakdown, ImageInfo, Machine, MachineResources, MachineState,
-    MachineSummary, PackOptions, PortEndpoint, Resize, ShareLink, UsageReport, UsageTotals,
+    MachineSummary, PackOptions, PortEndpoint, Resize, ShareLink, SshConnection, UsageReport,
+    UsageTotals,
 };
 pub use smol_cloud::types::{
     CacheDisk as CacheDiskInfo, CacheDiskVersion, MachineCacheDisk as CacheDiskRef,
