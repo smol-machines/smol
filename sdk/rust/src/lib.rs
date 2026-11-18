@@ -85,10 +85,12 @@
 //!
 //! # Blocking
 //!
-//! Every call blocks. The engine is synchronous, so an async caller should run
-//! these on a blocking pool, the way [`tokio::task::spawn_blocking`] does. That
-//! is exactly what the Node and Python SDKs do internally; in Rust the choice
-//! is left to you rather than made for you.
+//! Machine operations block. The engine is synchronous, so an async caller
+//! should run them on a blocking pool, the way [`tokio::task::spawn_blocking`]
+//! does. That is exactly what the Node and Python SDKs do internally; in Rust
+//! the choice is left to you rather than made for you. For gateways that already
+//! own an async runtime, [`TunnelTarget::connect`] opens a local/cloud byte
+//! stream on that runtime without a listener or an additional runtime thread.
 //!
 //! [`tokio::task::spawn_blocking`]: https://docs.rs/tokio/latest/tokio/task/fn.spawn_blocking.html
 //!
@@ -152,7 +154,7 @@ pub use smol_cloud::types::{
     PublishedCacheDisk,
 };
 pub use transport::ReadyOptions;
-pub use tunnel::Tunnel;
+pub use tunnel::{Tunnel, TunnelStream, TunnelTarget};
 
 /// The engine binary this SDK drives for local machines: the one `SMOLVM`
 /// names, else the engine inside an installed `smol` CLI of this crate's

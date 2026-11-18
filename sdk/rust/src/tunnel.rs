@@ -14,6 +14,8 @@ use tokio_tungstenite::tungstenite::{
 use crate::{Error, ErrorKind, Result};
 
 mod http;
+mod target;
+pub use target::{TunnelStream, TunnelTarget};
 
 #[derive(Clone)]
 pub(crate) enum Target {
@@ -310,81 +312,10 @@ async fn relay<S>(mut socket: S, target: Target) -> Result<()>
 where
     S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
 {
-    match target {
-        Target::Local(address) => {
-            let mut remote = tokio::time::timeout(
-                Duration::from_secs(10),
-                tokio::net::TcpStream::connect(address),
-            )
-            .await
-            .map_err(|_| connection_error())?
-            .map_err(|_| connection_error())?;
-            tokio::io::copy_bidirectional(&mut socket, &mut remote)
-                .await
-                .map_err(|_| connection_error())?;
-        }
-        Target::Cloud(request) => {
-            let tls = rustls::ClientConfig::builder_with_provider(Arc::new(
-                rustls::crypto::ring::default_provider(),
-            ))
-            .with_safe_default_protocol_versions()
-            .map_err(|_| connection_error())?
-            .with_root_certificates(rustls::RootCertStore::from_iter(
-                webpki_roots::TLS_SERVER_ROOTS.iter().cloned(),
-            ))
-            .with_no_client_auth();
-            let config = WebSocketConfig::default()
-                .max_message_size(Some(65536))
-                .max_frame_size(Some(65536))
-                .write_buffer_size(0)
-                .max_write_buffer_size(65536 + 1024);
-            let connect = tokio_tungstenite::connect_async_tls_with_config(
-                request,
-                Some(config),
-                false,
-                Some(tokio_tungstenite::Connector::Rustls(Arc::new(tls))),
-            );
-            let (ws, _) = tokio::time::timeout(Duration::from_secs(10), connect)
-                .await
-                .map_err(|_| connection_error())?
-                .map_err(|_| connection_error())?;
-            let (mut sink, mut stream) = ws.split();
-            let (mut reader, mut writer) = tokio::io::split(socket);
-            let (ping, mut pong) = mpsc::channel(1);
-            let upload = async {
-                let mut buffer = [0u8; 32768];
-                loop {
-                    let message = tokio::select! {
-                        data = reader.read(&mut buffer) => {
-                            let len = data.map_err(|_| connection_error())?;
-                            if len == 0 { return Ok(()); }
-                            Message::Binary(buffer[..len].to_vec().into())
-                        }
-                        Some(data) = pong.recv() => Message::Pong(data),
-                    };
-                    sink.send(message).await.map_err(|_| connection_error())?;
-                }
-            };
-            let download = async {
-                while let Some(message) = stream.next().await {
-                    match message.map_err(|_| connection_error())? {
-                        Message::Binary(data) => writer
-                            .write_all(&data)
-                            .await
-                            .map_err(|_| connection_error())?,
-                        Message::Ping(data) => {
-                            ping.send(data).await.map_err(|_| connection_error())?
-                        }
-                        Message::Pong(_) => {}
-                        Message::Close(_) => return Ok(()),
-                        _ => return Err(connection_error()),
-                    }
-                }
-                Ok(())
-            };
-            tokio::select! { result = upload => result, result = download => result }?;
-        }
-    }
+    let mut remote = TunnelTarget { target }.connect().await?;
+    tokio::io::copy_bidirectional(&mut socket, &mut remote)
+        .await
+        .map_err(|_| connection_error())?;
     Ok(())
 }
 
