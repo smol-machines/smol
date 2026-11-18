@@ -207,4 +207,11 @@ fn ssh_and_sftp_cold_start_the_pinned_local_environment() {
     assert_eq!(second.stdout, bytes);
     fixture.ok(&["_engine", "machine", "delete", "--name", NAME, "--force"]);
     assert!(fixture.db().unwrap().get_vm(NAME).unwrap().is_none());
+    let remaining: Vec<serde_json::Value> =
+        serde_json::from_slice(&fixture.ok(&["_engine", "machine", "ls", "--json"]).stdout)
+            .unwrap();
+    assert!(
+        remaining.is_empty(),
+        "internal setup machines were left behind: {remaining:?}"
+    );
 }

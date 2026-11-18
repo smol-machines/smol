@@ -180,6 +180,10 @@ fn init_logging(verbose: u8) {
 }
 
 fn main() {
+    if let Err(error) = smolvm::engine_cli::register(&["_engine"]) {
+        eprintln!("Engine startup failed: {error}");
+        std::process::exit(2);
+    }
     // Generated SSH clients may run outside the shell which selected the data
     // root. Restore that non-secret context before resolving any paths.
     if let Err(error) =

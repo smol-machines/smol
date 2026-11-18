@@ -91,6 +91,6 @@ impl Start {
         // The generated connection is pinned to a local identity. A public
         // machine start can follow a move to the cloud; the native engine must
         // start exactly the machine whose SSH identity was verified instead.
-        smolvm::ssh::start_owned_with_prefix(&self.name, &["_engine"])
+        smolvm::ssh::start_owned(&self.name)
     }
 }
