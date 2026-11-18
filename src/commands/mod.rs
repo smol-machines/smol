@@ -17,6 +17,7 @@ pub mod fork_batch;
 pub mod images;
 pub mod init;
 pub mod inspect;
+pub mod kubernetes;
 pub mod login;
 pub mod logout;
 pub mod logs;

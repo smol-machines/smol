@@ -475,7 +475,7 @@ impl Machine {
                 let credential_env = config.credential_env();
                 let smolfile = config.credential_smolfile();
                 let (mut args, ports) = config.into_local_args()?;
-                let cli = crate::transport::local::resolve_cli()?;
+                let cli = crate::transport::local::resolve_engine()?;
                 let smolfile = smolfile
                     .map(crate::transport::local::TempSmolfile::write)
                     .transpose()?;
@@ -580,7 +580,7 @@ impl Machine {
     /// Create a stopped local machine from a portable checkpoint on disk.
     pub fn restore_checkpoint(name: impl Into<String>, artifact: impl AsRef<Path>) -> Result<Self> {
         let name = name.into();
-        let cli = crate::transport::local::resolve_cli()?;
+        let cli = crate::transport::local::resolve_engine()?;
         let args = vec![
             "machine".to_string(),
             "create".to_string(),
