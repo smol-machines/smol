@@ -73,6 +73,13 @@ pub(crate) trait Transport: Send + Sync + std::fmt::Debug {
     /// Which target this machine lives on.
     fn target(&self) -> crate::connect::Target;
 
+    fn ssh_connection(&self) -> Result<crate::machine::SshConnection> {
+        Err(unsupported(
+            "ssh_connection()",
+            "SSH is currently available for local environments only",
+        ))
+    }
+
     fn state(&self) -> MachineState;
     fn is_running(&self) -> bool;
     fn pid(&self) -> Option<i32>;

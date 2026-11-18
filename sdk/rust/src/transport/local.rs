@@ -916,6 +916,16 @@ impl Transport for LocalTransport {
         Target::Local
     }
 
+    fn ssh_connection(&self) -> Result<crate::machine::SshConnection> {
+        let output = self.run(&["machine", "ssh-config", "--name", &self.name])?;
+        serde_json::from_slice(&output).map_err(|error| {
+            Error::new(
+                ErrorKind::Other,
+                format!("read machine SSH configuration: {error}"),
+            )
+        })
+    }
+
     fn state(&self) -> MachineState {
         match self.record() {
             Ok(row) => row
@@ -1880,6 +1890,47 @@ mod io_tests {
             ports: vec![],
             interceptor: std::sync::Mutex::new(None),
         }
+    }
+
+    #[test]
+    fn ssh_connection_uses_the_selected_bundled_engine_without_starting_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut transport = cli(
+            dir.path(),
+            r#"[ "$#" = 5 ]
+[ "$1" = _engine ]
+[ "$2" = machine ]
+[ "$3" = ssh-config ]
+[ "$4" = --name ]
+[ "$5" = 'test environment' ]
+printf '%s\n' '{"host":"test-1234.smol","config":"/private/path with spaces/config"}'"#,
+        );
+        transport.cli.bundled = true;
+        transport.name = "test environment".into();
+        let machine = crate::Machine::from_transport(Box::new(transport));
+        let connection = machine.ssh_connection().unwrap();
+        assert_eq!(connection.host, "test-1234.smol");
+        assert_eq!(
+            connection.config,
+            PathBuf::from("/private/path with spaces/config")
+        );
+    }
+
+    #[test]
+    fn ssh_connection_preserves_engine_errors_and_rejects_incomplete_output() {
+        let dir = tempfile::tempdir().unwrap();
+        let transport = cli(dir.path(), "echo 'VM not found: test' >&2; exit 1");
+        assert!(transport
+            .ssh_connection()
+            .unwrap_err()
+            .to_string()
+            .contains("VM not found"));
+        let transport = cli(dir.path(), r#"echo '{"host":"test.smol"}'"#);
+        assert!(transport
+            .ssh_connection()
+            .unwrap_err()
+            .to_string()
+            .contains("configuration"));
     }
 
     #[test]

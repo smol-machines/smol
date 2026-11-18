@@ -180,6 +180,14 @@ fn init_logging(verbose: u8) {
 }
 
 fn main() {
+    // Generated SSH clients may run outside the shell which selected the data
+    // root. Restore that non-secret context before resolving any paths.
+    if let Err(error) =
+        smolvm::ssh::apply_proxy_context(&std::env::args_os().skip(1).collect::<Vec<_>>())
+    {
+        eprintln!("SSH startup failed: {error:#}");
+        std::process::exit(2);
+    }
     // tokio-tungstenite (interactive cloud exec/shell) builds its rustls config
     // from the process-default CryptoProvider; with both ring and aws-lc-rs in
     // the tree, rustls 0.23 can't auto-pick one, so install ring explicitly.

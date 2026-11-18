@@ -45,6 +45,18 @@ pub enum MachineSubcommand {
     /// Execute a command in a running machine
     Exec(crate::commands::exec::ExecCmd),
 
+    /// Open SSH to an environment, starting it automatically when needed
+    Ssh(crate::commands::ssh::Connect),
+
+    /// Generate the SSH host and configuration path as JSON for editors and tools
+    SshConfig(crate::commands::ssh::Configure),
+
+    #[command(hide = true)]
+    SshProxy(crate::commands::ssh::Proxy),
+
+    #[command(hide = true)]
+    SshStart(crate::commands::ssh::Start),
+
     /// Open an interactive shell in a machine
     #[command(visible_alias = "sh")]
     Shell {
@@ -135,6 +147,10 @@ impl MachineCmd {
             MachineSubcommand::Ls(cmd) => cmd.run(),
             MachineSubcommand::Status(cmd) => cmd.run(),
             MachineSubcommand::Exec(cmd) => cmd.run(),
+            MachineSubcommand::Ssh(cmd) => cmd.run(),
+            MachineSubcommand::SshConfig(cmd) => cmd.run(),
+            MachineSubcommand::SshProxy(cmd) => cmd.run(),
+            MachineSubcommand::SshStart(cmd) => cmd.run(),
             MachineSubcommand::Shell { name, cloud, local } => crate::commands::exec::ExecCmd {
                 name,
                 command: vec!["/bin/sh".to_string()],
@@ -182,6 +198,34 @@ mod tests {
     struct TestCli {
         #[command(subcommand)]
         command: MachineSubcommand,
+    }
+
+    #[test]
+    fn ssh_commands_accept_machine_references_and_remote_arguments() {
+        let parsed = TestCli::parse_from([
+            "smol",
+            "ssh",
+            "--name",
+            "local/work",
+            "--",
+            "printf",
+            "%s",
+            "hello world",
+        ]);
+        let MachineSubcommand::Ssh(connect) = parsed.command else {
+            panic!("expected SSH command");
+        };
+        assert_eq!(connect.machine.name.as_deref(), Some("local/work"));
+        assert_eq!(connect.command, ["printf", "%s", "hello world"]);
+        assert!(TestCli::try_parse_from(["smol", "ssh-config", "--local", "--cloud",]).is_err());
+        assert!(matches!(
+            TestCli::parse_from(["smol", "ssh-proxy", "--context-hex", "00"]).command,
+            MachineSubcommand::SshProxy(_)
+        ));
+        assert!(matches!(
+            TestCli::parse_from(["smol", "ssh-start", "--name", "work"]).command,
+            MachineSubcommand::SshStart(_)
+        ));
     }
 
     #[test]
