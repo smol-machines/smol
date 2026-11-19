@@ -1004,3 +1004,42 @@ fn restore_receipt_distinguishes_later_pause_and_refuses_contradictory_sources()
             .contains("expected saved checkpoint"));
     }
 }
+
+#[test]
+fn deletion_confirmation_is_account_scoped_and_requires_explicit_proof() {
+    for (status, body, expected) in [
+        (
+            200,
+            r#"{"machineId":"owned/a","executionGone":true}"#,
+            Some(true),
+        ),
+        (
+            200,
+            r#"{"machineId":"owned/a","executionGone":false}"#,
+            Some(false),
+        ),
+        (200, r#"{"machineId":"owned/a"}"#, None),
+        (200, r#"{"executionGone":true}"#, None),
+        (404, "{}", None),
+        (403, "{}", None),
+        (503, "{}", None),
+    ] {
+        let server = Server::new(move |_, request| {
+            scoped(request);
+            assert!(request.starts_with("GET /v1/machines/owned%2Fa/deletion "));
+            (status, String::new(), body.into())
+        });
+        let reply = server.client().deletion_status("owned/a");
+        if let Some(expected) = expected {
+            let reply = reply.unwrap();
+            assert_eq!(reply.machine_id, "owned/a");
+            assert_eq!(reply.execution_gone, expected);
+        } else {
+            assert!(
+                reply.is_err(),
+                "unconfirmed deletion must fail: {status} {body}"
+            );
+        }
+        assert_eq!(server.rows().len(), if status == 503 { 4 } else { 1 });
+    }
+}

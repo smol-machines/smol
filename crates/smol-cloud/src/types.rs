@@ -577,6 +577,17 @@ pub struct CheckpointExecution {
     pub idle_action: Option<String>,
 }
 
+/// Confirmation that a deleted machine's backing execution is gone.
+/// A normal machine GET returning 404 is not equivalent to this confirmation.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MachineDeletion {
+    /// Stable identity of the deleted machine.
+    pub machine_id: String,
+    /// True only after the original node confirms its backing VM is absent.
+    pub execution_gone: bool,
+}
+
 /// A machine's current pause association, including a pending upload.
 /// This read is not a lease; recheck before resuming the checkpoint elsewhere.
 #[derive(Debug, Clone, Deserialize, Serialize)]
