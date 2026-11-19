@@ -5,6 +5,7 @@
 //! [`crate::credentials`] with its own HTTP client.
 
 mod download;
+mod preflight;
 #[cfg(test)]
 mod tenant_tests;
 mod upload;

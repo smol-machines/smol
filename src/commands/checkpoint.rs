@@ -6,6 +6,25 @@ use std::path::PathBuf;
 use tokio::io::AsyncWriteExt;
 
 #[derive(Args, Debug)]
+pub struct CheckpointRequirementsCmd {
+    #[arg(short = 'n', long)]
+    pub name: String,
+    /// Inspect the local machine even when its name has a cloud association.
+    #[arg(long)]
+    pub local: bool,
+}
+
+impl CheckpointRequirementsCmd {
+    pub fn run(self) -> anyhow::Result<()> {
+        use super::resolve::{self, Target};
+        let (_, name) = resolve::route_here(Some(&self.name), Target::Local)?;
+        let requirements = smolvm::portable_checkpoint::capture_requirements(&name)?;
+        println!("{}", serde_json::to_string(&requirements)?);
+        Ok(())
+    }
+}
+
+#[derive(Args, Debug)]
 pub struct CheckpointCmd {
     /// Running checkpointable machine (name, `local/name`, or `cloud/name`).
     #[arg(

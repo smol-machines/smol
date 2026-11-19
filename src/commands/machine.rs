@@ -95,6 +95,9 @@ pub enum MachineSubcommand {
     /// Persist a live machine as a portable rollback point
     Checkpoint(crate::commands::checkpoint::CheckpointCmd),
 
+    /// Inspect local checkpoint requirements without pausing or capturing it
+    CheckpointRequirements(crate::commands::checkpoint::CheckpointRequirementsCmd),
+
     /// Remove unused objects from a local incremental checkpoint store
     #[command(name = "checkpoint-prune")]
     CheckpointPrune(crate::commands::checkpoint::CheckpointPruneCmd),
@@ -173,6 +176,7 @@ impl MachineCmd {
             MachineSubcommand::Branch(cmd) => cmd.run(),
             MachineSubcommand::BranchBatch(cmd) => cmd.run(),
             MachineSubcommand::Checkpoint(cmd) => cmd.run(),
+            MachineSubcommand::CheckpointRequirements(cmd) => cmd.run(),
             MachineSubcommand::Move(cmd) => cmd.run(),
             MachineSubcommand::CheckpointPrune(cmd) => cmd.run(),
             MachineSubcommand::CheckpointLog(cmd) => Ok(cmd.run()?),
