@@ -110,8 +110,13 @@ LIB_DIR="$ENGINE_EXTRACT/lib"
 # at this same version. Locally `..` is the monorepo (verified protocol-identical);
 # CI repoints it to a v-tag checkout before invoking this script.
 echo ">> building smol-bin"
-export LIBKRUN_BUNDLE="$LIB_DIR"
-export SMOLVM_LIB_DIR="$LIB_DIR"
+# The engine's macOS build script rewrites and re-signs LIBKRUN_BUNDLE.
+# Link against a private copy so the distribution retains the verified release
+# libraries byte-for-byte, matching the engine and its checkpoint identity.
+BUILD_LIB_DIR="$WORK/build-lib"
+cp -a "$LIB_DIR" "$BUILD_LIB_DIR"
+export LIBKRUN_BUNDLE="$BUILD_LIB_DIR"
+export SMOLVM_LIB_DIR="$BUILD_LIB_DIR"
 if [ "${USE_ZIG:-0}" = "1" ]; then
   : "${TARGET:?USE_ZIG=1 requires TARGET}"
   # cargo-zigbuild strips the glibc suffix for the output dir (target/<triple>/release),
