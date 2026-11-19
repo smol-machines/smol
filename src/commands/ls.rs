@@ -7,6 +7,8 @@
 use super::resolve::{self, Location, Target};
 use clap::Args;
 
+mod watch;
+
 #[derive(Args, Debug)]
 pub struct LsCmd {
     /// Only list local machines
@@ -20,65 +22,30 @@ pub struct LsCmd {
     /// Output in JSON format
     #[arg(long)]
     pub json: bool,
+
+    /// Observe named local machines independently; stdin input refreshes, EOF stops
+    #[arg(long, requires_all = ["local", "json", "name"])]
+    pub watch: bool,
+
+    /// Observe only these local machine names (repeat for multiple machines)
+    #[arg(long, requires = "watch")]
+    pub name: Vec<String>,
 }
 
 impl LsCmd {
     pub fn run(&self) -> anyhow::Result<()> {
+        if self.watch {
+            anyhow::ensure!(
+                self.local && self.json && !self.cloud && !self.name.is_empty(),
+                "--watch requires --local --json and at least one --name"
+            );
+            return watch::run(&self.name);
+        }
         let target = Target::from_flags(self.local, self.cloud)?;
         let listing = resolve::list_all(target)?;
 
         if self.json {
-            // A local row is the engine's own object, so `smol` and `smolvm`
-            // report a local machine with the same fields; smol adds where the
-            // machine lives and, for compatibility, `source`.
-            let config = listing
-                .machines
-                .iter()
-                .any(|m| m.location == Location::Local)
-                .then(smolvm::config::SmolvmConfig::load)
-                .transpose()?;
-            let rows: Vec<_> = listing
-                .machines
-                .iter()
-                .map(|m| {
-                    let record = config
-                        .as_ref()
-                        .filter(|_| m.location == Location::Local)
-                        .and_then(|config| {
-                            config
-                                .list_vms()
-                                .find(|(name, _)| **name == m.id)
-                                .map(|(_, r)| r)
-                        });
-                    let mut row = match record {
-                        Some(record) => smolvm::cli::vm_common::machine_status_json(&m.id, record),
-                        None => serde_json::json!({
-                            "name": m.name,
-                            "state": m.state,
-                            "cpus": m.cpus,
-                            "memory_mib": m.memory_mib,
-                            "image": m.source,
-                            // Without this labels are write-only: a caller could
-                            // set them and never read them back.
-                            "labels": m.labels,
-                        }),
-                    };
-                    if let Some(fields) = row.as_object_mut() {
-                        fields.insert("location".into(), serde_json::json!(m.location.as_str()));
-                        fields.insert("name".into(), serde_json::json!(m.name));
-                        fields.insert("id".into(), serde_json::json!(m.id));
-                        fields.insert("source".into(), serde_json::json!(m.source));
-                        fields.insert(
-                            "movedTo".into(),
-                            serde_json::json!(super::moved::from_labels(&m.labels).map(
-                                |moved| serde_json::json!({ "name": moved.name, "id": moved.id })
-                            )),
-                        );
-                    }
-                    row
-                })
-                .collect();
-            println!("{}", serde_json::to_string_pretty(&rows)?);
+            println!("{}", serde_json::to_string_pretty(&json_rows(&listing)?)?);
             return Ok(());
         }
 
@@ -131,6 +98,74 @@ impl LsCmd {
 
         Ok(())
     }
+}
+
+fn local_watch_row(name: &str) -> anyhow::Result<Option<serde_json::Value>> {
+    let config = smolvm::config::SmolvmConfig::load()?;
+    // Select before probing so held or unrelated machines receive no traffic.
+    let Some((_, record)) = config
+        .list_vms()
+        .find(|(candidate, _)| candidate.as_str() == name)
+    else {
+        return Ok(None);
+    };
+    let mut row = smolvm::cli::vm_common::machine_status_json(name, record);
+    row["location"] = serde_json::json!("local");
+    row["id"] = serde_json::json!(name);
+    row["source"] = serde_json::json!(record.display_image());
+    row["movedTo"] = serde_json::json!(super::moved::from_labels(&record.labels)
+        .map(|moved| serde_json::json!({"name":moved.name,"id":moved.id})));
+    Ok(Some(row))
+}
+
+fn json_rows(listing: &resolve::Listing) -> anyhow::Result<Vec<serde_json::Value>> {
+    let config = listing
+        .machines
+        .iter()
+        .any(|m| m.location == Location::Local)
+        .then(smolvm::config::SmolvmConfig::load)
+        .transpose()?;
+    let rows: Vec<_> = listing
+        .machines
+        .iter()
+        .map(|m| {
+            let record = config
+                .as_ref()
+                .filter(|_| m.location == Location::Local)
+                .and_then(|config| {
+                    config
+                        .list_vms()
+                        .find(|(name, _)| **name == m.id)
+                        .map(|(_, r)| r)
+                });
+            let mut row = match record {
+                Some(record) => smolvm::cli::vm_common::machine_status_json(&m.id, record),
+                None => serde_json::json!({
+                    "name": m.name,
+                    "state": m.state,
+                    "cpus": m.cpus,
+                    "memory_mib": m.memory_mib,
+                    "image": m.source,
+                    // Without this labels are write-only: a caller could
+                    // set them and never read them back.
+                    "labels": m.labels,
+                }),
+            };
+            if let Some(fields) = row.as_object_mut() {
+                fields.insert("location".into(), serde_json::json!(m.location.as_str()));
+                fields.insert("name".into(), serde_json::json!(m.name));
+                fields.insert("id".into(), serde_json::json!(m.id));
+                fields.insert("source".into(), serde_json::json!(m.source));
+                fields.insert(
+                    "movedTo".into(),
+                    serde_json::json!(super::moved::from_labels(&m.labels)
+                        .map(|moved| serde_json::json!({ "name": moved.name, "id": moved.id }))),
+                );
+            }
+            row
+        })
+        .collect();
+    Ok(rows)
 }
 
 fn truncate(s: &str, max: usize) -> String {
