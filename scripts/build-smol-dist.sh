@@ -93,7 +93,13 @@ else
   TARBALL_SRC="$WORK/$ASSET"
 fi
 [ -f "$TARBALL_SRC" ] || { echo "error: engine asset not found: $TARBALL_SRC" >&2; exit 1; }
-tar -xzf "$TARBALL_SRC" -C "$WORK"
+# Preserve runtime archive permissions without adopting the build host's owners.
+# BSD tar otherwise strips setuid/setgid when the archived owner differs.
+extract_owner=()
+if [ "$OS" = darwin ]; then
+  extract_owner=(--uid "$(id -u)" --gid "$(id -g)")
+fi
+tar --no-same-owner "${extract_owner[@]+"${extract_owner[@]}"}" -xpzf "$TARBALL_SRC" -C "$WORK"
 ENGINE_EXTRACT="$WORK/smolvm-${ENGINE_VERSION#v}-${PLATFORM}"
 LIB_DIR="$ENGINE_EXTRACT/lib"
 [ -d "$LIB_DIR" ] || { echo "error: no lib/ in $ASSET" >&2; exit 1; }
@@ -104,8 +110,13 @@ LIB_DIR="$ENGINE_EXTRACT/lib"
 # at this same version. Locally `..` is the monorepo (verified protocol-identical);
 # CI repoints it to a v-tag checkout before invoking this script.
 echo ">> building smol-bin"
-export LIBKRUN_BUNDLE="$LIB_DIR"
-export SMOLVM_LIB_DIR="$LIB_DIR"
+# The engine's macOS build script rewrites and re-signs LIBKRUN_BUNDLE.
+# Link against a private copy so the distribution retains the verified release
+# libraries byte-for-byte, matching the engine and its checkpoint identity.
+BUILD_LIB_DIR="$WORK/build-lib"
+cp -a "$LIB_DIR" "$BUILD_LIB_DIR"
+export LIBKRUN_BUNDLE="$BUILD_LIB_DIR"
+export SMOLVM_LIB_DIR="$BUILD_LIB_DIR"
 if [ "${USE_ZIG:-0}" = "1" ]; then
   : "${TARGET:?USE_ZIG=1 requires TARGET}"
   # cargo-zigbuild strips the glibc suffix for the output dir (target/<triple>/release),
