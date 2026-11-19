@@ -482,6 +482,21 @@ impl Client {
         )
     }
 
+    /// Check whether the original node confirms a deleted machine is gone.
+    /// A 404 (including an older server without this endpoint) is an error,
+    /// never permission to resume a retained copy elsewhere.
+    pub fn deletion_status(&self, id: &str) -> Result<crate::types::MachineDeletion> {
+        self.json(
+            reqwest::Method::GET,
+            &format!(
+                "/v1/machines/{}/deletion",
+                encode_path(id).replace('/', "%2F")
+            ),
+            Body::None,
+            REQUEST_TIMEOUT,
+        )
+    }
+
     /// Delete a machine.
     pub fn delete(&self, id: &str) -> Result<()> {
         self.empty(
