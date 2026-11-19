@@ -3,6 +3,7 @@
 use clap::Args;
 use smolvm::agent::{AgentClient, AgentManager, LaunchFeatures, RunConfig, VmResources};
 use smolvm::data::network::PortMapping;
+use smolvm::data::resources::default_microvm_memory_mib;
 use smolvm::data::storage::HostMount;
 use smolvm::DEFAULT_SHELL_CMD;
 
@@ -55,7 +56,7 @@ pub struct RunCmd {
     #[arg(long, value_name = "N")]
     pub cpus: Option<u8>,
 
-    /// Memory in MiB
+    /// Memory in MiB [default: half the host's RAM, at most 8192]
     #[arg(long, value_name = "MiB")]
     pub mem: Option<u32>,
 
@@ -145,16 +146,7 @@ impl RunCmd {
             .collect();
         let ports = self.port.clone();
 
-        let resources = VmResources {
-            cpus: self.cpus.unwrap_or(4),
-            memory_mib: self.mem.unwrap_or(8192),
-            network: self.net || !self.port.is_empty(),
-            gpu: self.gpu,
-            gpu_vram_mib: self.gpu_vram,
-            cuda: self.cuda,
-            disk_durability: self.disk_durability.unwrap_or_default(),
-            ..Default::default()
-        };
+        let resources = self.vm_resources();
 
         // Resolve the image: a registry reference is pulled in-guest, while a
         // local source — a docker/podman `save` archive (`-I ./img.tar`), stdin
@@ -318,6 +310,19 @@ impl RunCmd {
         manager.kill();
         std::process::exit(exit_code);
     }
+
+    fn vm_resources(&self) -> VmResources {
+        VmResources {
+            cpus: self.cpus.unwrap_or(4),
+            memory_mib: self.mem.unwrap_or_else(default_microvm_memory_mib),
+            network: self.net || !self.port.is_empty(),
+            gpu: self.gpu,
+            gpu_vram_mib: self.gpu_vram,
+            cuda: self.cuda,
+            disk_durability: self.disk_durability.unwrap_or_default(),
+            ..Default::default()
+        }
+    }
 }
 
 /// `IMAGE -- CMD...` -> `(IMAGE, CMD...)`: exactly one word before the first
@@ -466,6 +471,30 @@ mod tests {
         assert_eq!(split_positional_image(&bare.run.command), None);
         let flag = Cli::try_parse_from(["smol", "-I", "alpine", "--", "echo"]).unwrap();
         assert_eq!(flag.run.image.as_deref(), Some("alpine"));
+    }
+
+    // Without `--mem` the machine gets what the engine gives a new machine on
+    // this host, not a fixed 8192 MiB a smaller host cannot back.
+    #[test]
+    fn an_unset_mem_takes_the_engine_default() {
+        use clap::Parser;
+        #[derive(Parser)]
+        struct Cli {
+            #[command(flatten)]
+            run: super::RunCmd,
+        }
+        let mem = |argv: &[&str]| {
+            Cli::try_parse_from(argv)
+                .unwrap()
+                .run
+                .vm_resources()
+                .memory_mib
+        };
+        assert_eq!(
+            mem(&["smol", "--", "true"]),
+            super::default_microvm_memory_mib()
+        );
+        assert_eq!(mem(&["smol", "--mem", "512", "--", "true"]), 512);
     }
 
     /// Bare / Docker-convention image names must never be treated as smolmachine
