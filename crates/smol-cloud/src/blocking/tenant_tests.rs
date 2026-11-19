@@ -1043,3 +1043,132 @@ fn deletion_confirmation_is_account_scoped_and_requires_explicit_proof() {
         assert_eq!(server.rows().len(), if status == 503 { 4 } else { 1 });
     }
 }
+
+fn reader_requirements() -> crate::types::CheckpointRequirements {
+    crate::types::CheckpointRequirements {
+        architecture: "arm64".into(),
+        engine_version: "1.35.0".into(),
+        format_version: 4,
+        device_profile: "smolvm-image-archive-v1".into(),
+    }
+}
+
+#[test]
+fn checkpoint_preflight_keeps_account_and_requires_explicit_support() {
+    for (status, body, allowed) in [
+        (200, r#"{"supported":true}"#, true),
+        (200, r#"{"supported":false}"#, false),
+        (200, "{}", false),
+        (200, r#"{"supported":"true"}"#, false),
+        (204, "", false),
+        (404, "old endpoint", false),
+        (
+            503,
+            r#"{"detail":"no compatible worker","retryable":true}"#,
+            false,
+        ),
+    ] {
+        let api = Server::new(move |_, request| {
+            scoped(request);
+            assert!(request.starts_with("POST /v1/checkpoints/check-format HTTP/1.1"));
+            let body_sent: serde_json::Value =
+                serde_json::from_str(request.split("\r\n\r\n").nth(1).unwrap()).unwrap();
+            assert_eq!(
+                body_sent,
+                serde_json::json!({"architecture":"arm64", "engineVersion":"1.35.0", "formatVersion":4, "deviceProfile":"smolvm-image-archive-v1"})
+            );
+            (status, String::new(), body.into())
+        });
+        let result = api
+            .client()
+            .check_checkpoint_format_cancellable(&reader_requirements(), &StreamCancel::new());
+        assert_eq!(result.is_ok(), allowed, "{status}: {body}");
+        assert_eq!(
+            api.rows().len(),
+            1,
+            "refusals do not keep a move waiting through retries"
+        );
+    }
+}
+
+#[test]
+fn checkpoint_preflight_refuses_redirects_and_oversized_answers() {
+    let target = Server::new(|_, _| panic!("credentials must not follow redirects"));
+    let location = format!("Location: {}/other\r\n", target.url);
+    let redirect = Server::new(move |_, _| (307, location.clone(), String::new()));
+    assert!(redirect
+        .client()
+        .check_checkpoint_format_cancellable(&reader_requirements(), &StreamCancel::new())
+        .is_err());
+    assert!(target.rows().is_empty());
+    let large = Server::new(|_, _| (200, String::new(), " ".repeat(20 * 1024)));
+    assert!(large
+        .client()
+        .check_checkpoint_format_cancellable(&reader_requirements(), &StreamCancel::new())
+        .unwrap_err()
+        .to_string()
+        .contains("too large"));
+}
+
+#[test]
+fn checkpoint_preflight_cancel_closes_a_stalled_body_and_prevents_a_new_request() {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = listener.local_addr().unwrap();
+    let (sent, received) = std::sync::mpsc::channel();
+    let server = std::thread::spawn(move || {
+        let (mut stream, _) = listener.accept().unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        let mut reader = BufReader::new(stream.try_clone().unwrap());
+        let mut length = 0;
+        loop {
+            let mut line = String::new();
+            assert_ne!(reader.read_line(&mut line).unwrap(), 0);
+            if line == "\r\n" {
+                break;
+            }
+            if let Some(n) = line.to_lowercase().strip_prefix("content-length:") {
+                length = n.trim().parse::<usize>().unwrap();
+            }
+        }
+        let mut body = vec![0; length];
+        reader.read_exact(&mut body).unwrap();
+        stream
+            .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 100\r\nConnection: close\r\n\r\n{")
+            .unwrap();
+        sent.send(()).unwrap();
+        let mut byte = [0];
+        assert_eq!(
+            stream.read(&mut byte).unwrap_or(0),
+            0,
+            "cancel closes socket"
+        );
+    });
+    let cancel = StreamCancel::new();
+    let stopping = cancel.clone();
+    let worker = std::thread::spawn(move || {
+        Client::new(Credentials::new(format!("http://{address}"), "test-key"))
+            .unwrap()
+            .check_checkpoint_format_cancellable(&reader_requirements(), &stopping)
+    });
+    received.recv_timeout(Duration::from_secs(5)).unwrap();
+    let before = Instant::now();
+    cancel.cancel();
+    assert_eq!(
+        worker.join().unwrap().unwrap_err().kind(),
+        ErrorKind::Cancelled
+    );
+    assert!(before.elapsed() < Duration::from_secs(2));
+    server.join().unwrap();
+    let untouched = Server::new(|_, _| panic!("already cancelled"));
+    assert_eq!(
+        untouched
+            .client()
+            .check_checkpoint_format_cancellable(&reader_requirements(), &cancel)
+            .unwrap_err()
+            .kind(),
+        ErrorKind::Cancelled
+    );
+    assert!(untouched.rows().is_empty());
+}

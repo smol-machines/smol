@@ -604,6 +604,21 @@ pub struct SavedExecution {
     pub checkpoint: Option<Checkpoint>,
 }
 
+/// Reader requirements for a local checkpoint, checked before pausing it.
+/// A positive answer reserves no capacity; restore checks the actual worker again.
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct CheckpointRequirements {
+    /// Guest architecture (`arm64` or `amd64`).
+    pub architecture: String,
+    /// Release of the engine capturing the local execution.
+    pub engine_version: String,
+    /// Checkpoint wire format version.
+    pub format_version: u32,
+    /// Device and carried-asset profile required by the guest.
+    pub device_profile: String,
+}
+
 /// Where to send a checkpoint file's bytes, as `POST /v1/checkpoints` returns.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
