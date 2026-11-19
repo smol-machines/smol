@@ -93,8 +93,13 @@ else
   TARBALL_SRC="$WORK/$ASSET"
 fi
 [ -f "$TARBALL_SRC" ] || { echo "error: engine asset not found: $TARBALL_SRC" >&2; exit 1; }
-# Preserve the guest's sticky directories and executable permission bits.
-tar -xpzf "$TARBALL_SRC" -C "$WORK"
+# Preserve runtime archive permissions without adopting the build host's owners.
+# BSD tar otherwise strips setuid/setgid when the archived owner differs.
+extract_owner=()
+if [ "$OS" = darwin ]; then
+  extract_owner=(--uid "$(id -u)" --gid "$(id -g)")
+fi
+tar --no-same-owner "${extract_owner[@]+"${extract_owner[@]}"}" -xpzf "$TARBALL_SRC" -C "$WORK"
 ENGINE_EXTRACT="$WORK/smolvm-${ENGINE_VERSION#v}-${PLATFORM}"
 LIB_DIR="$ENGINE_EXTRACT/lib"
 [ -d "$LIB_DIR" ] || { echo "error: no lib/ in $ASSET" >&2; exit 1; }
