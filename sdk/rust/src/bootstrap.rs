@@ -218,7 +218,11 @@ fn extract(bytes: &[u8], root: &Path) -> Result<()> {
         .map_err(|e| Error::new(ErrorKind::Storage, format!("stage the engine: {e}")))?;
 
     let decoder = flate2::read::GzDecoder::new(bytes);
-    tar::Archive::new(decoder)
+    let mut archive = tar::Archive::new(decoder);
+    // This verified runtime contains a Linux filesystem; dropping sticky or
+    // setuid bits changes its behavior when it is mounted inside the guest.
+    archive.set_preserve_permissions(true);
+    archive
         .unpack(&staging)
         .map_err(|e| Error::new(ErrorKind::Storage, format!("unpack the engine: {e}")))?;
 
@@ -292,6 +296,53 @@ mod tests {
             .find(|(_, name)| name.trim() == "x.tar.gz")
             .map(|(digest, _)| digest.to_string());
         assert_eq!(expected.as_deref(), Some("0".repeat(64).as_str()));
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn extracted_guest_keeps_temporary_and_private_file_permissions() {
+        use std::os::unix::fs::PermissionsExt;
+        let mut archive = tar::Builder::new(flate2::write::GzEncoder::new(
+            Vec::new(),
+            flate2::Compression::fast(),
+        ));
+        let modes = [
+            ("tmp", 0o1777, true),
+            ("var/tmp", 0o1777, true),
+            ("private", 0o700, true),
+            ("private/config", 0o600, false),
+            ("read-only", 0o444, false),
+            ("setuid-tool", 0o4755, false),
+        ];
+        for (name, mode, directory) in modes {
+            let mut header = tar::Header::new_gnu();
+            header.set_entry_type(if directory {
+                tar::EntryType::Directory
+            } else {
+                tar::EntryType::Regular
+            });
+            header.set_mode(mode);
+            header.set_size(if directory { 0 } else { 7 });
+            header.set_cksum();
+            archive
+                .append_data(
+                    &mut header,
+                    format!("smolvm-test/agent-rootfs/{name}"),
+                    if directory { &b""[..] } else { &b"fixture"[..] },
+                )
+                .unwrap();
+        }
+        let bytes = archive.into_inner().unwrap().finish().unwrap();
+        let root = tempfile::tempdir().unwrap();
+        extract(&bytes, root.path()).unwrap();
+        for (name, expected, _) in modes {
+            let path = root.path().join("smolvm-test/agent-rootfs").join(name);
+            assert_eq!(
+                path.metadata().unwrap().permissions().mode() & 0o7777,
+                expected,
+                "guest permissions changed for {name}"
+            );
+        }
     }
 
     #[test]

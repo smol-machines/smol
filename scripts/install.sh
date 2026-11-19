@@ -115,7 +115,8 @@ main() {
 
   # ── extract on the prefix's filesystem, then mv into place atomically ─────
   echo ">> installing to $PREFIX"
-  tar -xzf "$TMP/$DIST.tar.gz" -C "$TMP"
+  # The guest filesystem must retain its modes even under the installer's umask.
+  tar -xpzf "$TMP/$DIST.tar.gz" -C "$TMP"
   [ -f "$TMP/$DIST/smol-bin" ] || err "bundle is missing smol-bin — download may be corrupt"
   local STAGE="${PREFIX}.new.$$"
   rm -rf "$STAGE" "$PREFIX"

@@ -93,7 +93,8 @@ else
   TARBALL_SRC="$WORK/$ASSET"
 fi
 [ -f "$TARBALL_SRC" ] || { echo "error: engine asset not found: $TARBALL_SRC" >&2; exit 1; }
-tar -xzf "$TARBALL_SRC" -C "$WORK"
+# Preserve the guest's sticky directories and executable permission bits.
+tar -xpzf "$TARBALL_SRC" -C "$WORK"
 ENGINE_EXTRACT="$WORK/smolvm-${ENGINE_VERSION#v}-${PLATFORM}"
 LIB_DIR="$ENGINE_EXTRACT/lib"
 [ -d "$LIB_DIR" ] || { echo "error: no lib/ in $ASSET" >&2; exit 1; }
