@@ -135,6 +135,10 @@ class MachineConfig:
     """Configuration for creating a machine."""
 
     name: Optional[str] = None
+    data_dir: Optional[str] = None
+    """Root directory for local engine state, including the machine database.
+    Uses the engine default when omitted. The embedded engine has one data root
+    per process, so this must not change after the first local operation."""
     egress_interceptor: Optional[EgressInterceptor] = field(default=None, repr=False)
     """Machine name (auto-generated if omitted)."""
     image: Optional[str] = None

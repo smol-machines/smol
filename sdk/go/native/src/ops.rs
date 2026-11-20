@@ -267,6 +267,7 @@ struct RuntimeAssets {
     lib_dir: Option<String>,
     agent_rootfs: Option<String>,
     agent_rootfs_tar: Option<String>,
+    data_dir: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -596,6 +597,11 @@ fn resolve_asset(
 /// same paths is a no-op, with different paths an error.
 fn configure_runtime_assets(a: RuntimeAssets) -> CallResult {
     static CONFIGURED: OnceLock<Mutex<Option<ResolvedAssets>>> = OnceLock::new();
+    // Select the constructor's data root before the engine resolves any paths.
+    // Without the option, use the engine default.
+    if let Some(data_dir) = a.data_dir.as_deref().filter(|dir| !dir.is_empty()) {
+        smolvm::process::apply_data_root(Path::new(data_dir));
+    }
     let agent_rootfs = resolve_asset("SMOLVM_AGENT_ROOTFS", a.agent_rootfs, true)?;
     let resolved = ResolvedAssets {
         boot_binary: resolve_asset("SMOLVM_BOOT_BINARY", a.boot_binary, false)?,

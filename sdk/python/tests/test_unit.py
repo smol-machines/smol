@@ -85,6 +85,37 @@ def test_native_config_persists_local_labels_for_listing():
     assert "labels" not in _native_config("m", MachineConfig())
 
 
+def test_local_create_passes_data_dir_to_native_initialization():
+    class FakeMachine:
+        def __init__(self, config):
+            self.name = config["name"]
+
+        def start(self):
+            pass
+
+    native = SimpleNamespace(Machine=FakeMachine)
+    with mock.patch.object(transport_module, "_load_native", return_value=native) as load, \
+         mock.patch.object(transport_module, "_wait_for_execution"):
+        transport_module.make_transport(
+            MachineConfig(data_dir="/tmp/smol-isolated", wait_for_ports=False),
+            ConnectOptions(target="local"),
+        )
+    load.assert_called_once_with("/tmp/smol-isolated")
+
+
+def test_cloud_rejects_local_data_dir_before_network_call():
+    try:
+        transport_module.make_transport(
+            MachineConfig(image="alpine", data_dir="/tmp/smol-isolated"),
+            ConnectOptions(target="cloud", api_key="test"),
+        )
+    except SmolError as error:
+        assert error.code == "NOT_SUPPORTED"
+        assert "data_dir is local-only" in str(error)
+    else:
+        raise AssertionError("cloud create accepted a local data directory")
+
+
 def test_local_machine_list_preserves_native_error_code():
     native = SimpleNamespace(
         Machine=SimpleNamespace(list=mock.Mock(side_effect=RuntimeError("[STORAGE_ERROR] database busy")))

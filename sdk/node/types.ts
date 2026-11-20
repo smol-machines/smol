@@ -222,6 +222,10 @@ export interface CredentialSpec {
 }
 
 export interface MachineConfig {
+  /** Root directory for local engine state, including the machine database.
+   *  Uses the engine default when omitted. The embedded engine has one data root
+   *  per process, so this must not change after the first local operation. */
+  dataDir?: string;
   /** Trusted host egress interceptor for local machines. Supply it again after reconnect. */
   egressInterceptor?: EgressInterceptor;
   /** Machine name (auto-generated if omitted). */
