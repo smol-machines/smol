@@ -94,6 +94,8 @@ fn set_asset(environment_key: &str, value: Option<&Path>) {
 /// `process.env`, which is not inherited by native subprocesses under Bun.
 #[napi]
 pub fn configure_runtime_assets(assets: RuntimeAssets) -> napi::Result<()> {
+    // Match the CLI: honor SMOLVM_DATA_DIR before the engine resolves any paths.
+    smolvm::process::apply_system_data_root(/* allow_auto */ false);
     let resolved_rootfs = resolve_asset("SMOLVM_AGENT_ROOTFS", assets.agent_rootfs, true)?;
     let resolved = ResolvedRuntimeAssets {
         boot_binary: resolve_asset("SMOLVM_BOOT_BINARY", assets.boot_binary, false)?,

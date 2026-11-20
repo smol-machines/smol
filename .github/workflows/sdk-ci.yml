@@ -183,6 +183,8 @@ jobs:
           bash scripts/bundle-native.sh
           bun run build:ts
           cp binding.js binding.d.ts smol.*.node dist/
+      - name: Verify SMOLVM_DATA_DIR
+        run: bun test/data-dir-e2e.ts
       - name: Run zero-config Bun lifecycle
         env:
           XDG_DATA_HOME: ${{ runner.temp }}/bun-smol-data

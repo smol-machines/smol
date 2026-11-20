@@ -1435,6 +1435,8 @@ fn configure_bundle(
     lib_dir: Option<String>,
     agent_rootfs_tar: Option<String>,
 ) -> PyResult<()> {
+    // Match the CLI: honor SMOLVM_DATA_DIR before the engine resolves any paths.
+    smolvm::process::apply_system_data_root(/* allow_auto */ false);
     let bundle = smolvm::embedded::bundle::Bundle {
         boot_binary: boot_binary.map(Into::into),
         lib_dir: lib_dir.map(Into::into),

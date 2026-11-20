@@ -596,6 +596,8 @@ fn resolve_asset(
 /// same paths is a no-op, with different paths an error.
 fn configure_runtime_assets(a: RuntimeAssets) -> CallResult {
     static CONFIGURED: OnceLock<Mutex<Option<ResolvedAssets>>> = OnceLock::new();
+    // Match the CLI: honor SMOLVM_DATA_DIR before the engine resolves any paths.
+    smolvm::process::apply_system_data_root(/* allow_auto */ false);
     let agent_rootfs = resolve_asset("SMOLVM_AGENT_ROOTFS", a.agent_rootfs, true)?;
     let resolved = ResolvedAssets {
         boot_binary: resolve_asset("SMOLVM_BOOT_BINARY", a.boot_binary, false)?,

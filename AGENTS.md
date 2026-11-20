@@ -150,6 +150,7 @@ alongside this one. CI checks it out automatically.
 |----------|--------|
 | `SMOL_CLOUD_TOKEN` | Cloud auth token. Set by `smol auth login`; read by both SDKs. |
 | `SMOL_CLOUD_URL` / `SMOL_CLOUD_API` | Point the cloud transport at a different control plane. |
+| `SMOLVM_DATA_DIR` | Keep all local CLI and embedded SDK state under a custom data root. |
 | `SMOL_LOG` | Log filter for the CLI and SDKs. |
 | `SMOL_FORK_DEBUG` | Extra diagnostics on the fork path. |
 
