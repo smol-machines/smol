@@ -737,6 +737,15 @@ func TestCloudCLISession(t *testing.T) {
 	}
 }
 
+func TestCloudRejectsLocalDataDir(t *testing.T) {
+	_, err := Create(context.Background(), MachineConfig{
+		Image: "alpine", DataDir: t.TempDir(),
+	}, &ConnectOptions{Target: TargetCloud, APIKey: "smk_test123"})
+	if !errors.Is(err, ErrNotSupported) {
+		t.Fatalf("DataDir on cloud: err = %v; want ErrNotSupported", err)
+	}
+}
+
 func TestDiskDurabilityReachesTheCloudRequestAndTheEngine(t *testing.T) {
 	isolateCloudEnv(t)
 	mock := newMockCloud()

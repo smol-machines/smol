@@ -23,6 +23,10 @@ the backend is chosen by `ConnectOptions`:
 // Local (embedded, default) — no server, no config:
 const local = await Machine.create({ resources: { cpus: 2, memoryMb: 1024 } });
 
+// Keep local engine state in a chosen directory instead of the default home
+// directories. Omit dataDir to use the default; the choice is fixed for the process.
+const isolated = await Machine.create({ dataDir: '/tmp/my-smol-data' });
+
 // A trusted local interceptor can inspect outbound TCP. Keep its token out of logs.
 const intercepted = await Machine.create({
   network: true,

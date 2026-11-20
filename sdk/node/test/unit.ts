@@ -522,6 +522,16 @@ async function finish() {
     }
   });
 
+  await checkAsync('dataDir is refused for a cloud create before any request', async () => {
+    await assert.rejects(
+      Machine.create(
+        { image: 'alpine', dataDir: '/tmp/smol-isolated' },
+        { target: 'cloud', apiKey: 'smk_test' },
+      ),
+      /dataDir is local-only/,
+    );
+  });
+
   await checkAsync('keepIdentity is refused for a cloud restore before any request', async () => {
     let requested = false;
     const realFetch = globalThis.fetch;

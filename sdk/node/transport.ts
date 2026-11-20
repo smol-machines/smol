@@ -2615,6 +2615,7 @@ export async function makeTransport(
   const useCloud = selectsCloud(conn);
 
   if (useCloud) {
+    if (config.dataDir !== undefined) throw new NotSupportedError("dataDir is local-only.");
     if (config.egressInterceptor || conn.egressInterceptor) throw new NotSupportedError("egressInterceptor is local-only.");
     // The cloud create API has no workload user; refuse rather than silently
     // run the workload as the image's default user.
@@ -2768,17 +2769,18 @@ export async function makeTransport(
     // Validate the config before loading the engine, so a config the local
     // target cannot honour fails the same way whether or not it is installed.
     const nativeConfig = toNativeConfig(name, config);
+    const native = getNapiMachine(config.dataDir);
     let inner: NapiInstance;
     if (config.image?.endsWith(".smolmachine")) {
       // A packed machine (as `smolvm machine create --from`): the pack supplies
       // defaults and this config overrides them, by the engine's rules for every
       // creation path, so an option is applied or refused by name, never dropped.
-      inner = await getNapiMachine().createFromPack(name, resolvePath(config.image), nativeConfig);
+      inner = await native.createFromPack(name, resolvePath(config.image), nativeConfig);
     } else {
       if (nativeConfig.image) {
-        nativeConfig.image = await getNapiMachine().prepareImage(nativeConfig.image);
+        nativeConfig.image = await native.prepareImage(nativeConfig.image);
       }
-      inner = new (getNapiMachine())(nativeConfig);
+      inner = new native(nativeConfig);
     }
     // A detached machine is nobody's to stop on a signal — it was created to
     // survive this process — and its branches inherit that.
