@@ -927,6 +927,11 @@ impl NapiMachine {
         pack: String,
         config: Option<MachineConfig>,
     ) -> napi::Result<NapiMachine> {
+        let network_disabled = config
+            .as_ref()
+            .and_then(|c| c.resources.as_ref())
+            .and_then(|r| r.network)
+            == Some(false);
         let (spec, credential_values) = match config.as_ref() {
             Some(config) => create_spec(config)?,
             None => Default::default(),
@@ -935,7 +940,19 @@ impl NapiMachine {
         let created = name.clone();
         let creating = runtime.clone();
         tokio::task::spawn_blocking(move || {
-            creating.create_machine_from_pack_with(&created, std::path::Path::new(&pack), &spec)
+            creating.create_machine_from_pack_with(&created, std::path::Path::new(&pack), &spec)?;
+            if network_disabled {
+                let off = smolvm::data::network::EgressPolicy {
+                    network: false,
+                    cidrs: Vec::new(),
+                    hosts: Vec::new(),
+                };
+                if let Err(err) = creating.set_egress_policy(&created, &off) {
+                    let _ = creating.delete_machine(&created);
+                    return Err(err);
+                }
+            }
+            Ok(())
         })
         .await
         .map_err(join_error)?

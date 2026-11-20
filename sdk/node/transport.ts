@@ -399,6 +399,26 @@ export function egressPolicy(policy: NetworkPolicy): { network: boolean; cidrs: 
   return { network: true, cidrs, hosts };
 }
 
+/** The caller's egress for a `.smolmachine` create, or `undefined` to keep the
+ *  policy the pack carries. A pack records its own outbound policy, which
+ *  applies when the caller says nothing about networking or passes a bare
+ *  `network: true`. An explicit `network: false` turns egress off (and wins
+ *  over an allow list), and an explicit allow list restricts egress to what it
+ *  names (an empty one allows nothing). Mirrors `pack_egress_override` in the
+ *  Python SDK. */
+export function packEgressOverride(
+  config: MachineConfig,
+): { network: boolean; cidrs: string[]; hosts: string[] } | undefined {
+  const network = resolveNetwork(config);
+  if (network === false) return { network: false, cidrs: [], hosts: [] };
+  const cidrs = config.resources?.allowCidrs;
+  const hosts = config.resources?.allowHosts;
+  if (cidrs !== undefined || hosts !== undefined) {
+    return egressPolicy({ allowCidrs: cidrs ?? [], allowHosts: hosts ?? [] });
+  }
+  return undefined;
+}
+
 /** Resolve the primary branch lifecycle name and its compatibility aliases. */
 export function resolveBranchable(config: MachineConfig): boolean | undefined {
   return config.branchable ?? config.forkable ?? config.checkpoint;
@@ -446,6 +466,14 @@ export function toNativeConfig(
       "cacheDisk is cloud-only for now; locally, pass the base with `smolvm machine create --cache-disk`.",
     );
   }
+  const network = resolveNetwork(config);
+  const hasAllowList =
+    config.resources?.allowCidrs !== undefined ||
+    config.resources?.allowHosts !== undefined;
+  const emptyAllowList =
+    hasAllowList &&
+    (config.resources?.allowCidrs?.length ?? 0) === 0 &&
+    (config.resources?.allowHosts?.length ?? 0) === 0;
   return {
     name,
     image: config.image,
@@ -481,11 +509,24 @@ export function toNativeConfig(
         ? {
             cpus: config.resources?.cpus,
             memoryMib: config.resources?.memoryMb,
-            network: resolveNetwork(config),
+            network,
             // Either list enables scoped networking on its own; the engine
             // enforces both (CIDRs directly, hostnames via its DNS filter).
-            allowedCidrs: config.resources?.allowCidrs,
-            allowedHosts: config.resources?.allowHosts,
+            // Explicit `network: false` wins over an allow list, and an allow
+            // list naming nothing restricts egress to loopback rather than
+            // reading as unrestricted.
+            allowedCidrs:
+              network === false
+                ? undefined
+                : emptyAllowList
+                  ? ["127.0.0.0/8", "::1/128"]
+                  : config.resources?.allowCidrs,
+            allowedHosts:
+              network === false
+                ? undefined
+                : emptyAllowList
+                  ? []
+                  : config.resources?.allowHosts,
             storageGib: config.resources?.storageGb,
             overlayGib: config.resources?.overlayGb,
             gpu: config.resources?.gpu,

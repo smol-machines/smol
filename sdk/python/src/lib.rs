@@ -854,6 +854,19 @@ impl Machine {
         pack: String,
         config: Option<&Bound<'_, PyDict>>,
     ) -> PyResult<Self> {
+        let network_disabled = match config {
+            Some(c) => match c.get_item("resources")? {
+                Some(r) => match r.downcast::<PyDict>() {
+                    Ok(rd) => match rd.get_item("network")? {
+                        Some(v) if !v.is_none() => !v.extract::<bool>()?,
+                        _ => false,
+                    },
+                    Err(_) => false,
+                },
+                None => false,
+            },
+            None => false,
+        };
         let (spec, credential_values) = match config {
             Some(config) => {
                 let (_, spec, values) = create_spec_from_config(config)?;
@@ -863,7 +876,19 @@ impl Machine {
         };
         let runtime = runtime().map_err(err)?;
         py.allow_threads(|| {
-            runtime.create_machine_from_pack_with(&name, std::path::Path::new(&pack), &spec)
+            runtime.create_machine_from_pack_with(&name, std::path::Path::new(&pack), &spec)?;
+            if network_disabled {
+                let off = smolvm::data::network::EgressPolicy {
+                    network: false,
+                    cidrs: Vec::new(),
+                    hosts: Vec::new(),
+                };
+                if let Err(err) = runtime.set_egress_policy(&name, &off) {
+                    let _ = runtime.delete_machine(&name);
+                    return Err(err);
+                }
+            }
+            Ok(())
         })
         .map_err(err)?;
         if !credential_values.is_empty() {
