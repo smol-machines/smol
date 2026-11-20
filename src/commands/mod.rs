@@ -50,3 +50,4 @@ pub mod stop;
 pub mod sync;
 pub mod up;
 pub mod update;
+pub mod usage;
