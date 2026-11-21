@@ -46,6 +46,7 @@ no local virtualization is needed.
 | `smol_list` | List machines and their states. |
 | `smol_set_network` | Change what an existing machine may reach outbound: `allow-all`, `deny-all`, or an allow list of hosts and CIDRs. |
 | `smol_publish_port`, `smol_unpublish_port` | Expose or stop exposing a guest TCP port of an existing machine, without restarting it. |
+| `smol_credentials` | Attach or detach credentials the server offers, by name, on a running machine. |
 
 ## The flow an agent follows
 
@@ -101,6 +102,26 @@ SMOL_MCP_AUTH_TOKEN=$(openssl rand -hex 32) \
 | `SMOL_TARGET` | `local` (default) or `cloud`. |
 | `SMOL_CLOUD_TOKEN` | Cloud API key; selects the cloud target when `SMOL_TARGET` is unset. |
 | `SMOL_MCP_AUTH_TOKEN` | Token every HTTP request must carry; required by `smolmachines-mcp-http`. |
+| `SMOL_MCP_CREDENTIALS` | Credentials the agent may attach, as a JSON array of `{"name", "envVar", "hosts"}`. |
+
+## Credentials
+
+You decide which secrets an agent can use and where each may be sent; the
+agent only attaches them by name. Neither the value nor the choice of hosts
+passes through the model, so a prompt cannot redirect a token elsewhere:
+
+```json
+"env": {
+  "SMOL_MCP_CREDENTIALS": "[{\"name\":\"github\",\"envVar\":\"GITHUB_TOKEN\",\"hosts\":[\"api.github.com\"]}]",
+  "GITHUB_TOKEN": "ghp_..."
+}
+```
+
+The machine sees `GITHUB_TOKEN` set to a placeholder. The real value is added
+only to HTTPS requests to `api.github.com`. Locally each value is read from
+the server's own `envVar`; on the cloud the credential stored for your account
+under `name` is used. Pass `credentials: ["github"]` to `smol_create`, or call
+`smol_credentials` to change a running machine's set.
 
 ## Develop
 

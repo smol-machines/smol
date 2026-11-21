@@ -18,7 +18,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import { Machine } from "smolmachines";
-import type { ConnectOptions, MachineConfig } from "smolmachines";
+import type { ConnectOptions, CredentialSpec, MachineConfig } from "smolmachines";
 import { spawn } from "node:child_process";
 import { extractUntrusted } from "./extract.js";
 import { mkdir, stat } from "node:fs/promises";
@@ -43,6 +43,43 @@ const target: "local" | "cloud" =
       : "local";
 // The MCP client owns this process's lifetime; it must not re-raise signals.
 const conn: ConnectOptions = { target, handleSignals: false };
+
+/**
+ * The credentials an agent may attach to its machines, by name, as the person
+ * running this server declared them in SMOL_MCP_CREDENTIALS: a JSON array of
+ * `{name, envVar, hosts}`. The agent picks names only. It never chooses which
+ * hosts a secret may reach, and no value passes through it: locally each value
+ * is read from this server's own `envVar`, and on the cloud the credential
+ * stored for the account under `name` is used.
+ */
+const offered: CredentialSpec[] = (() => {
+  const raw = process.env.SMOL_MCP_CREDENTIALS;
+  if (!raw) return [];
+  const parsed = z
+    .array(z.object({ name: z.string(), envVar: z.string(), hosts: z.array(z.string()).min(1) }).strict())
+    .safeParse(JSON.parse(raw));
+  if (!parsed.success) throw new Error(`SMOL_MCP_CREDENTIALS: ${parsed.error.message}`);
+  return parsed.data;
+})();
+
+/** The offered credentials named, with their values where this target reads them here. */
+function credentialsNamed(names: string[]): CredentialSpec[] {
+  return names.map((name) => {
+    const credential = offered.find((c) => c.name === name);
+    if (!credential) {
+      const available = offered.map((c) => c.name).join(", ") || "none";
+      throw new Error(`no credential "${name}" is offered by this server (offered: ${available})`);
+    }
+    if (target === "cloud") return { ...credential };
+    const value = process.env[credential.envVar];
+    if (!value) throw new Error(`credential "${name}": ${credential.envVar} is not set for this server`);
+    return { ...credential, value };
+  });
+}
+
+const offeredDescription = offered.length
+  ? `Offered: ${offered.map((c) => `${c.name} (${c.hosts.join(", ")})`).join("; ")}.`
+  : "None are offered by this server.";
 
 const machines = new Map<string, Machine>();
 let branchCounter = 0;
@@ -144,6 +181,7 @@ const server = new McpServer(
       "Typical flow: smol_create with the project as `workspace` (it is copied to /workspace), then smol_exec to work.",
       "Before a risky change, call smol_branch and continue in the child. If it worked, keep working there or smol_export the results; if not, smol_delete the child and the source is untouched.",
       "smol_checkpoint saves a point you can smol_restore into a fresh machine later. Branching and checkpoints cost only what changed.",
+      `Credentials attach by name (smol_create's credentials, or smol_credentials on a running machine): the machine gets a placeholder variable and the real value is added only to HTTPS requests to that credential's hosts. ${offeredDescription}`,
       `Tools run on the ${target} target.`,
     ].join(" "),
   },
@@ -178,6 +216,10 @@ server.registerTool(
         .optional()
         .describe("Restrict egress to these hosts (e.g. api.anthropic.com, registry.npmjs.org)."),
       env: z.record(z.string()).optional().describe("Environment for every command run in the machine."),
+      credentials: z
+        .array(z.string())
+        .optional()
+        .describe(`Names of credentials to attach. ${offeredDescription}`),
       persistent: z
         .boolean()
         .default(true)
@@ -199,6 +241,7 @@ server.registerTool(
           network: args.network,
           ...(args.allowHosts ? { allowHosts: args.allowHosts } : {}),
         },
+        ...(args.credentials?.length ? { credentials: credentialsNamed(args.credentials) } : {}),
       };
       const started = Date.now();
       const m = await Machine.create(config, conn);
@@ -221,6 +264,27 @@ server.registerTool(
         workspace: args.workspace ? { from: args.workspace, to: args.workspaceTarget, bytes: copied } : undefined,
         ms: Date.now() - started,
       });
+    } catch (error) {
+      return failure(error);
+    }
+  },
+);
+
+server.registerTool(
+  "smol_credentials",
+  {
+    title: "Set a machine's credentials",
+    description: `Replace the credentials attached to a machine with exactly these names, while it runs: an added one is usable on its next request, one left out stops working. The machine sees only a placeholder variable; the real value is added to HTTPS requests to that credential's hosts. ${offeredDescription}`,
+    inputSchema: {
+      machine: z.string(),
+      credentials: z.array(z.string()).describe("Every credential name the machine should have; [] removes them all."),
+    },
+  },
+  async (args) => {
+    try {
+      const m = await machine(args.machine);
+      await m.setCredentials(credentialsNamed(args.credentials));
+      return text({ machine: args.machine, credentials: args.credentials });
     } catch (error) {
       return failure(error);
     }
