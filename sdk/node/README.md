@@ -343,6 +343,21 @@ await machine.exec(['sh', '-c', 'curl -H "Authorization: Bearer $NOTION_API_KEY"
 - On the cloud, a credential with a `value` is stored for your account under
   `name`; one without refers to a credential already stored there.
 
+Change a machine's bindings or values later, even while it runs; the next
+request to a bound host uses them, with no restart:
+
+```ts
+await machine.setCredentials([
+  { name: "notion", envVar: "NOTION_API_KEY", hosts: ["api.notion.com"] },
+  { name: "github", envVar: "GITHUB_TOKEN", hosts: ["api.github.com"], value: process.env.GITHUB_TOKEN },
+]);
+await machine.updateCredentialValues({ notion: rotatedKey });
+```
+
+`setCredentials` replaces the whole set: a binding left out is removed.
+On the cloud a value belongs to your account's credential of that name, so
+updating it reaches every machine bound to it.
+
 ## Cache disks (cloud)
 
 A cache disk is a disk image many machines start from, each through its own

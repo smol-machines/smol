@@ -227,7 +227,7 @@ impl NapiMachine {
         // Held in memory for this machine's starts in this process; a binding
         // without a value is read from this process's environment instead.
         if !credential_values.is_empty() {
-            runtime.supply_credential_values(&config.name, credential_values);
+            runtime.supply_credential_values(&config.name, credential_values).into_napi()?;
         }
 
         Ok(Self { name: config.name })
@@ -367,6 +367,43 @@ impl NapiMachine {
                 },
             )
             .into_napi()
+    }
+
+    /// Replace this machine's credential bindings, created or running. A
+    /// binding's `value` is held in this process's memory; values held for a
+    /// binding that stays are kept. A running machine takes the change at
+    /// once, unless it booted without bindings: then it takes them from its
+    /// next start.
+    #[napi]
+    pub async fn set_credentials(&self, credentials: Vec<CredentialConfig>) -> napi::Result<()> {
+        let (policy, values) = credential_policy(credentials);
+        let runtime = runtime().into_napi()?;
+        let name = self.name.clone();
+        tokio::task::spawn_blocking(move || {
+            runtime.set_credential_bindings(&name, policy.unwrap_or_default(), values)
+        })
+        .await
+        .map_err(join_error)?
+        .into_napi()
+        .map(drop)
+    }
+
+    /// Hand this machine new values for its credential bindings, by binding
+    /// name, held in this process's memory. A running machine's next request
+    /// to a bound host carries them, with no restart.
+    #[napi]
+    pub async fn update_credential_values(
+        &self,
+        values: std::collections::HashMap<String, String>,
+    ) -> napi::Result<()> {
+        let runtime = runtime().into_napi()?;
+        let name = self.name.clone();
+        tokio::task::spawn_blocking(move || {
+            runtime.supply_credential_values(&name, values.into_iter().collect())
+        })
+        .await
+        .map_err(join_error)?
+        .into_napi()
     }
 
     /// Export a stored checkpoint directory as one portable checkpoint file.
@@ -941,7 +978,7 @@ impl NapiMachine {
         .map_err(join_error)?
         .into_napi()?;
         if !credential_values.is_empty() {
-            runtime.supply_credential_values(&name, credential_values);
+            runtime.supply_credential_values(&name, credential_values).into_napi()?;
         }
         Ok(Self { name })
     }

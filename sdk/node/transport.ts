@@ -21,6 +21,7 @@ import {
   type NativeExecOptions,
   type NativeExecStream,
   type NativeMachineConfig,
+  type NativeCredential,
 } from "./native";
 import {
   InvalidConfigError,
@@ -159,6 +160,8 @@ export interface Transport {
   readonly machineId: string;
   sync(): Promise<void>;
   setNetworkPolicy(policy: NetworkPolicy): Promise<void>;
+  setCredentials(credentials: CredentialSpec[]): Promise<void>;
+  updateCredentialValues(values: Record<string, string>): Promise<void>;
   /** Published ports, whether or not the machine runs. */
   ports(): Promise<PublishedPort[]>;
   /** Replace the published ports. The cloud takes TCP guest ports and picks host ports. */
@@ -437,6 +440,10 @@ async function storeCloudCredentials(
   }
 }
 
+function toNativeCredential(c: CredentialSpec): NativeCredential {
+  return { name: c.name, envVar: c.envVar, hosts: c.hosts, methods: c.methods, value: c.value };
+}
+
 export function toNativeConfig(
   name: string,
   config: MachineConfig,
@@ -459,13 +466,7 @@ export function toNativeConfig(
     forkable: resolveBranchable(config),
     detached: config.detach,
     labels: config.labels,
-    credentials: config.credentials?.map((c) => ({
-      name: c.name,
-      envVar: c.envVar,
-      hosts: c.hosts,
-      methods: c.methods,
-      value: c.value,
-    })),
+    credentials: config.credentials?.map(toNativeCredential),
     mounts: config.mounts?.map((m) => ({
       source: m.source,
       target: m.target,
@@ -784,6 +785,22 @@ class LocalTransport implements Transport {
   async setNetworkPolicy(policy: NetworkPolicy): Promise<void> {
     try {
       this.inner.setEgressPolicy(egressPolicy(policy));
+    } catch (e) {
+      throw wrapNativeError(e);
+    }
+  }
+
+  async setCredentials(credentials: CredentialSpec[]): Promise<void> {
+    try {
+      await this.inner.setCredentials(credentials.map(toNativeCredential));
+    } catch (e) {
+      throw wrapNativeError(e);
+    }
+  }
+
+  async updateCredentialValues(values: Record<string, string>): Promise<void> {
+    try {
+      await this.inner.updateCredentialValues(values);
     } catch (e) {
       throw wrapNativeError(e);
     }
@@ -2120,6 +2137,35 @@ class CloudTransport implements Transport {
 
   async pack(): Promise<string> {
     throw new NotSupportedError("pack() is local-only; use checkpoint() on the cloud.");
+  }
+
+  async setCredentials(credentials: CredentialSpec[]): Promise<void> {
+    // Values are stored for the account first, so the binding change can
+    // hand a running machine the ones it now needs.
+    await storeCloudCredentials(this.conn, credentials);
+    await cloudFetch<MachineInfo>(this.conn, "PUT", `/v1/machines/${this.id}/credentials`, {
+      json: { credentials: credentials.map((c) => c.name) },
+    });
+  }
+
+  async updateCredentialValues(values: Record<string, string>): Promise<void> {
+    // A cloud value belongs to the account's credential of that name, so it
+    // changes for every machine bound to it; running ones take it at once.
+    const names = Object.keys(values);
+    if (names.length === 0) return;
+    const stored = await cloudFetch<Schemas["CredentialInfo"][]>(this.conn, "GET", "/v1/credentials");
+    for (const name of names) {
+      const credential = stored.find((c) => c.name === name);
+      if (!credential) {
+        throw new InvalidConfigError(`no stored credential "${name}"; bind it with setCredentials first.`);
+      }
+      const body: Schemas["SetCredentialRequest"] = {
+        envVar: credential.envVar,
+        hosts: credential.hosts,
+        value: values[name]!,
+      };
+      await cloudFetch(this.conn, "PUT", `/v1/credentials/${encodeURIComponent(name)}`, { json: body });
+    }
   }
 
   async setNetworkPolicy(policy: NetworkPolicy): Promise<void> {

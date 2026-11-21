@@ -206,6 +206,28 @@ func (m *Machine) SetNetworkPolicy(ctx context.Context, policy NetworkPolicy) er
 	return m.t.setNetworkPolicy(ctx, policy)
 }
 
+// SetCredentials replaces this machine's credential bindings with exactly
+// credentials, while it is created, stopped or running. A running machine
+// takes the change at once: a new host is trusted and a removed binding stops
+// being substituted, with no restart.
+//
+// Locally a binding's Value is held in this process's memory, and values
+// already held for a binding that stays are kept; a machine that booted with
+// no bindings takes them from its next start. On the cloud each Value is
+// stored for your account first, and a binding without one uses the
+// credential already stored.
+func (m *Machine) SetCredentials(ctx context.Context, credentials []CredentialSpec) error {
+	return m.t.setCredentials(ctx, credentials)
+}
+
+// UpdateCredentialValues hands this machine new values for its credential
+// bindings, by binding name; its next request to a bound host carries them,
+// with no restart. On the cloud a value belongs to your account's credential
+// of that name, so every machine bound to it gets the new value.
+func (m *Machine) UpdateCredentialValues(ctx context.Context, values map[string]string) error {
+	return m.t.updateCredentialValues(ctx, values)
+}
+
 // Start boots a stopped machine with its disk state, not its previous RAM.
 // interceptor rebinds intercepted egress for a local machine; nil reuses the
 // previous binding.

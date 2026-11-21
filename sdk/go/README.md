@@ -120,6 +120,38 @@ or `SMOL_CLOUD_TOKEN`), and the local engine otherwise. A library embedding
 the SDK should set the target explicitly. On the cloud target the key falls
 back to the session `smol auth login` stored.
 
+### Credentials
+
+Bind a credential to the hosts it is for. The guest variable holds a
+placeholder; the real value is substituted only in HTTPS requests to those
+hosts, so the workload never sees it:
+
+```go
+m, err := smol.Create(ctx, smol.MachineConfig{
+	Image: "alpine",
+	Credentials: []smol.CredentialSpec{{
+		Name: "notion", EnvVar: "NOTION_API_KEY",
+		Hosts: []string{"api.notion.com"}, Value: os.Getenv("NOTION_API_KEY"),
+	}},
+}, nil)
+
+// Later, even while it runs; the next request uses the change.
+err = m.SetCredentials(ctx, []smol.CredentialSpec{
+	{Name: "notion", EnvVar: "NOTION_API_KEY", Hosts: []string{"api.notion.com"}},
+	{Name: "github", EnvVar: "GITHUB_TOKEN", Hosts: []string{"api.github.com"}, Value: token},
+})
+err = m.UpdateCredentialValues(ctx, map[string]string{"notion": rotatedKey})
+```
+
+- Locally the value stays in this process's memory. Without `Value`, this
+  process's own `EnvVar` is read at each start. `Methods` limits a token to,
+  say, `GET` and `HEAD`.
+- On the cloud, a credential with a `Value` is stored for your account under
+  `Name`; one without refers to a credential already stored there. A value
+  belongs to the account's credential, so updating it reaches every machine
+  bound to it.
+- `SetCredentials` replaces the whole set: a binding left out is removed.
+
 ### Machines that outlive the process (local)
 
 A local machine is tied to the process that made it: the engine reaps its VM

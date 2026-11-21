@@ -1,6 +1,6 @@
 {
   "name": "smolmachines",
-  "version": "1.36.0",
+  "version": "1.36.1",
   "description": "Embed isolated microVM sandboxes directly in your code — no server to run.",
   "license": "Apache-2.0",
   "author": "smol-machines",
@@ -55,7 +55,8 @@
     "gen:openapi": "bash scripts/gen-openapi.sh",
     "test:cloud": "tsx test/cloud-mock.ts && tsx test/cloud-deferred-ports.ts && tsx test/cloud-resumable.ts",
     "test:unit": "tsx test/unit.ts",
-    "test:host-daemon": "tsx test/host-daemon-e2e.ts"
+    "test:host-daemon": "tsx test/host-daemon-e2e.ts",
+    "test:credentials": "tsx test/credentials-e2e.ts"
   },
   "devDependencies": {
     "@napi-rs/cli": "^2.18.4",

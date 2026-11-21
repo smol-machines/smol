@@ -160,6 +160,15 @@ pub(crate) trait Transport: Send + Sync + std::fmt::Debug {
         ))
     }
 
+    /// Replace the machine's credential bindings with exactly `credentials`.
+    fn set_credentials(&self, credentials: &[crate::config::Credential]) -> Result<()>;
+
+    /// Hand the machine new values for its bindings, by binding name.
+    fn update_credential_values(
+        &self,
+        values: &std::collections::BTreeMap<String, String>,
+    ) -> Result<()>;
+
     /// The network policy the machine starts with.
     fn network(&self) -> Result<crate::config::NetworkPolicy> {
         Err(unsupported(

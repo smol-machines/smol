@@ -163,6 +163,8 @@ class Transport(Protocol):
     def ports(self) -> "list[PublishedPort]": ...
     def set_ports(self, ports: "list[PublishedPort]") -> None: ...
     def set_network_policy(self, policy: "NetworkPolicy") -> None: ...
+    def set_credentials(self, credentials: "list[CredentialSpec]") -> None: ...
+    def update_credential_values(self, values: "dict[str, str]") -> None: ...
     def pack(self, output: str) -> str: ...
     def pause(self) -> None: ...
     def resume(self, wait_until_ready: bool = True) -> None: ...
@@ -447,6 +449,20 @@ def _ports_from_native(ports: "list[tuple[int, int, str]]") -> "list[PublishedPo
     return [PublishedPort(guest=g, host=h, protocol="udp" if p == "udp" else "tcp") for h, g, p in ports]
 
 
+def _native_credentials(credentials: "list[CredentialSpec]") -> "list[dict[str, Any]]":
+    """Credentials as the native module takes them."""
+    return [
+        {
+            "name": c.name,
+            "env_var": c.env_var,
+            "hosts": list(c.hosts),
+            "methods": list(c.methods) if c.methods is not None else None,
+            "value": c.value,
+        }
+        for c in credentials
+    ]
+
+
 def _store_cloud_credentials(
     base_url: str, api_key: str, credentials: Optional[list[CredentialSpec]]
 ) -> None:
@@ -513,16 +529,7 @@ def _native_config(name: str, config: MachineConfig) -> dict:
     if config.ports:
         cfg["ports"] = [{"host": p.host, "guest": p.guest} for p in config.ports]
     if config.credentials:
-        cfg["credentials"] = [
-            {
-                "name": c.name,
-                "env_var": c.env_var,
-                "hosts": list(c.hosts),
-                "methods": list(c.methods) if c.methods is not None else None,
-                "value": c.value,
-            }
-            for c in config.credentials
-        ]
+        cfg["credentials"] = _native_credentials(config.credentials)
     r = config.resources
     network = resolve_network(config)
     # A top-level `network` alone must still produce a resources block, so the
@@ -892,6 +899,18 @@ class LocalTransport:
             self._inner.set_egress_policy(network, cidrs, hosts)
         except AttributeError:
             raise NotSupportedError("reinstall a smolmachines wheel with set_network_policy") from None
+        except Exception as e:  # noqa: BLE001
+            raise wrap_native_error(e) from e
+
+    def set_credentials(self, credentials: "list[CredentialSpec]") -> None:
+        try:
+            self._inner.set_credentials(_native_credentials(credentials))
+        except Exception as e:  # noqa: BLE001
+            raise wrap_native_error(e) from e
+
+    def update_credential_values(self, values: "dict[str, str]") -> None:
+        try:
+            self._inner.update_credential_values(dict(values))
         except Exception as e:  # noqa: BLE001
             raise wrap_native_error(e) from e
 
@@ -1554,6 +1573,36 @@ class CloudTransport:
             f"/v1/machines/{self._id}/ports",
             json_body={"ports": [{"port": g} for g in guests]},
         )
+
+    def set_credentials(self, credentials: "list[CredentialSpec]") -> None:
+        # Values are stored for the account first, so the binding change can
+        # hand a running machine the ones it now needs.
+        _store_cloud_credentials(self._base, self._key, credentials)
+        _cloud_fetch(
+            self._base,
+            self._key,
+            "PUT",
+            f"/v1/machines/{self._id}/credentials",
+            json_body={"credentials": [c.name for c in credentials]},
+        )
+
+    def update_credential_values(self, values: "dict[str, str]") -> None:
+        # A cloud value belongs to the account's credential of that name, so it
+        # changes for every machine bound to it; running ones take it at once.
+        if not values:
+            return
+        stored = {c["name"]: c for c in _cloud_fetch(self._base, self._key, "GET", "/v1/credentials")}
+        for name, value in values.items():
+            credential = stored.get(name)
+            if credential is None:
+                raise InvalidConfigError(f'no stored credential "{name}"; bind it with set_credentials first')
+            _cloud_fetch(
+                self._base,
+                self._key,
+                "PUT",
+                f"/v1/credentials/{quote(name, safe='')}",
+                json_body={"envVar": credential["envVar"], "hosts": list(credential["hosts"]), "value": value},
+            )
 
     def set_network_policy(self, policy: "NetworkPolicy") -> None:
         # A running machine takes a new allow list at once; switching it to or

@@ -422,6 +422,64 @@ impl Transport for CloudTransport {
         Ok(Checkpoint::Cloud(self.client.checkpoint(&self.id)?.into()))
     }
 
+    fn set_credentials(&self, credentials: &[crate::config::Credential]) -> Result<()> {
+        if let Some(c) = credentials.iter().find(|c| !c.methods.is_empty()) {
+            return Err(Error::new(
+                ErrorKind::NotSupported,
+                format!(
+                    "credential \"{}\": methods are enforced on the local target only; \
+                     omit them for a cloud machine",
+                    c.name
+                ),
+            ));
+        }
+        // Values are stored for the account first, so the binding change can
+        // hand a running machine the ones it now needs.
+        for c in credentials {
+            if let Some(value) = &c.value {
+                self.client.set_credential(
+                    &c.name,
+                    &wire::SetCredential {
+                        env_var: c.env_var.clone(),
+                        hosts: c.hosts.clone(),
+                        value: value.clone(),
+                    },
+                )?;
+            }
+        }
+        let names: Vec<String> = credentials.iter().map(|c| c.name.clone()).collect();
+        Ok(self.client.set_machine_credentials(&self.id, &names)?)
+    }
+
+    fn update_credential_values(
+        &self,
+        values: &std::collections::BTreeMap<String, String>,
+    ) -> Result<()> {
+        // A cloud value belongs to the account's credential of that name, so
+        // it changes for every machine bound to it; running ones take it at once.
+        if values.is_empty() {
+            return Ok(());
+        }
+        let stored = self.client.stored_credentials()?;
+        for (name, value) in values {
+            let info = stored.iter().find(|c| &c.name == name).ok_or_else(|| {
+                Error::new(
+                    ErrorKind::Config,
+                    format!("no stored credential \"{name}\"; bind it with set_credentials first"),
+                )
+            })?;
+            self.client.set_credential(
+                name,
+                &wire::SetCredential {
+                    env_var: info.env_var.clone(),
+                    hosts: info.hosts.clone(),
+                    value: value.clone(),
+                },
+            )?;
+        }
+        Ok(())
+    }
+
     fn checkpoints(&self) -> Result<Vec<Checkpoint>> {
         Ok(self
             .client

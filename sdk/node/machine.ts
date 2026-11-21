@@ -34,6 +34,7 @@ import {
 import type {
   CacheDiskInfo,
   CreateCacheDiskOptions,
+  CredentialSpec,
   PublishedCacheDisk,
   MachineResources,
   ResizeOptions,
@@ -463,6 +464,26 @@ export class Machine {
    *  stopped first, and `"deny-all"` is refused once the machine has run. */
   setNetworkPolicy(policy: NetworkPolicy): Promise<void> {
     return this.transport.setNetworkPolicy(policy);
+  }
+
+  /** Replace this machine's credential bindings with `credentials`, while it
+   *  is created, stopped or running. A running machine takes the change at
+   *  once: a new host is trusted and a removed binding stops being
+   *  substituted, with no restart. Locally a binding's `value` is held in
+   *  this process's memory and values already held for a binding that stays
+   *  are kept; a machine that booted with no bindings takes them from its
+   *  next start. On the cloud each `value` is stored for your account first,
+   *  and a binding without one uses the credential already stored. */
+  setCredentials(credentials: CredentialSpec[]): Promise<void> {
+    return this.transport.setCredentials(credentials);
+  }
+
+  /** Hand this machine new values for its credential bindings, by binding
+   *  name; its next request to a bound host carries them, with no restart.
+   *  On the cloud a value belongs to your account's credential of that name,
+   *  so every machine bound to it gets the new value. */
+  updateCredentialValues(values: Record<string, string>): Promise<void> {
+    return this.transport.updateCredentialValues(values);
   }
 
   /** The machine's published ports, whether or not it runs. On the cloud each

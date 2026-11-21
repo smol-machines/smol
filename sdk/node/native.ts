@@ -186,6 +186,8 @@ export interface NapiMachine {
   execStream(command: string[], options?: NativeExecOptions): NativeExecStream;
   sync(): Promise<void>;
   setEgressPolicy(policy: { network: boolean; cidrs?: string[]; hosts?: string[] }): void;
+  setCredentials(credentials: NativeCredential[]): Promise<void>;
+  updateCredentialValues(values: Record<string, string>): Promise<void>;
   stop(options?: NativeStopOptions): Promise<void>;
   publishedPorts(): { host: number; guest: number; protocol: string }[];
   setPorts(ports: { host: number; guest: number; protocol: string }[]): Promise<void>;

@@ -395,6 +395,18 @@ const server = createServer(async (req, res) => {
   }
   if (method === "GET" && url === "/v1/machines/m1")
     return json(200, { ...readinessResponse("m1", 2), ports: m1Ports });
+  if (method === "PUT" && url === "/v1/machines/m1/credentials") {
+    seen.machineCredentialBodies = [
+      ...(seen.machineCredentialBodies ?? []),
+      JSON.parse((await readBody(req)).toString() || "{}"),
+    ];
+    return json(200, { id: "m1", name: "golden", state: "started" });
+  }
+  if (method === "GET" && url === "/v1/credentials") {
+    return json(200, [
+      { name: "gh", envVar: "GH_TOKEN", hosts: ["api.github.com"], createdAt: "", updatedAt: "" },
+    ]);
+  }
   if (method === "PUT" && url === "/v1/machines/m1/network") {
     seen.networkBodies = [...(seen.networkBodies ?? []), JSON.parse((await readBody(req)).toString() || "{}")];
     return json(200, { id: "m1", name: "golden", state: "started", network: seen.networkBodies.at(-1) });
@@ -1067,6 +1079,32 @@ async function main(): Promise<void> {
   check("allow-all is the open mode", JSON.stringify(seen.networkBodies?.at(-1)) === JSON.stringify({ mode: "open" }));
   await m.setNetworkPolicy("deny-all");
   check("deny-all is the blocked mode", JSON.stringify(seen.networkBodies?.at(-1)) === JSON.stringify({ mode: "blocked" }));
+
+  // --- credentials: change a machine's bindings and their values ---
+  const putsBefore = seen.credentialPuts?.length ?? 0;
+  await m.setCredentials([
+    { name: "gh", envVar: "GH_TOKEN", hosts: ["api.github.com"], value: "ghp_new" },
+    { name: "notion", envVar: "NOTION_API_KEY", hosts: ["api.notion.com"] },
+  ]);
+  check(
+    "setCredentials stores the given value, then binds the names",
+    seen.credentialPuts.length === putsBefore + 1 &&
+      seen.credentialPuts.at(-1).name === "gh" &&
+      JSON.stringify(seen.machineCredentialBodies?.at(-1)) === JSON.stringify({ credentials: ["gh", "notion"] }),
+    JSON.stringify(seen.machineCredentialBodies),
+  );
+  await m.updateCredentialValues({ gh: "ghp_rotated" });
+  check(
+    "updateCredentialValues re-stores the credential with its variable and hosts",
+    JSON.stringify(seen.credentialPuts.at(-1)) ===
+      JSON.stringify({ name: "gh", body: { envVar: "GH_TOKEN", hosts: ["api.github.com"], value: "ghp_rotated" } }),
+    JSON.stringify(seen.credentialPuts.at(-1)),
+  );
+  const unknownValue = await m.updateCredentialValues({ stripe: "sk" }).then(
+    () => "",
+    (e: Error) => e.message,
+  );
+  check("updateCredentialValues refuses a credential not stored", unknownValue.includes('no stored credential "stripe"'), unknownValue);
 
   // --- branch batch: fan out N children in one transactional call ---
   const batch = await m.branchBatch({ count: 3, namePrefix: "rollout" });

@@ -327,6 +327,19 @@ pub struct CacheDiskList {
     pub cache_disks: Vec<CacheDisk>,
 }
 
+/// A credential stored for the account: its name, variable and hosts. Its
+/// value is never returned.
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct CredentialInfo {
+    /// The name machines bind it by.
+    pub name: String,
+    /// The variable a binding machine sees, holding a placeholder.
+    pub env_var: String,
+    /// The only hosts the value is ever sent to.
+    pub hosts: Vec<String>,
+}
+
 /// A credential to store for the account, which machines then bind by name.
 /// The value is sealed at rest and never returned.
 #[derive(Clone, Serialize)]

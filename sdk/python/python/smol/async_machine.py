@@ -31,6 +31,7 @@ from typing import Any, AsyncIterator, Optional
 
 from .machine import Job, Machine
 from .types import (
+    CredentialSpec,
     JobInfo,
     JobOutput,
     MachineSummary,
@@ -327,6 +328,14 @@ class AsyncMachine:
     async def set_network_policy(self, policy: Any) -> None:
         """Replace the machine's outbound network policy; see :meth:`Machine.set_network_policy`."""
         await asyncio.to_thread(self._m.set_network_policy, policy)
+
+    async def set_credentials(self, credentials: "list[CredentialSpec]") -> None:
+        """Replace the machine's credential bindings; see :meth:`Machine.set_credentials`."""
+        await asyncio.to_thread(self._m.set_credentials, credentials)
+
+    async def update_credential_values(self, values: "dict[str, str]") -> None:
+        """Hand the machine new credential values; see :meth:`Machine.update_credential_values`."""
+        await asyncio.to_thread(self._m.update_credential_values, values)
 
     async def ports(self) -> "list[PublishedPort]":
         """The machine's published ports, whether or not it runs; see :meth:`Machine.ports`."""
