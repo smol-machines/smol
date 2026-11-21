@@ -14,6 +14,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -844,6 +845,83 @@ func (t *cloudTransport) setNetworkPolicy(ctx context.Context, p NetworkPolicy) 
 	return err
 }
 
+// setCredentials stores each given value for the account first, so the
+// binding change can hand a running machine the ones it now needs, then binds
+// the machine to exactly these names.
+func (t *cloudTransport) setCredentials(ctx context.Context, credentials []CredentialSpec) error {
+	if err := storeCloudCredentials(ctx, t.conn, credentials); err != nil {
+		return err
+	}
+	names := make([]string, len(credentials))
+	for i, c := range credentials {
+		names[i] = c.Name
+	}
+	_, err := cloudDo(ctx, t.conn, "PUT", t.path("/credentials"), fetchOpts{json: map[string]any{"credentials": names}})
+	return err
+}
+
+// updateCredentialValues re-stores each named account credential with its
+// new value. A cloud value belongs to the account's credential of that name,
+// so it changes for every machine bound to it; running ones take it at once.
+func (t *cloudTransport) updateCredentialValues(ctx context.Context, values map[string]string) error {
+	if len(values) == 0 {
+		return nil
+	}
+	var stored []storedCredential
+	if err := cloudJSON(ctx, t.conn, "GET", "/v1/credentials", fetchOpts{}, &stored); err != nil {
+		return err
+	}
+	byName := make(map[string]storedCredential, len(stored))
+	for _, c := range stored {
+		byName[c.Name] = c
+	}
+	names := make([]string, 0, len(values))
+	for name := range values {
+		if _, ok := byName[name]; !ok {
+			return invalidConfig(fmt.Sprintf("no stored credential %q; bind it with SetCredentials first", name))
+		}
+		names = append(names, name)
+	}
+	slices.Sort(names)
+	for _, name := range names {
+		c := byName[name]
+		body := map[string]any{"envVar": c.EnvVar, "hosts": c.Hosts, "value": values[name]}
+		if _, err := cloudDo(ctx, t.conn, "PUT", "/v1/credentials/"+url.PathEscape(name), fetchOpts{json: body}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// storedCredential is an account credential as GET /v1/credentials lists it,
+// without its value.
+type storedCredential struct {
+	Name   string   `json:"name"`
+	EnvVar string   `json:"envVar"`
+	Hosts  []string `json:"hosts"`
+}
+
+// storeCloudCredentials stores each credential that carries a value for the
+// account, so a machine can bind it by name. The cloud enforces hosts but not
+// methods, so a method restriction is refused rather than silently dropped.
+func storeCloudCredentials(ctx context.Context, conn cloudConn, credentials []CredentialSpec) error {
+	for _, c := range credentials {
+		if len(c.Methods) > 0 {
+			return notSupported(fmt.Sprintf("credential %q: methods are enforced on the local target only; omit them for a cloud machine.", c.Name))
+		}
+	}
+	for _, c := range credentials {
+		if c.Value == "" {
+			continue
+		}
+		body := map[string]any{"envVar": c.EnvVar, "hosts": c.Hosts, "value": c.Value}
+		if _, err := cloudDo(ctx, conn, "PUT", "/v1/credentials/"+url.PathEscape(c.Name), fetchOpts{json: body}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (t *cloudTransport) stop(ctx context.Context) error {
 	_, err := cloudDo(ctx, t.conn, "POST", t.path("/stop"), fetchOpts{})
 	return err
@@ -1565,6 +1643,16 @@ func createCloud(ctx context.Context, cfg MachineConfig, c ConnectOptions) (tran
 	// the branch endpoint checks the stored flag.
 	if cfg.Branchable {
 		body["forkable"] = true
+	}
+	if len(cfg.Credentials) > 0 {
+		if err := storeCloudCredentials(ctx, conn, cfg.Credentials); err != nil {
+			return nil, err
+		}
+		names := make([]string, len(cfg.Credentials))
+		for i, c := range cfg.Credentials {
+			names[i] = c.Name
+		}
+		body["credentials"] = names
 	}
 	var created machineInfo
 	if err := cloudJSON(ctx, conn, "POST", "/v1/machines", fetchOpts{json: body}, &created); err != nil {

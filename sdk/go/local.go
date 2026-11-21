@@ -367,6 +367,16 @@ func (t *localTransport) setNetworkPolicy(ctx context.Context, policy NetworkPol
 	}, nil)
 }
 
+func (t *localTransport) setCredentials(ctx context.Context, credentials []CredentialSpec) error {
+	return localCall(ctx, "set_credentials", map[string]any{
+		"name": t.n, "credentials": nativeCredentials(credentials),
+	}, nil)
+}
+
+func (t *localTransport) updateCredentialValues(ctx context.Context, values map[string]string) error {
+	return localCall(ctx, "update_credential_values", map[string]any{"name": t.n, "values": values}, nil)
+}
+
 func (t *localTransport) stop(ctx context.Context) error {
 	untrackLocal(t)
 	return localCall(ctx, "stop", nameArgs{t.n}, nil)
@@ -721,18 +731,39 @@ type nativeResources struct {
 }
 
 type nativeMachineConfig struct {
-	Name       string            `json:"name"`
-	Image      string            `json:"image,omitempty"`
-	Env        []nativeEnv       `json:"env,omitempty"`
-	Workdir    string            `json:"workdir,omitempty"`
-	User       string            `json:"user,omitempty"`
-	Mounts     []nativeMount     `json:"mounts,omitempty"`
-	Ports      []nativePort      `json:"ports,omitempty"`
-	Resources  nativeResources   `json:"resources"`
-	Persistent bool              `json:"persistent"`
-	Forkable   bool              `json:"forkable"`
-	Detached   bool              `json:"detached"`
-	Labels     map[string]string `json:"labels,omitempty"`
+	Name        string             `json:"name"`
+	Image       string             `json:"image,omitempty"`
+	Env         []nativeEnv        `json:"env,omitempty"`
+	Workdir     string             `json:"workdir,omitempty"`
+	User        string             `json:"user,omitempty"`
+	Mounts      []nativeMount      `json:"mounts,omitempty"`
+	Ports       []nativePort       `json:"ports,omitempty"`
+	Resources   nativeResources    `json:"resources"`
+	Persistent  bool               `json:"persistent"`
+	Forkable    bool               `json:"forkable"`
+	Detached    bool               `json:"detached"`
+	Labels      map[string]string  `json:"labels,omitempty"`
+	Credentials []nativeCredential `json:"credentials,omitempty"`
+}
+
+type nativeCredential struct {
+	Name    string   `json:"name"`
+	EnvVar  string   `json:"env_var"`
+	Hosts   []string `json:"hosts"`
+	Methods []string `json:"methods,omitempty"`
+	Value   *string  `json:"value,omitempty"`
+}
+
+func nativeCredentials(credentials []CredentialSpec) []nativeCredential {
+	out := make([]nativeCredential, len(credentials))
+	for i, c := range credentials {
+		out[i] = nativeCredential{Name: c.Name, EnvVar: c.EnvVar, Hosts: c.Hosts, Methods: c.Methods}
+		if c.Value != "" {
+			value := c.Value
+			out[i].Value = &value
+		}
+	}
+	return out
 }
 
 func toNativeConfig(name string, cfg MachineConfig) nativeMachineConfig {
@@ -766,10 +797,11 @@ func toNativeConfig(name string, cfg MachineConfig) nativeMachineConfig {
 			DiskDurability: string(r.DiskDurability),
 		},
 		// A machine meant to outlive this process has to outlive its record too.
-		Persistent: cfg.Persistent || cfg.Detach,
-		Forkable:   cfg.Branchable,
-		Detached:   cfg.Detach,
-		Labels:     cfg.Labels,
+		Persistent:  cfg.Persistent || cfg.Detach,
+		Forkable:    cfg.Branchable,
+		Detached:    cfg.Detach,
+		Labels:      cfg.Labels,
+		Credentials: nativeCredentials(cfg.Credentials),
 	}
 }
 

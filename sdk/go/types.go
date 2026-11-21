@@ -289,6 +289,32 @@ type MachineConfig struct {
 	User string
 	// EgressInterceptor binds intercepted egress for this local machine.
 	EgressInterceptor *EgressInterceptor
+	// Credentials the workload uses without seeing them. Implies network
+	// access. See CredentialSpec.
+	Credentials []CredentialSpec
+}
+
+// CredentialSpec is a credential the workload uses without ever seeing it,
+// like the CLI's --credential. The guest variable EnvVar holds a
+// placeholder; the real value is substituted only in HTTPS requests to
+// Hosts, so no other destination can receive it.
+type CredentialSpec struct {
+	// Name is the binding name: 1-64 lowercase letters, digits, - and _. On
+	// the cloud it names the credential stored for your account.
+	Name string
+	// EnvVar is the guest environment variable that holds the placeholder.
+	EnvVar string
+	// Hosts are the exact host names the value may be sent to. No wildcards.
+	Hosts []string
+	// Value is the real value. Locally it is held in this process's memory
+	// only; when empty, this process's own EnvVar is read at each start. On
+	// the cloud it is stored sealed under Name; when empty, the credential
+	// already stored under Name is used.
+	Value string
+	// Methods limits the HTTP methods the value may be used with, for
+	// example GET and HEAD for a read-only token. Every method when empty.
+	// Local only.
+	Methods []string
 }
 
 // MachineSummary is one machine as List reports it.

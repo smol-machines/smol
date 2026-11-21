@@ -36,6 +36,12 @@ pub(crate) fn dispatch(op: &str, args: Value, payload: &mut Payload) -> CallResu
         "export_checkpoint" => export_checkpoint(parse(args)?),
         "prune_checkpoint_store" => prune_checkpoint_store(parse(args)?),
         "set_egress_policy" => set_egress_policy(parse(args)?),
+        "set_credentials" => set_credentials(parse(args)?),
+        "update_credential_values" => {
+            let a: CredentialValuesArgs = parse(args)?;
+            rt()?.supply_credential_values(&a.name, a.values)?;
+            Ok(Value::Null)
+        }
         "state" => {
             let a: Named = parse(args)?;
             Ok(json!(rt()?.state(&a.name)))
@@ -333,6 +339,80 @@ struct MachineConfig {
     detached: bool,
     #[serde(default)]
     labels: BTreeMap<String, String>,
+    #[serde(default)]
+    credentials: Vec<CredentialConfig>,
+}
+
+/// A credential binding as the Go SDK sends it, with its value when given.
+#[derive(Deserialize)]
+struct CredentialConfig {
+    name: String,
+    env_var: String,
+    hosts: Vec<String>,
+    #[serde(default)]
+    methods: Vec<String>,
+    #[serde(default)]
+    value: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct CredentialsArgs {
+    name: String,
+    credentials: Vec<CredentialConfig>,
+}
+
+#[derive(Deserialize)]
+struct CredentialValuesArgs {
+    name: String,
+    values: BTreeMap<String, String>,
+}
+
+/// The engine's policy for `configs`, and the values supplied with them by
+/// binding name.
+fn credential_policy(
+    configs: Vec<CredentialConfig>,
+) -> (
+    smolvm_protocol::credentials::CredentialPolicy,
+    BTreeMap<String, String>,
+) {
+    let mut values = BTreeMap::new();
+    let credentials = configs
+        .into_iter()
+        .map(|c| {
+            if let Some(value) = c.value {
+                values.insert(c.name.clone(), value);
+            }
+            smolvm_protocol::credentials::CredentialBinding {
+                name: c.name,
+                environment_variable: c.env_var,
+                allowed_hosts: c
+                    .hosts
+                    .into_iter()
+                    .map(|host| host.trim().to_ascii_lowercase())
+                    .collect(),
+                injection_location: Default::default(),
+                set_header: None,
+                methods: if c.methods.is_empty() {
+                    smolvm_protocol::credentials::DEFAULT_METHODS
+                        .iter()
+                        .map(|method| method.to_string())
+                        .collect()
+                } else {
+                    c.methods
+                },
+            }
+        })
+        .collect();
+    (
+        smolvm_protocol::credentials::CredentialPolicy { credentials },
+        values,
+    )
+}
+
+fn set_credentials(a: CredentialsArgs) -> CallResult {
+    let (policy, values) = credential_policy(a.credentials);
+    rt()?.set_credential_bindings(&a.name, policy, values)?;
+    Ok(Value::Null)
 }
 
 #[derive(Deserialize, Default)]
@@ -508,14 +588,12 @@ fn pinned_ports(ports: &[PortConfig]) -> Vec<(u16, u16)> {
     ports.iter().map(|p| (p.host, p.guest)).collect()
 }
 
-fn interceptor(
-    i: Interceptor,
-) -> Result<Option<smolvm_protocol::InterceptEndpoint>, CallError> {
+fn interceptor(i: Interceptor) -> Result<Option<smolvm_protocol::InterceptEndpoint>, CallError> {
     match (i.interceptor_address, i.interceptor_token) {
         (None, None) => Ok(None),
-        (Some(address), Some(token)) => {
-            Ok(Some(smolvm::embedded::interceptor_endpoint(&address, &token)?))
-        }
+        (Some(address), Some(token)) => Ok(Some(smolvm::embedded::interceptor_endpoint(
+            &address, &token,
+        )?)),
         _ => Err(CallError::config(
             "egress interceptor requires both address and token",
         )),
@@ -689,6 +767,10 @@ fn create(c: MachineConfig) -> CallResult {
         mounts.push(mount);
     }
     let resources = vm_resources(&c.resources)?;
+    // A binding without a value reads this process's variable at each start,
+    // as in the other SDKs; values given are held in this process's memory.
+    let (credentials, credential_values) = credential_policy(c.credentials);
+    let credentials = (!credentials.credentials.is_empty()).then_some(credentials);
     let spec = MachineSpec {
         name: c.name,
         mounts,
@@ -708,10 +790,16 @@ fn create(c: MachineConfig) -> CallResult {
         // Hostname rules live on the spec, not in VmResources: the engine
         // persists them separately and its DNS filter enforces them.
         allowed_hosts: c.resources.allowed_hosts.unwrap_or_default(),
+        credentials,
         ..Default::default()
     };
+    let name = spec.name.clone();
     let env = c.env.into_iter().map(|v| (v.key, v.value)).collect();
-    rt()?.create_machine_with_workload(spec, env, c.workdir, c.user)?;
+    let runtime = rt()?;
+    runtime.create_machine_with_workload(spec, env, c.workdir, c.user)?;
+    if !credential_values.is_empty() {
+        runtime.supply_credential_values(&name, credential_values)?;
+    }
     Ok(Value::Null)
 }
 
