@@ -88,6 +88,17 @@ impl Fixture {
             .join("smolvm/vms")
             .join(smolvm::agent::vm_dir_hash(NAME))
     }
+    /// Whether neither disk image exists yet. A created machine already owns
+    /// its directory (it holds the name binding), but no disk is allocated
+    /// until the machine first boots.
+    fn no_disks(&self) -> bool {
+        [
+            smolvm::storage::STORAGE_DISK_FILENAME,
+            smolvm::storage::OVERLAY_DISK_FILENAME,
+        ]
+        .iter()
+        .all(|disk| !self.disks().join(disk).exists())
+    }
     fn sizes(&self) -> (Option<u64>, Option<u64>) {
         let record = self.db().get_vm(NAME).unwrap().unwrap();
         (record.storage_gb, record.overlay_gb)
@@ -116,7 +127,7 @@ impl Drop for Fixture {
 #[test]
 fn public_update_plans_disk_sizes_before_first_boot() {
     let f = Fixture::new();
-    assert!(!f.disks().exists());
+    assert!(f.no_disks());
     let output = f.update("2", "3");
     assert!(
         output.status.success(),
@@ -126,7 +137,7 @@ fn public_update_plans_disk_sizes_before_first_boot() {
     assert_eq!(f.sizes(), (Some(2), Some(3)));
     assert_eq!(f.db().get_vm(NAME).unwrap().unwrap().mem, 768);
     assert!(
-        !f.disks().exists(),
+        f.no_disks(),
         "editing a fresh machine must not allocate disks"
     );
     f.ok(&[
@@ -157,7 +168,7 @@ fn public_update_plans_disk_sizes_before_first_boot() {
         (Some(3), Some(4)),
         "invalid combined resize must not partially save"
     );
-    assert!(!f.disks().exists());
+    assert!(f.no_disks());
 }
 
 #[test]
@@ -208,7 +219,7 @@ fn first_boot_uses_planned_sizes_and_later_growth_preserves_data() {
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );
-    assert!(!f.disks().exists());
+    assert!(f.no_disks());
     f.ok(&["machine", "start", "--name", NAME]);
     assert_eq!(
         std::fs::metadata(f.disks().join(smolvm::storage::STORAGE_DISK_FILENAME))
