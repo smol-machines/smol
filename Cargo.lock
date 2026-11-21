@@ -3799,7 +3799,7 @@ checksum = "67b1b7a3b5fe4f1376887184045fcf45c69e92af734b7aaddc05fb777b6fbd03"
 
 [[package]]
 name = "smol-cli"
-version = "1.36.0"
+version = "1.36.1"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -3833,7 +3833,7 @@ dependencies = [
 
 [[package]]
 name = "smol-cloud"
-version = "1.36.0"
+version = "1.36.1"
 dependencies = [
  "base64 0.22.1",
  "futures-util",
@@ -3847,7 +3847,7 @@ dependencies = [
 
 [[package]]
 name = "smolfile"
-version = "1.36.0"
+version = "1.36.1"
 dependencies = [
  "serde",
  "smolvm-protocol",
@@ -3857,7 +3857,7 @@ dependencies = [
 
 [[package]]
 name = "smolmachines"
-version = "1.36.0"
+version = "1.36.1"
 dependencies = [
  "flate2",
  "futures-util",
@@ -3880,7 +3880,7 @@ dependencies = [
 
 [[package]]
 name = "smolvm"
-version = "1.36.0"
+version = "1.36.1"
 dependencies = [
  "anyhow",
  "async-stream",
@@ -3960,7 +3960,7 @@ dependencies = [
 
 [[package]]
 name = "smolvm-checkpoint"
-version = "1.36.0"
+version = "1.36.1"
 dependencies = [
  "hex",
  "libc",
@@ -3975,7 +3975,7 @@ dependencies = [
 
 [[package]]
 name = "smolvm-credentials"
-version = "1.36.0"
+version = "1.36.1"
 dependencies = [
  "anyhow",
  "bytes",
@@ -4000,7 +4000,7 @@ dependencies = [
 
 [[package]]
 name = "smolvm-cuda"
-version = "1.36.0"
+version = "1.36.1"
 dependencies = [
  "getrandom 0.3.4",
  "libc",
@@ -4009,7 +4009,7 @@ dependencies = [
 
 [[package]]
 name = "smolvm-network"
-version = "1.36.0"
+version = "1.36.1"
 dependencies = [
  "crossbeam-queue",
  "getrandom 0.3.4",
@@ -4026,7 +4026,7 @@ dependencies = [
 
 [[package]]
 name = "smolvm-oci-layer"
-version = "1.36.0"
+version = "1.36.1"
 dependencies = [
  "flate2",
  "libc",
@@ -4037,7 +4037,7 @@ dependencies = [
 
 [[package]]
 name = "smolvm-pack"
-version = "1.36.0"
+version = "1.36.1"
 dependencies = [
  "crc32fast",
  "libc",
@@ -4057,14 +4057,14 @@ dependencies = [
 
 [[package]]
 name = "smolvm-paths"
-version = "1.36.0"
+version = "1.36.1"
 dependencies = [
  "dirs",
 ]
 
 [[package]]
 name = "smolvm-protocol"
-version = "1.36.0"
+version = "1.36.1"
 dependencies = [
  "base64 0.22.1",
  "serde",
@@ -4074,7 +4074,7 @@ dependencies = [
 
 [[package]]
 name = "smolvm-registry"
-version = "1.36.0"
+version = "1.36.1"
 dependencies = [
  "bytes",
  "filetime",
