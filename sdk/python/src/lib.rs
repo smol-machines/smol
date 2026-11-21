@@ -25,6 +25,8 @@ use smolvm::error::{AgentErrorKind, Error as SmolvmError};
 #[path = "../../shared/exec_stream_utf8.rs"]
 mod exec_stream_utf8;
 use exec_stream_utf8::Utf8ExecStream;
+#[path = "../../shared/rosetta_pull.rs"]
+mod rosetta_pull;
 
 // Error codes exposed to Python as `SmolError.code` (parity with smol-node's
 // `errors.rs`). The pure-Python `wrap_native_error` parses the `[CODE]` prefix.
@@ -595,6 +597,11 @@ fn create_spec_from_config(
                     spec.cuda = v.extract()?;
                 }
             }
+            if let Some(v) = rd.get_item("rosetta")? {
+                if !v.is_none() {
+                    spec.rosetta = v.extract()?;
+                }
+            }
         }
     }
     // Map the Python `mounts` list (dicts of {source, target, read_only, staged})
@@ -750,6 +757,7 @@ impl Machine {
             }
             _ => None,
         };
+        rosetta_pull::refuse_rosetta_host_fetch(&name, image.as_deref(), &spec).map_err(err)?;
         let runtime = runtime().map_err(err)?;
         py.allow_threads(|| runtime.create_machine_with_spec(&name, image.as_deref(), &spec))
             .map_err(err)?;

@@ -716,6 +716,7 @@ type nativeResources struct {
 	GPU            bool     `json:"gpu,omitempty"`
 	GPUVRAMMiB     int      `json:"gpu_vram_mib,omitempty"`
 	CUDA           bool     `json:"cuda,omitempty"`
+	Rosetta        bool     `json:"rosetta,omitempty"`
 	NetworkBackend string   `json:"network_backend,omitempty"`
 	DiskDurability string   `json:"disk_durability,omitempty"`
 }
@@ -762,6 +763,7 @@ func toNativeConfig(name string, cfg MachineConfig) nativeMachineConfig {
 			GPU:            r.GPU,
 			GPUVRAMMiB:     r.GPUVRAMMiB,
 			CUDA:           r.CUDA,
+			Rosetta:        r.Rosetta,
 			NetworkBackend: string(r.NetworkBackend),
 			DiskDurability: string(r.DiskDurability),
 		},
