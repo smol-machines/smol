@@ -756,7 +756,9 @@ impl Machine {
         // Held in memory for this machine's starts in this process; a binding
         // without a value is read from this process's environment instead.
         if !credential_values.is_empty() {
-            runtime.supply_credential_values(&name, credential_values);
+            runtime
+                .supply_credential_values(&name, credential_values)
+                .map_err(err)?;
         }
         Ok(Self { name })
     }
@@ -867,7 +869,9 @@ impl Machine {
         })
         .map_err(err)?;
         if !credential_values.is_empty() {
-            runtime.supply_credential_values(&name, credential_values);
+            runtime
+                .supply_credential_values(&name, credential_values)
+                .map_err(err)?;
         }
         Ok(Self { name })
     }
@@ -926,6 +930,36 @@ impl Machine {
             hosts,
         };
         py.allow_threads(|| runtime.set_egress_policy(&self.name, &policy))
+            .map_err(err)
+    }
+
+    /// Replace this machine's credential bindings, created or running, with
+    /// `credentials` (dicts as in a create config). A binding's `value` is
+    /// held in this process's memory; values held for a binding that stays
+    /// are kept. A running machine takes the change at once, unless it booted
+    /// without bindings: then it takes them from its next start.
+    fn set_credentials(&self, py: Python<'_>, credentials: Bound<'_, PyAny>) -> PyResult<()> {
+        let config = PyDict::new_bound(py);
+        config.set_item("credentials", credentials)?;
+        let (policy, values) = credential_policy(&config)?;
+        let runtime = runtime().map_err(err)?;
+        py.allow_threads(|| {
+            runtime.set_credential_bindings(&self.name, policy.unwrap_or_default(), values)
+        })
+        .map(drop)
+        .map_err(err)
+    }
+
+    /// Hand this machine new values for its credential bindings, by binding
+    /// name, held in this process's memory. A running machine's next request
+    /// to a bound host carries them, with no restart.
+    fn update_credential_values(
+        &self,
+        py: Python<'_>,
+        values: std::collections::BTreeMap<String, String>,
+    ) -> PyResult<()> {
+        let runtime = runtime().map_err(err)?;
+        py.allow_threads(|| runtime.supply_credential_values(&self.name, values))
             .map_err(err)
     }
 

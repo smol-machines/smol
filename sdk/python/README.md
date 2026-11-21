@@ -467,6 +467,21 @@ with Machine.create(MachineConfig(
 - On the cloud, a credential with a `value` is stored for your account under
   `name`; one without refers to a credential already stored there.
 
+Change a machine's bindings or values later, even while it runs; the next
+request to a bound host uses them, with no restart:
+
+```python
+machine.set_credentials([
+    CredentialSpec(name="notion", env_var="NOTION_API_KEY", hosts=["api.notion.com"]),
+    CredentialSpec(name="github", env_var="GITHUB_TOKEN", hosts=["api.github.com"], value=token),
+])
+machine.update_credential_values({"notion": rotated_key})
+```
+
+`set_credentials` replaces the whole set: a binding left out is removed.
+On the cloud a value belongs to your account's credential of that name, so
+updating it reaches every machine bound to it.
+
 ## Cache disks (cloud)
 
 A cache disk is a disk image many machines start from, each through its own

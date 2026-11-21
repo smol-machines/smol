@@ -37,6 +37,7 @@ from .transport import (
 )
 from .errors import InvalidConfigError, NotSupportedError, SmolError, wrap_native_error
 from .types import (
+    CredentialSpec,
     JobInfo,
     JobOutput,
     MachineSummary,
@@ -452,6 +453,30 @@ class Machine:
         if not hasattr(self._t, "set_network_policy"):
             raise NotSupportedError("set_network_policy is not supported on this target")
         self._t.set_network_policy(policy)
+
+    def set_credentials(self, credentials: "list[CredentialSpec]") -> None:
+        """Replace this machine's credential bindings with ``credentials``,
+        while it is created, stopped or running. A running machine takes the
+        change at once: a new host is trusted and a removed binding stops
+        being substituted, with no restart.
+
+        Locally a binding's ``value`` is held in this process's memory, and
+        values already held for a binding that stays are kept; a machine that
+        booted with no bindings takes them from its next start. On the cloud
+        each ``value`` is stored for your account first, and a binding without
+        one uses the credential already stored."""
+        if not hasattr(self._t, "set_credentials"):
+            raise NotSupportedError("set_credentials is not supported on this target")
+        self._t.set_credentials(list(credentials))
+
+    def update_credential_values(self, values: "dict[str, str]") -> None:
+        """Hand this machine new values for its credential bindings, by
+        binding name; its next request to a bound host carries them, with no
+        restart. On the cloud a value belongs to your account's credential of
+        that name, so every machine bound to it gets the new value."""
+        if not hasattr(self._t, "update_credential_values"):
+            raise NotSupportedError("update_credential_values is not supported on this target")
+        self._t.update_credential_values(dict(values))
 
     def ports(self) -> "list[PublishedPort]":
         """The machine's published ports, whether or not it runs. On the cloud

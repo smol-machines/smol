@@ -413,6 +413,27 @@ let machine = Machine::builder("notes")
 - On the cloud, a credential with a value is stored for your account under its
   name; one without refers to a credential already stored there.
 
+Change a machine's bindings or values later, even while it runs; the next
+request to a bound host uses them, with no restart:
+
+```rust,no_run
+# use smolmachines::{Credential, Machine};
+# fn main() -> smolmachines::Result<()> {
+# let machine = Machine::connect("agent")?;
+machine.set_credentials(&[
+    Credential::new("notion", "NOTION_API_KEY", ["api.notion.com"]),
+    Credential::new("github", "GITHUB_TOKEN", ["api.github.com"]).value("ghp_..."),
+])?;
+machine.update_credential_values([("notion", "secret_rotated")])?;
+# Ok(())
+# }
+```
+
+`set_credentials` replaces the whole set: a binding left out is removed.
+Locally it needs engine 1.36.1 or newer, and methods stay as set at create.
+On the cloud a value belongs to your account's credential of that name, so
+updating it reaches every machine bound to it.
+
 ## Cache disks (cloud)
 
 A cache disk is a disk image many machines start from, each through its own

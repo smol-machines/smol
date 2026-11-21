@@ -1125,6 +1125,37 @@ impl Machine {
         self.transport.update_network(policy)
     }
 
+    /// Replace this machine's credential bindings with exactly
+    /// `credentials`, while it is created, stopped or running. A running
+    /// machine takes the change at once: a new host is trusted and a removed
+    /// binding stops being substituted, with no restart.
+    ///
+    /// Locally a binding's `value` reaches only the engine processes this SDK
+    /// runs, and methods are fixed at create; a machine that booted with no
+    /// bindings takes them from its next start. Needs engine 1.36.1 or newer.
+    /// On the cloud each `value` is stored for your account first, and a
+    /// binding without one uses the credential already stored.
+    pub fn set_credentials(&self, credentials: &[crate::config::Credential]) -> Result<()> {
+        self.transport.set_credentials(credentials)
+    }
+
+    /// Hand this machine new values for its credential bindings, by binding
+    /// name; its next request to a bound host carries them, with no restart.
+    /// On the cloud a value belongs to your account's credential of that
+    /// name, so every machine bound to it gets the new value.
+    pub fn update_credential_values<I, K, V>(&self, values: I) -> Result<()>
+    where
+        I: IntoIterator<Item = (K, V)>,
+        K: Into<String>,
+        V: Into<String>,
+    {
+        let values = values
+            .into_iter()
+            .map(|(k, v)| (k.into(), v.into()))
+            .collect();
+        self.transport.update_credential_values(&values)
+    }
+
     /// The network policy this machine starts with.
     pub fn network(&self) -> Result<crate::config::NetworkPolicy> {
         self.transport.network()

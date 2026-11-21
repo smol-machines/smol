@@ -20,8 +20,8 @@ use crate::credentials::Credentials;
 use crate::error::{Error, ErrorKind, Result};
 use crate::types::{
     BranchBatch, Checkpoint, CheckpointExecution, CheckpointRestore, CheckpointUpload, Command,
-    CommandOutput, CreateMachine, IdleAction, JobOutput, JobRequest, Machine, MachineCacheDisk,
-    MachineJob, Network, Port, SetCredential, Share, Usage,
+    CommandOutput, CreateMachine, CredentialInfo, IdleAction, JobOutput, JobRequest, Machine,
+    MachineCacheDisk, MachineJob, Network, Port, SetCredential, Share, Usage,
 };
 
 /// Ordinary calls are short: a hung request must not block a caller forever.
@@ -889,6 +889,27 @@ impl Client {
             reqwest::Method::PUT,
             &format!("/v1/credentials/{}", encode_path(name)),
             Body::Json(serde_json::to_value(credential).map_err(serialize_error)?),
+            REQUEST_TIMEOUT,
+        )
+    }
+
+    /// The credentials stored for the account, without their values.
+    pub fn stored_credentials(&self) -> Result<Vec<CredentialInfo>> {
+        self.json(
+            reqwest::Method::GET,
+            "/v1/credentials",
+            Body::None,
+            REQUEST_TIMEOUT,
+        )
+    }
+
+    /// Bind machine `id` to exactly these stored credentials, by name. A
+    /// running machine takes the change at once where its node can.
+    pub fn set_machine_credentials(&self, id: &str, names: &[String]) -> Result<()> {
+        self.empty(
+            reqwest::Method::PUT,
+            &format!("/v1/machines/{id}/credentials"),
+            Body::Json(serde_json::json!({ "credentials": names })),
             REQUEST_TIMEOUT,
         )
     }

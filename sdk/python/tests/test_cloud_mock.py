@@ -16,7 +16,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "python"))
 
-from smol import AsyncMachine, ConnectOptions, ExecOptions, Machine, MachineConfig, MountSpec, NotSupportedError, PortSpec, ResourceSpec, SmolError  # noqa: E402
+from smol import AsyncMachine, ConnectOptions, ExecOptions, InvalidConfigError, Machine, MachineConfig, MountSpec, NotSupportedError, PortSpec, ResourceSpec, SmolError  # noqa: E402
 from smol.transport import _cloud_fetch  # noqa: E402  (internal — asserts request-id surfacing)
 
 MACHINE_ID = "mach-test123"
@@ -339,6 +339,9 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(401, b"bad token")
         if self.path.startswith("/v1/machines/mach-jobs"):
             return self._jobs("GET")
+        if self.path == "/v1/credentials":
+            return self._send(200, json.dumps([{"name": "gh", "envVar": "GH_TOKEN", "hosts": ["api.github.com"],
+                                                "createdAt": "", "updatedAt": ""}]).encode())
         # mach-flaky: reads are briefly unavailable twice, then answer.
         if self.path == "/v1/machines/mach-flaky":
             captured["flaky_gets"] = captured.get("flaky_gets", 0) + 1
@@ -436,6 +439,9 @@ class Handler(BaseHTTPRequestHandler):
             ]
             return self._send(200, json.dumps({"id": MACHINE_ID, "state": "started",
                                                "ports": captured["ports"]}).encode())
+        if self.path == f"/v1/machines/{MACHINE_ID}/credentials":
+            captured.setdefault("machine_credential_bodies", []).append(json.loads(self._read() or b"{}"))
+            return self._send(200, json.dumps({"id": MACHINE_ID, "state": "started"}).encode())
         if self.path.startswith("/v1/credentials/"):
             captured.setdefault("credential_puts", []).append(
                 {"name": self.path[len("/v1/credentials/"):], "body": json.loads(self._read() or b"{}")}
@@ -842,7 +848,7 @@ def main() -> int:
         from smol import CredentialSpec
 
         captured["credential_puts"] = []
-        Machine.create(
+        bound = Machine.create(
             MachineConfig(
                 image="alpine:3.20",
                 credentials=[
@@ -867,6 +873,30 @@ def main() -> int:
         check("cloud create binds every credential by name",
               captured["create_body"].get("credentials") == ["notion", "github"],
               str(captured["create_body"].get("credentials")))
+
+        # A machine's bindings change by name after create; a value given is
+        # stored for the account first.
+        captured["credential_puts"] = []
+        bound.set_credentials([
+            CredentialSpec(name="gh", env_var="GH_TOKEN", hosts=["api.github.com"], value="ghp_new"),
+            CredentialSpec(name="notion", env_var="NOTION_API_KEY", hosts=["api.notion.com"]),
+        ])
+        check("set_credentials stores the given value, then binds the names",
+              [p["name"] for p in captured["credential_puts"]] == ["gh"]
+              and captured["machine_credential_bodies"][-1] == {"credentials": ["gh", "notion"]},
+              str(captured.get("machine_credential_bodies")))
+        bound.update_credential_values({"gh": "ghp_rotated"})
+        check("update_credential_values re-stores the credential with its variable and hosts",
+              captured["credential_puts"][-1] == {
+                  "name": "gh", "body": {"envVar": "GH_TOKEN", "hosts": ["api.github.com"], "value": "ghp_rotated"}},
+              str(captured["credential_puts"][-1]))
+        try:
+            bound.update_credential_values({"stripe": "sk"})
+            unknown = ""
+        except InvalidConfigError as e:
+            unknown = str(e)
+        check("update_credential_values refuses a credential not stored",
+              'no stored credential "stripe"' in unknown, unknown)
         captured["credential_puts"] = []
         try:
             Machine.create(

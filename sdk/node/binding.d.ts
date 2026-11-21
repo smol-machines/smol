@@ -381,6 +381,20 @@ export declare class NapiMachine {
    * before it first boots.
    */
   setEgressPolicy(policy: EgressPolicyConfig): void
+  /**
+   * Replace this machine's credential bindings, created or running. A
+   * binding's `value` is held in this process's memory; values held for a
+   * binding that stays are kept. A running machine takes the change at
+   * once, unless it booted without bindings: then it takes them from its
+   * next start.
+   */
+  setCredentials(credentials: Array<CredentialConfig>): Promise<void>
+  /**
+   * Hand this machine new values for its credential bindings, by binding
+   * name, held in this process's memory. A running machine's next request
+   * to a bound host carries them, with no restart.
+   */
+  updateCredentialValues(values: Record<string, string>): Promise<void>
   /** Export a stored checkpoint directory as one portable checkpoint file. */
   static exportCheckpoint(source: string, output: string): number
   /** Remove objects that no retained checkpoint in a local store references. */

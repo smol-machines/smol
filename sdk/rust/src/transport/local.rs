@@ -603,6 +603,31 @@ impl CredentialEnv {
     fn apply(&self, command: &mut Command) {
         command.envs(self.0.iter().map(|(var, value)| (var, value)));
     }
+
+    /// Supply `value` for `var`, replacing what was supplied for it before.
+    fn set(&mut self, var: &str, value: &str) {
+        self.0.retain(|(v, _)| v != var);
+        self.0.push((var.to_string(), value.to_string()));
+    }
+}
+
+/// A machine's credential bindings as its status row lists them: name,
+/// variable and hosts. None from an engine whose rows predate the list.
+pub(crate) fn bindings_of(row: &serde_json::Value) -> Option<Vec<(String, String, Vec<String>)>> {
+    row.get("credentials")?
+        .as_array()?
+        .iter()
+        .map(|b| {
+            let text = |key: &str| b.get(key)?.as_str().map(str::to_string);
+            let hosts = b
+                .get("hosts")?
+                .as_array()?
+                .iter()
+                .filter_map(|h| h.as_str().map(str::to_string))
+                .collect();
+            Some((text("name")?, text("env_var")?, hosts))
+        })
+        .collect()
 }
 
 impl std::fmt::Debug for CredentialEnv {
@@ -648,7 +673,7 @@ pub(crate) struct LocalTransport {
     cli: Engine,
     /// Credential values this SDK supplied, applied to every engine call so
     /// any start resolves them.
-    credential_env: CredentialEnv,
+    credential_env: std::sync::Mutex<CredentialEnv>,
     /// Ports selected at creation; attached handles query the engine's mappings.
     ports: Vec<Port>,
     interceptor: std::sync::Mutex<Option<EgressInterceptor>>,
@@ -659,7 +684,7 @@ impl LocalTransport {
         Ok(Self {
             name: name.into(),
             cli: resolve_engine()?,
-            credential_env: CredentialEnv::default(),
+            credential_env: Default::default(),
             ports: Vec::new(),
             interceptor: std::sync::Mutex::new(None),
         })
@@ -691,7 +716,10 @@ impl LocalTransport {
             // See assets.rs: this variable makes the engine tie the VM's life
             // to its parent, and every CLI call here is short-lived.
             .env_remove("SMOLVM_BOOT_BINARY");
-        self.credential_env.apply(&mut command);
+        self.credential_env
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .apply(&mut command);
         if let Some(token) = token {
             command.env("SMOLVM_INTERCEPTOR_TOKEN", token);
         }
@@ -723,6 +751,38 @@ impl LocalTransport {
     }
 
     /// This machine's row from `machine ls --json`.
+    /// The machine's credential bindings, from an engine that lists them.
+    fn bindings(&self) -> Result<Vec<(String, String, Vec<String>)>> {
+        bindings_of(&self.record()?).ok_or_else(|| {
+            Error::new(
+                ErrorKind::NotSupported,
+                "changing credential bindings needs smolvm 1.36.1 or newer",
+            )
+        })
+    }
+
+    /// Supply these `(variable, value)` pairs to every later engine call.
+    fn supply<'a>(&self, values: impl IntoIterator<Item = (&'a str, &'a str)>) {
+        let mut env = self
+            .credential_env
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        for (var, value) in values {
+            env.set(var, value);
+        }
+    }
+
+    /// Hand a running machine the supplied values of these bindings; a stopped
+    /// one reads them at its next start.
+    fn refresh_credentials(&self, names: &[String]) -> Result<()> {
+        if names.is_empty() || self.state() != MachineState::Running {
+            return Ok(());
+        }
+        let mut args = vec!["machine", "credentials", "refresh", "--name", &self.name];
+        args.extend(names.iter().map(String::as_str));
+        self.run(&args).map(|_| ())
+    }
+
     fn record(&self) -> Result<serde_json::Value> {
         let out = self.run(&["machine", "ls", "--json"])?;
         machine_rows(&out)?
@@ -1412,6 +1472,89 @@ impl Transport for LocalTransport {
         Ok(network_policy_of(&self.record()?))
     }
 
+    fn set_credentials(&self, credentials: &[crate::config::Credential]) -> Result<()> {
+        if let Some(c) = credentials.iter().find(|c| !c.methods.is_empty()) {
+            return Err(Error::new(
+                ErrorKind::NotSupported,
+                format!(
+                    "credential \"{}\": methods are set when the machine is created",
+                    c.name
+                ),
+            ));
+        }
+        let bound = self.bindings()?;
+        self.supply(
+            credentials
+                .iter()
+                .filter_map(|c| Some((c.env_var.as_str(), c.value.as_deref()?))),
+        );
+        let normalized = |hosts: &[String]| -> Vec<String> {
+            let mut hosts: Vec<String> = hosts
+                .iter()
+                .map(|h| h.trim().to_ascii_lowercase())
+                .collect();
+            hosts.sort();
+            hosts
+        };
+        let unchanged = |c: &crate::config::Credential| {
+            bound.iter().any(|(name, var, hosts)| {
+                name == &c.name && var == &c.env_var && normalized(hosts) == normalized(&c.hosts)
+            })
+        };
+        // The engine reads an added binding's value from its environment, so
+        // only new or changed bindings are added; one that stays as it is
+        // takes a new value by refresh.
+        let mut add: Vec<String> = ["machine", "credentials", "add", "--name", &self.name]
+            .into_iter()
+            .map(str::to_string)
+            .collect();
+        let mut refresh: Vec<String> = Vec::new();
+        for c in credentials {
+            if !unchanged(c) {
+                add.push("--credential".into());
+                add.push(format!("{}={}@{}", c.name, c.env_var, c.hosts.join(",")));
+            } else if c.value.is_some() {
+                refresh.push(c.name.clone());
+            }
+        }
+        if add.len() > 5 {
+            let args: Vec<&str> = add.iter().map(String::as_str).collect();
+            self.run(&args)?;
+        }
+        self.refresh_credentials(&refresh)?;
+        let removed: Vec<&str> = bound
+            .iter()
+            .map(|(name, _, _)| name.as_str())
+            .filter(|name| !credentials.iter().any(|c| c.name == *name))
+            .collect();
+        if !removed.is_empty() {
+            let mut args = vec!["machine", "credentials", "remove", "--name", &self.name];
+            args.extend(removed);
+            self.run(&args)?;
+        }
+        Ok(())
+    }
+
+    fn update_credential_values(
+        &self,
+        values: &std::collections::BTreeMap<String, String>,
+    ) -> Result<()> {
+        let bound = self.bindings()?;
+        let mut supplied = Vec::new();
+        for (name, value) in values {
+            let (_, var, _) = bound.iter().find(|(n, _, _)| n == name).ok_or_else(|| {
+                Error::new(
+                    ErrorKind::Config,
+                    format!("machine '{}' has no credential binding '{name}'", self.name),
+                )
+            })?;
+            supplied.push((var.as_str(), value.as_str()));
+        }
+        self.supply(supplied);
+        let names: Vec<String> = values.keys().cloned().collect();
+        self.refresh_credentials(&names)
+    }
+
     fn resize(&self, resize: &Resize) -> Result<MachineResources> {
         // The engine checks every target first, then applies RAM, CPUs and
         // disks in that order.
@@ -1482,7 +1625,12 @@ impl Transport for LocalTransport {
         Ok(Box::new(LocalTransport {
             name: name.into(),
             cli: self.cli.clone(),
-            credential_env: self.credential_env.clone(),
+            credential_env: std::sync::Mutex::new(
+                self.credential_env
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .clone(),
+            ),
             ports: options.ports.clone(),
             interceptor: std::sync::Mutex::new(None),
         }))
@@ -1578,7 +1726,7 @@ pub(crate) fn create(
         name: name.into(),
         ports,
         interceptor: std::sync::Mutex::new(None),
-        credential_env,
+        credential_env: std::sync::Mutex::new(credential_env),
     })
 }
 
@@ -1886,7 +2034,7 @@ mod io_tests {
                 path,
                 bundled: false,
             },
-            credential_env: CredentialEnv::default(),
+            credential_env: Default::default(),
             ports: vec![],
             interceptor: std::sync::Mutex::new(None),
         }
@@ -2032,6 +2180,60 @@ printf '%s\n' '{"host":"test-1234.smol","config":"/private/path with spaces/conf
     }
 
     #[test]
+    fn credential_bindings_change_through_add_refresh_and_remove() {
+        let dir = tempfile::tempdir().unwrap();
+        let log = dir.path().join("args");
+        let transport = cli(
+            dir.path(),
+            &format!(
+                r#"if [ "$*" = "machine ls --json" ]; then
+  echo '[{{"name":"test","state":"running","credentials":[{{"name":"gh","env_var":"GH_TOKEN","hosts":["api.github.com"]}},{{"name":"old","env_var":"OLD","hosts":["old.example"]}}]}}]'
+  exit 0
+fi
+echo "$* PM=${{PM_AUTH:-}} GH=${{GH_TOKEN:-}}" >> {}"#,
+                log.display()
+            ),
+        );
+        transport
+            .set_credentials(&[
+                crate::config::Credential::new("gh", "GH_TOKEN", ["API.github.com"]).value("gh2"),
+                crate::config::Credential::new("pm", "PM_AUTH", ["postman-echo.com"]).value("pm1"),
+            ])
+            .unwrap();
+        let calls = std::fs::read_to_string(&log).unwrap();
+        let calls: Vec<&str> = calls.lines().collect();
+        assert_eq!(
+            calls,
+            [
+                "machine credentials add --name test --credential pm=PM_AUTH@postman-echo.com PM=pm1 GH=gh2",
+                "machine credentials refresh --name test gh PM=pm1 GH=gh2",
+                "machine credentials remove --name test old PM=pm1 GH=gh2",
+            ],
+            "only the new binding is added, the kept one refreshed, the dropped one removed"
+        );
+        let refused = transport
+            .update_credential_values(&std::collections::BTreeMap::from([(
+                "stripe".to_string(),
+                "sk".to_string(),
+            )]))
+            .unwrap_err();
+        assert!(
+            refused
+                .to_string()
+                .contains("no credential binding 'stripe'"),
+            "{refused}"
+        );
+    }
+
+    #[test]
+    fn an_engine_that_does_not_list_bindings_is_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        let transport = cli(dir.path(), r#"echo '[{"name":"test","state":"stopped"}]'"#);
+        let err = transport.set_credentials(&[]).unwrap_err();
+        assert_eq!(err.kind(), ErrorKind::NotSupported, "{err}");
+    }
+
+    #[test]
     fn branches_keep_the_selected_engine_and_credentials() {
         let dir = tempfile::tempdir().unwrap();
         let log = dir.path().join("args");
@@ -2042,8 +2244,10 @@ printf '%s\n' '{"host":"test-1234.smol","config":"/private/path with spaces/conf
                 log.display()
             ),
         );
-        transport.credential_env =
-            CredentialEnv::new(vec![("SMOL_SDK_TEST_CREDENTIAL".into(), "fixture".into())]);
+        transport.credential_env = std::sync::Mutex::new(CredentialEnv::new(vec![(
+            "SMOL_SDK_TEST_CREDENTIAL".into(),
+            "fixture".into(),
+        )]));
         transport.ports = vec![Port::same(9000)];
         let child = transport
             .branch("child", &BranchOptions::new().port(Port::new(18080, 8080)))
