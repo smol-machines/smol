@@ -42,11 +42,12 @@
     "start": "node dist/index.js",
     "test:e2e": "npm run build && tsx test/e2e.ts",
     "test:http": "npm run build && tsx test/http.ts",
-    "test:extract": "tsx test/extract.ts"
+    "test:extract": "tsx test/extract.ts",
+    "test:credentials": "npm run build && tsx test/credentials.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.32.1",
-    "smolmachines": "^1.35.0",
+    "smolmachines": "^1.36.1",
     "zod": "^3.25.0"
   },
   "devDependencies": {
