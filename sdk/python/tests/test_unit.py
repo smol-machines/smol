@@ -333,6 +333,12 @@ def test_native_config_omits_gpu_when_unset():
     assert "gpu_vram_mib" not in res
 
 
+def test_native_config_forwards_rosetta_only_when_asked():
+    rosetta = MachineConfig(resources=ResourceSpec(rosetta=True))
+    assert _native_config("m", rosetta)["resources"]["rosetta"] is True
+    assert "rosetta" not in _native_config("m", MachineConfig(resources=ResourceSpec(cpus=2)))["resources"]
+
+
 def test_native_config_forwards_scoped_egress():
     cfg = MachineConfig(
         resources=ResourceSpec(

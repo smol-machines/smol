@@ -65,6 +65,9 @@ class ResourceSpec:
     """Run the guest's unmodified CUDA/PyTorch code on the host's NVIDIA GPU by
     remoting CUDA Driver-API calls to the host over vsock (distinct from ``gpu``,
     which is Vulkan; no CUDA toolkit needed in the image). Local target only."""
+    rosetta: Optional[bool] = None
+    """Run x86_64 binaries through Rosetta 2 on Apple Silicon, and pull the
+    image for ``linux/amd64``. Local target only. Default: False."""
 
 
 @dataclass

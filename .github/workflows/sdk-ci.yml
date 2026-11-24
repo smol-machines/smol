@@ -169,11 +169,11 @@ jobs:
         run: |
           bun run build:native
           cargo build --release --bin smolvm --manifest-path ../../../Cargo.toml
-      - name: Verify Python native stream decoding
+      - name: Python native unit tests
         env:
           LIBKRUN_BUNDLE: ${{ github.workspace }}/monorepo/lib/linux-x86_64
           SMOLVM_LIB_DIR: ${{ github.workspace }}/monorepo/lib/linux-x86_64
-        run: cargo test --manifest-path ../python/Cargo.toml --lib exec_stream_utf8::tests
+        run: cargo test --manifest-path ../python/Cargo.toml --lib
       - name: Assemble release assets
         env:
           SMOLVM_LIB_DIR: ${{ github.workspace }}/monorepo/lib/linux-x86_64

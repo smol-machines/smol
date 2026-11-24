@@ -196,6 +196,11 @@ export interface VmResourcesConfig {
    */
   cuda?: boolean
   /**
+   * Run x86_64 binaries through Rosetta 2 on Apple Silicon, and pull the image
+   * for `linux/amd64`. Local target only (default: false).
+   */
+  rosetta?: boolean
+  /**
    * Network backend: `"tsi"` (outbound-only, the default for plain network
    * access) or `"virtio-net"`. A machine that will be checkpointed and have
    * its egress policy changed later needs virtio-net, since the policy is

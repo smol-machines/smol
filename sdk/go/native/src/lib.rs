@@ -14,6 +14,8 @@
 //! the other SDKs code for code.
 
 mod ops;
+#[path = "../../../shared/rosetta_pull.rs"]
+mod rosetta_pull;
 
 use std::ffi::{c_char, CStr, CString};
 use std::panic::{catch_unwind, AssertUnwindSafe};
