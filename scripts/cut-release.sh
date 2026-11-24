@@ -28,6 +28,7 @@ bump_versions() {
   perl -i -pe "s/^const Version = \"[^\"]+\"/const Version = \"$VERSION\"/" sdk/go/assets.go
   perl -0777 -i -pe "s/(\"name\": \"smolmachines\",\n\\s*\"version\": )\"[^\"]+\"/\$1\"$VERSION\"/g" sdk/node/package-lock.json
   perl -i -pe "s/^  \"version\": \"[^\"]+\"/  \"version\": \"$VERSION\"/" sdk/mcp/package.json
+  perl -i -pe "s/^(  |      )\"version\": \"[^\"]+\"/\$1\"version\": \"$VERSION\"/" sdk/mcp/server.json
   perl -0777 -i -pe "s/(\"name\": \"smolmachines-mcp\",\n\\s*\"version\": )\"[^\"]+\"/\$1\"$VERSION\"/g" sdk/mcp/package-lock.json
   for f in Cargo.lock sdk/node/Cargo.lock sdk/python/Cargo.lock sdk/go/native/Cargo.lock sdk/rust/Cargo.lock; do
     perl -0777 -i -pe "s/(name = \"(?:smol-cli|smol-cloud|smol-node|smol-py|smol-go|smolmachines)\"\nversion = )\"[^\"]+\"/\$1\"$VERSION\"/g" "$f"

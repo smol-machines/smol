@@ -359,6 +359,50 @@ jobs:
             npm publish --access public --provenance
           fi
 
+  # ─── MCP server: listing in the official MCP registry ──────────────────────
+  # The registry checks the published npm package's `mcpName` against
+  # server.json, so this runs after mcp-publish, as its own job: a registry
+  # refusal leaves the npm publish standing and a re-run retries only this.
+  # GitHub OIDC from this org's repo grants `io.github.smol-machines/*`.
+  mcp-registry:
+    name: mcp · publish to the MCP registry
+    needs: mcp-publish
+    if: ${{ github.event_name == 'push' || inputs.publish }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    defaults:
+      run:
+        working-directory: sdk/mcp
+    env:
+      MCP_PUBLISHER_VERSION: v1.8.16
+      MCP_PUBLISHER_SHA256: 6e2f799550cf843c6fd3350498d56cc49be3dc0af1e6237eb0e6435c7a9d5c05
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install mcp-publisher
+        run: |
+          curl -fsSL -o mcp-publisher.tar.gz \
+            "https://github.com/modelcontextprotocol/registry/releases/download/$MCP_PUBLISHER_VERSION/mcp-publisher_linux_amd64.tar.gz"
+          echo "$MCP_PUBLISHER_SHA256  mcp-publisher.tar.gz" | sha256sum -c -
+          tar xzf mcp-publisher.tar.gz mcp-publisher
+      - name: Publish to the MCP registry
+        # Skips a version the registry already lists, like the other publishes.
+        # The registry can 404 a version npm published seconds ago, so retry.
+        run: |
+          name="$(jq -r .name server.json)"
+          ver="$(jq -r .version server.json)"
+          if curl -fs -o /dev/null "https://registry.modelcontextprotocol.io/v0.1/servers/${name/\//%2F}/versions/$ver"; then
+            echo "$name $ver already in the MCP registry, skipping"
+            exit 0
+          fi
+          ./mcp-publisher login github-oidc
+          for _ in $(seq 1 5); do
+            ./mcp-publisher publish && exit 0
+            sleep 30
+          done
+          exit 1
+
   # ─── Go: per-platform runtime bundles ──────────────────────────────────────
   # A Go module can't carry per-platform binaries, so the Go SDK downloads its
   # runtime from the smol release on first local use. The bundle is the npm

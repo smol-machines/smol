@@ -1,6 +1,7 @@
 {
   "name": "smolmachines-mcp",
   "version": "1.36.1",
+  "mcpName": "io.github.smol-machines/smolmachines-mcp",
   "description": "MCP server that gives any agent its own branchable microVM: create a machine of your environment, run commands, branch before risky steps, keep or discard, checkpoint and restore. Local by default, same tools on smol cloud.",
   "license": "Apache-2.0",
   "author": "smol-machines",
