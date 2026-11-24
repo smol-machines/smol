@@ -673,6 +673,57 @@ func TestCloudBackgroundExecSendsTheFlagAndReturnsThePid(t *testing.T) {
 	}
 }
 
+func TestCloudEnvLabelsAndMetrics(t *testing.T) {
+	isolateCloudEnv(t)
+	type call struct {
+		method, path string
+		body         map[string]any
+	}
+	var calls []call
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		c := call{method: r.Method, path: r.URL.Path, body: map[string]any{}}
+		_ = json.NewDecoder(r.Body).Decode(&c.body)
+		calls = append(calls, c)
+		w.Header().Set("content-type", "application/json")
+		if r.URL.Path == "/v1/machines/m1/metrics" {
+			_, _ = io.WriteString(w, `{"machineId":"m1","at":"2026-11-23T10:00:00.000Z","state":"started","vcpus":2,"memoryLimitMb":4096,"cpuMillis":1500,"memoryMb":812,"rssMb":null}`)
+			return
+		}
+		_, _ = io.WriteString(w, `{"id":"m1","state":"started"}`)
+	}))
+	defer srv.Close()
+	tr := newCloud(cloudConn{baseURL: srv.URL, apiKey: "k"}, "m1", "m1")
+	ctx := context.Background()
+
+	if err := tr.setEnv(ctx, map[string]string{"APP_MODE": "prod"}); err != nil {
+		t.Fatal(err)
+	}
+	env, _ := calls[0].body["env"].(map[string]any)
+	if calls[0].method != "PUT" || calls[0].path != "/v1/machines/m1/env" || env["APP_MODE"] != "prod" {
+		t.Fatalf("setEnv sent %s %s %v; want PUT /env with the set", calls[0].method, calls[0].path, calls[0].body)
+	}
+
+	team := "infra"
+	if err := tr.setLabels(ctx, map[string]*string{"team": &team, "stale": nil}); err != nil {
+		t.Fatal(err)
+	}
+	labels, _ := calls[1].body["labels"].(map[string]any)
+	if calls[1].method != "PATCH" || calls[1].path != "/v1/machines/m1/labels" || labels["team"] != "infra" {
+		t.Fatalf("setLabels sent %s %s %v; want PATCH /labels", calls[1].method, calls[1].path, calls[1].body)
+	}
+	if v, present := labels["stale"]; !present || v != nil {
+		t.Fatalf("a nil label must be sent as null to remove it, got %v (present %v)", v, present)
+	}
+
+	m, err := tr.metrics(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m.VCPUs != 2 || m.MemoryMB == nil || *m.MemoryMB != 812 || m.RSSMB != nil || m.DiskUsedMB != nil {
+		t.Fatalf("metrics = %+v; want vcpus 2, memory 812, rss and disk-used absent", m)
+	}
+}
+
 func TestCloudErrorSentence(t *testing.T) {
 	cases := map[string]string{
 		`{"type":"about:blank","title":"Not Found","detail":"no machine m9"}`: "no machine m9",

@@ -339,6 +339,12 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(401, b"bad token")
         if self.path.startswith("/v1/machines/mach-jobs"):
             return self._jobs("GET")
+        if self.path == f"/v1/machines/{MACHINE_ID}/metrics":
+            return self._send(200, json.dumps({
+                "machineId": MACHINE_ID, "at": "2026-11-23T10:00:00.000Z", "state": "started",
+                "vcpus": 2, "memoryLimitMb": 4096, "cpuMillis": 1500, "memoryMb": 812,
+                "rssMb": None, "diskGb": 20, "egressBytes": 4096,
+            }).encode())
         if self.path == "/v1/credentials":
             return self._send(200, json.dumps([{"name": "gh", "envVar": "GH_TOKEN", "hosts": ["api.github.com"],
                                                 "createdAt": "", "updatedAt": ""}]).encode())
@@ -409,6 +415,15 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(200, captured.get("file") or b"", "application/octet-stream")
         return self._send(404, b"no route")
 
+    def do_PATCH(self):
+        captured["hits"].append(f"PATCH {self.path}")
+        if not self._auth_ok():
+            return self._send(401, b"bad token")
+        if self.path == f"/v1/machines/{MACHINE_ID}/labels":
+            captured.setdefault("label_bodies", []).append(json.loads(self._read() or b"{}"))
+            return self._send(200, json.dumps({"id": MACHINE_ID, "state": "started"}).encode())
+        return self._send(404, b"not found")
+
     def do_PUT(self):
         captured["hits"].append(f"PUT {self.path}")
         if self.path.startswith("/upload/"):
@@ -421,6 +436,9 @@ class Handler(BaseHTTPRequestHandler):
         if self.path.startswith(f"/v1/machines/{MACHINE_ID}/files/"):
             captured["file"] = self._read()
             return self._send(200, b"{}")
+        if self.path == f"/v1/machines/{MACHINE_ID}/env":
+            captured.setdefault("env_bodies", []).append(json.loads(self._read() or b"{}"))
+            return self._send(200, json.dumps({"id": MACHINE_ID, "state": "started"}).encode())
         if self.path == f"/v1/machines/{MACHINE_ID}/network":
             asked = json.loads(self._read() or b"{}")
             captured.setdefault("network_bodies", []).append(asked)
@@ -666,6 +684,21 @@ def main() -> int:
         m.unpublish(guest=3000)
         check("unpublish sends the remaining set",
               captured["ports_bodies"][-1] == {"ports": [{"port": 8080}]}, str(captured["ports_bodies"][-1]))
+
+        # --- env, labels and metrics on a running machine ---
+        m.set_env({"APP_MODE": "prod", "LOG": "debug"})
+        check("set_env sends the whole set to PUT /env",
+              captured["env_bodies"][-1] == {"env": {"APP_MODE": "prod", "LOG": "debug"}},
+              str(captured.get("env_bodies")))
+        m.set_labels({"team": "infra", "stale": None})
+        check("set_labels sends set and remove to PATCH /labels",
+              captured["label_bodies"][-1] == {"labels": {"team": "infra", "stale": None}},
+              str(captured.get("label_bodies")))
+        metrics = m.metrics()
+        check("metrics reads GET /metrics; a reading the node could not take is None",
+              metrics.machine_id == MACHINE_ID and metrics.vcpus == 2 and metrics.memory_mb == 812
+              and metrics.cpu_millis == 1500 and metrics.rss_mb is None and metrics.disk_used_mb is None,
+              str(metrics))
 
         # --- network policy: replace what an existing machine may reach ---
         m.set_network_policy({"allow_hosts": ["api.github.com"], "allow_cidrs": ["10.0.0.0/8"]})

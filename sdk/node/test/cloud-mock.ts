@@ -407,6 +407,28 @@ const server = createServer(async (req, res) => {
       { name: "gh", envVar: "GH_TOKEN", hosts: ["api.github.com"], createdAt: "", updatedAt: "" },
     ]);
   }
+  if (method === "PUT" && url === "/v1/machines/m1/env") {
+    seen.envBodies = [...(seen.envBodies ?? []), JSON.parse((await readBody(req)).toString() || "{}")];
+    return json(200, { id: "m1", name: "golden", state: "started" });
+  }
+  if (method === "PATCH" && url === "/v1/machines/m1/labels") {
+    seen.labelBodies = [...(seen.labelBodies ?? []), JSON.parse((await readBody(req)).toString() || "{}")];
+    return json(200, { id: "m1", name: "golden", state: "started" });
+  }
+  if (method === "GET" && url === "/v1/machines/m1/metrics") {
+    return json(200, {
+      machineId: "m1",
+      at: "2026-11-23T10:00:00.000Z",
+      state: "started",
+      vcpus: 2,
+      memoryLimitMb: 4096,
+      cpuMillis: 1500,
+      memoryMb: 812,
+      rssMb: null,
+      diskGb: 20,
+      egressBytes: 4096,
+    });
+  }
   if (method === "PUT" && url === "/v1/machines/m1/network") {
     seen.networkBodies = [...(seen.networkBodies ?? []), JSON.parse((await readBody(req)).toString() || "{}")];
     return json(200, { id: "m1", name: "golden", state: "started", network: seen.networkBodies.at(-1) });
@@ -1079,6 +1101,31 @@ async function main(): Promise<void> {
   check("allow-all is the open mode", JSON.stringify(seen.networkBodies?.at(-1)) === JSON.stringify({ mode: "open" }));
   await m.setNetworkPolicy("deny-all");
   check("deny-all is the blocked mode", JSON.stringify(seen.networkBodies?.at(-1)) === JSON.stringify({ mode: "blocked" }));
+
+  // --- env, labels and metrics on a running machine ---
+  await m.setEnv({ APP_MODE: "prod", LOG: "debug" });
+  check(
+    "setEnv sends the whole set to PUT /env",
+    JSON.stringify(seen.envBodies?.at(-1)) === JSON.stringify({ env: { APP_MODE: "prod", LOG: "debug" } }),
+    JSON.stringify(seen.envBodies),
+  );
+  await m.setLabels({ team: "infra", stale: null });
+  check(
+    "setLabels sends set and remove to PATCH /labels",
+    JSON.stringify(seen.labelBodies?.at(-1)) === JSON.stringify({ labels: { team: "infra", stale: null } }),
+    JSON.stringify(seen.labelBodies),
+  );
+  const metrics = await m.metrics();
+  check(
+    "metrics reads GET /metrics and leaves out readings the node could not take",
+    metrics.machineId === "m1" &&
+      metrics.vcpus === 2 &&
+      metrics.memoryMb === 812 &&
+      metrics.cpuMillis === 1500 &&
+      !("rssMb" in metrics) &&
+      !("diskUsedMb" in metrics),
+    JSON.stringify(metrics),
+  );
 
   // --- credentials: change a machine's bindings and their values ---
   const putsBefore = seen.credentialPuts?.length ?? 0;

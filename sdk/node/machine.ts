@@ -32,6 +32,7 @@ import {
   type Transport,
 } from "./transport";
 import type {
+  MachineMetrics,
   CacheDiskInfo,
   CreateCacheDiskOptions,
   CredentialSpec,
@@ -464,6 +465,24 @@ export class Machine {
    *  stopped first, and `"deny-all"` is refused once the machine has run. */
   setNetworkPolicy(policy: NetworkPolicy): Promise<void> {
     return this.transport.setNetworkPolicy(policy);
+  }
+
+  /** Replace every environment variable the machine's commands start with,
+   *  while it runs. Commands started from now on get the new set; processes
+   *  already running keep theirs. (cloud) */
+  setEnv(env: Record<string, string>): Promise<void> {
+    return this.transport.setEnv(env);
+  }
+
+  /** Change this machine's labels: a string sets or replaces that key, `null`
+   *  removes it, and keys not named are kept. (cloud) */
+  setLabels(labels: Record<string, string | null>): Promise<void> {
+    return this.transport.setLabels(labels);
+  }
+
+  /** Read the machine's live CPU, memory, disk and egress figures. (cloud) */
+  metrics(): Promise<MachineMetrics> {
+    return this.transport.metrics();
   }
 
   /** Replace this machine's credential bindings with `credentials`, while it

@@ -309,6 +309,38 @@ pub struct CacheDisk {
     pub created_at: String,
 }
 
+/// `GET /v1/machines/{id}/metrics`: a machine's live resource use. The
+/// optional readings are absent while the machine is not running or when
+/// its node cannot report them.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MachineMetrics {
+    /// The machine's id.
+    pub machine_id: String,
+    /// When the reading was taken (RFC 3339).
+    pub at: String,
+    /// The machine's state at that time.
+    pub state: String,
+    /// vCPUs the machine was given.
+    pub vcpus: u32,
+    /// Memory limit in MiB.
+    pub memory_limit_mb: u64,
+    /// CPU time used, in milliseconds.
+    pub cpu_millis: Option<u64>,
+    /// CPU limit in millicpus.
+    pub cpu_limit_millicpus: Option<u64>,
+    /// Guest memory in use, in MiB.
+    pub memory_mb: Option<u64>,
+    /// Host resident memory of the VM, in MiB.
+    pub rss_mb: Option<u64>,
+    /// Disk size in GiB.
+    pub disk_gb: Option<u64>,
+    /// Disk used, in MiB.
+    pub disk_used_mb: Option<u64>,
+    /// Bytes sent out of the machine.
+    pub egress_bytes: Option<u64>,
+}
+
 /// What publishing a machine's cache disk created.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "camelCase")]

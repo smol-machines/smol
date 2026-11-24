@@ -394,6 +394,25 @@ class MachineSizes:
 
 
 @dataclass
+class MachineMetrics:
+    """Live resource readings for a machine, from :meth:`Machine.metrics`. A
+    reading the node could not take is ``None``."""
+
+    machine_id: str
+    at: str
+    state: str
+    vcpus: int
+    memory_limit_mb: int
+    cpu_millis: Optional[int] = None
+    cpu_limit_millicpus: Optional[int] = None
+    memory_mb: Optional[int] = None
+    rss_mb: Optional[int] = None
+    disk_gb: Optional[int] = None
+    disk_used_mb: Optional[int] = None
+    egress_bytes: Optional[int] = None
+
+
+@dataclass
 class PublishedPort:
     """A published port. ``host`` is the host port forwarding to ``guest``; on
     the cloud it is the node port, set once the machine is placed."""

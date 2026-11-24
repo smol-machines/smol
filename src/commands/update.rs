@@ -81,11 +81,36 @@ pub struct UpdateCmd {
 }
 
 impl UpdateCmd {
+    /// Whether the only settings this update touches are environment variables.
+    fn changes_only_env(&self) -> bool {
+        (!self.env.is_empty() || !self.remove_env.is_empty())
+            && self.volume.is_empty()
+            && self.remove_volume.is_empty()
+            && self.port.is_empty()
+            && self.remove_port.is_empty()
+            && self.cpus.is_none()
+            && self.mem.is_none()
+            && !self.net
+            && !self.no_net
+            && !self.no_egress_interceptor
+            && self.workdir.is_none()
+            && !self.gpu
+            && !self.no_gpu
+            && self.storage.is_none()
+            && self.overlay.is_none()
+    }
+
     pub fn run(self) -> anyhow::Result<()> {
         let db = SmolvmDb::open()?;
         let record = db
             .get_vm(&self.name)?
             .ok_or_else(|| anyhow::anyhow!("machine '{}' not found", self.name))?;
+
+        // An environment-only change applies to a running machine, through the
+        // engine's own update: new commands get it, running processes keep theirs.
+        if record.actual_state() == RecordState::Running && self.changes_only_env() {
+            return run_engine_env_update(&self.name, &self.env, &self.remove_env);
+        }
 
         // Must be stopped.
         match record.actual_state() {
@@ -302,4 +327,30 @@ impl UpdateCmd {
         }
         Ok(())
     }
+}
+
+/// Hand an environment-only change for a running machine to the engine's
+/// `machine update`, which applies it live.
+fn run_engine_env_update(name: &str, env: &[String], remove_env: &[String]) -> anyhow::Result<()> {
+    use clap::Parser;
+    #[derive(Parser)]
+    #[command(name = "smol")]
+    struct Engine {
+        #[command(subcommand)]
+        command: smolvm::cli::machine::MachineCmd,
+    }
+    let mut argv = vec!["smol".to_string(), "update".to_string(), "--name".to_string(), name.to_string()];
+    for spec in env {
+        argv.push("--env".to_string());
+        argv.push(spec.clone());
+    }
+    for key in remove_env {
+        argv.push("--remove-env".to_string());
+        argv.push(key.clone());
+    }
+    let smolvm::cli::machine::MachineCmd::Update(update) = Engine::try_parse_from(argv)?.command
+    else {
+        unreachable!("the arguments name machine update");
+    };
+    Ok(update.run()?)
 }

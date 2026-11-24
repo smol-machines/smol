@@ -349,6 +349,29 @@ export interface PublishedPort {
   protocol: "tcp" | "udp";
 }
 
+/** Live resource readings for a machine, from `Machine.metrics()`. A reading
+ *  the node could not take is absent. */
+export interface MachineMetrics {
+  machineId: string;
+  /** When the node was read (RFC 3339). */
+  at: string;
+  state: string;
+  vcpus: number;
+  memoryLimitMb: number;
+  /** CPU time used since the VM started, in milliseconds. */
+  cpuMillis?: number;
+  /** A CPU limit in force right now, in thousandths of a CPU. */
+  cpuLimitMillicpus?: number;
+  /** Memory in use, with pages shared with branches split among them. */
+  memoryMb?: number;
+  /** Resident memory, counting shared pages in full. */
+  rssMb?: number;
+  diskGb?: number;
+  diskUsedMb?: number;
+  /** Bytes sent out since the VM started. */
+  egressBytes?: number;
+}
+
 /** How `stop()` and `delete()` treat work still running on the machine. */
 export interface StopOptions {
   /** Wait up to this many seconds for running commands and file transfers to

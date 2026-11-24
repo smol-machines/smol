@@ -206,6 +206,23 @@ func (m *Machine) SetNetworkPolicy(ctx context.Context, policy NetworkPolicy) er
 	return m.t.setNetworkPolicy(ctx, policy)
 }
 
+// SetEnv replaces every environment variable the machine's commands start
+// with, while it runs. Commands started from now on get the new set; processes
+// already running keep theirs. Cloud only for now.
+func (m *Machine) SetEnv(ctx context.Context, env map[string]string) error {
+	return m.t.setEnv(ctx, env)
+}
+
+// SetLabels changes this machine's labels: a value sets or replaces that key,
+// nil removes it, and keys not named are kept. Cloud only for now.
+func (m *Machine) SetLabels(ctx context.Context, labels map[string]*string) error {
+	return m.t.setLabels(ctx, labels)
+}
+
+// Metrics reads the machine's live CPU, memory, disk and egress figures. Cloud
+// only for now.
+func (m *Machine) Metrics(ctx context.Context) (*MachineMetrics, error) { return m.t.metrics(ctx) }
+
 // SetCredentials replaces this machine's credential bindings with exactly
 // credentials, while it is created, stopped or running. A running machine
 // takes the change at once: a new host is trusted and a removed binding stops

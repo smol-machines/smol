@@ -150,7 +150,7 @@ pub use machine::{
     UsageTotals,
 };
 pub use smol_cloud::types::{
-    CacheDisk as CacheDiskInfo, CacheDiskVersion, MachineCacheDisk as CacheDiskRef,
+    CacheDisk as CacheDiskInfo, CacheDiskVersion, MachineCacheDisk as CacheDiskRef, MachineMetrics,
     PublishedCacheDisk,
 };
 pub use transport::ReadyOptions;

@@ -8,6 +8,7 @@ use crate::connect::{ConnectOptions, Target};
 use crate::error::{Error, ErrorKind, Result};
 use crate::exec::{ExecOptions, ExecResult, ExecStream};
 use crate::transport::{cloud, local::LocalTransport, ReadyOptions, Transport};
+use smol_cloud::types::MachineMetrics;
 
 /// How long a restore waits for its machine, matching [`ReadyOptions`].
 const READY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(120);
@@ -1123,6 +1124,28 @@ impl Machine {
     /// machine's network is set when it is created. Needs engine 1.28 or newer.
     pub fn update_network(&self, policy: &crate::config::NetworkPolicy) -> Result<()> {
         self.transport.update_network(policy)
+    }
+
+    /// Replace this machine's environment with exactly `env`. A running
+    /// machine's next command sees the new values, with no restart. Cloud
+    /// only for now; locally use `smol machine update -e`.
+    pub fn set_env(&self, env: &std::collections::BTreeMap<String, String>) -> Result<()> {
+        self.transport.set_env(env)
+    }
+
+    /// Merge `labels` into this machine's labels; a `None` value removes
+    /// that label. Cloud only for now.
+    pub fn set_labels(
+        &self,
+        labels: &std::collections::BTreeMap<String, Option<String>>,
+    ) -> Result<()> {
+        self.transport.set_labels(labels)
+    }
+
+    /// This machine's live resource use: CPU, memory, disk and egress.
+    /// Cloud only for now.
+    pub fn metrics(&self) -> Result<MachineMetrics> {
+        self.transport.metrics()
     }
 
     /// Replace this machine's credential bindings with exactly

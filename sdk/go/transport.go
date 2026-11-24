@@ -32,6 +32,9 @@ type transport interface {
 	listImages(ctx context.Context) ([]ImageInfo, error)
 	sync(ctx context.Context) error
 	setNetworkPolicy(ctx context.Context, policy NetworkPolicy) error
+	setEnv(ctx context.Context, env map[string]string) error
+	setLabels(ctx context.Context, labels map[string]*string) error
+	metrics(ctx context.Context) (*MachineMetrics, error)
 	setCredentials(ctx context.Context, credentials []CredentialSpec) error
 	updateCredentialValues(ctx context.Context, values map[string]string) error
 	stop(ctx context.Context) error

@@ -845,6 +845,30 @@ func (t *cloudTransport) setNetworkPolicy(ctx context.Context, p NetworkPolicy) 
 	return err
 }
 
+// setEnv replaces every variable the machine's commands start with; commands
+// started from now on get the new set.
+func (t *cloudTransport) setEnv(ctx context.Context, env map[string]string) error {
+	if env == nil {
+		env = map[string]string{}
+	}
+	_, err := cloudDo(ctx, t.conn, "PUT", t.path("/env"), fetchOpts{json: map[string]any{"env": env}})
+	return err
+}
+
+// setLabels sets each label with a value and removes each nil one.
+func (t *cloudTransport) setLabels(ctx context.Context, labels map[string]*string) error {
+	_, err := cloudDo(ctx, t.conn, "PATCH", t.path("/labels"), fetchOpts{json: map[string]any{"labels": labels}})
+	return err
+}
+
+func (t *cloudTransport) metrics(ctx context.Context) (*MachineMetrics, error) {
+	var out MachineMetrics
+	if err := cloudJSON(ctx, t.conn, "GET", t.path("/metrics"), fetchOpts{}, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
 // setCredentials stores each given value for the account first, so the
 // binding change can hand a running machine the ones it now needs, then binds
 // the machine to exactly these names.

@@ -1476,3 +1476,53 @@ fn a_cache_slot_is_created_and_a_restore_fills_it_with_another_cache() {
         serde_json::json!({"cache": "project-a", "version": 3})
     );
 }
+
+#[test]
+fn env_labels_and_metrics_use_their_machine_routes() {
+    let cloud = MockCloud::start(routes(vec![
+        (
+            "GET /v1/machines/m-1",
+            Box::new(|_| Reply::json(ready_machine("m-1"))),
+        ),
+        (
+            "PUT /v1/machines/m-1/env",
+            Box::new(|_| Reply::status(204, "")),
+        ),
+        (
+            "PATCH /v1/machines/m-1/labels",
+            Box::new(|_| Reply::status(204, "")),
+        ),
+        (
+            "GET /v1/machines/m-1/metrics",
+            Box::new(|_| {
+                Reply::json(
+                    r#"{"machineId":"m-1","at":"2026-11-23T00:00:00Z","state":"running","vcpus":2,"memoryLimitMb":1024,"cpuMillis":1500,"rssMb":null}"#,
+                )
+            }),
+        ),
+    ]));
+    let machine = Machine::connect_with("m-1", &cloud.connect()).unwrap();
+
+    let env = std::collections::BTreeMap::from([("MODE".to_string(), "prod".to_string())]);
+    machine.set_env(&env).unwrap();
+    let labels = std::collections::BTreeMap::from([
+        ("team".to_string(), Some("infra".to_string())),
+        ("old".to_string(), None),
+    ]);
+    machine.set_labels(&labels).unwrap();
+    let metrics = machine.metrics().unwrap();
+    assert_eq!(metrics.vcpus, 2);
+    assert_eq!(metrics.memory_limit_mb, 1024);
+    assert_eq!(metrics.cpu_millis, Some(1500));
+    assert_eq!(metrics.rss_mb, None);
+
+    let sent = cloud.requests();
+    let body = |path: &str| -> serde_json::Value {
+        let r = sent.iter().find(|r| r.path == path).expect(path);
+        serde_json::from_str(&r.body).unwrap()
+    };
+    assert_eq!(body("/v1/machines/m-1/env")["env"]["MODE"], "prod");
+    let labels = body("/v1/machines/m-1/labels");
+    assert_eq!(labels["labels"]["team"], "infra");
+    assert!(labels["labels"]["old"].is_null());
+}

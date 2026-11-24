@@ -38,6 +38,7 @@ from .transport import (
 from .errors import InvalidConfigError, NotSupportedError, SmolError, wrap_native_error
 from .types import (
     CredentialSpec,
+    MachineMetrics,
     JobInfo,
     JobOutput,
     MachineSummary,
@@ -453,6 +454,21 @@ class Machine:
         if not hasattr(self._t, "set_network_policy"):
             raise NotSupportedError("set_network_policy is not supported on this target")
         self._t.set_network_policy(policy)
+
+    def set_env(self, env: "dict[str, str]") -> None:
+        """Replace every environment variable the machine's commands start
+        with, while it runs. Commands started from now on get the new set;
+        processes already running keep theirs. (cloud)"""
+        self._t.set_env(env)
+
+    def set_labels(self, labels: "dict[str, Optional[str]]") -> None:
+        """Change this machine's labels: a string sets or replaces that key,
+        ``None`` removes it, and keys not named are kept. (cloud)"""
+        self._t.set_labels(labels)
+
+    def metrics(self) -> MachineMetrics:
+        """Read the machine's live CPU, memory, disk and egress figures. (cloud)"""
+        return self._t.metrics()
 
     def set_credentials(self, credentials: "list[CredentialSpec]") -> None:
         """Replace this machine's credential bindings with ``credentials``,
