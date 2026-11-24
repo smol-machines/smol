@@ -230,6 +230,23 @@ type PublishedPort struct {
 	Protocol string // "tcp" or "udp"
 }
 
+// MachineMetrics is a machine's live resource readings, from Machine.Metrics.
+// A reading the node could not take is nil.
+type MachineMetrics struct {
+	MachineID         string `json:"machineId"`
+	At                string `json:"at"` // when the node was read, RFC 3339
+	State             string `json:"state"`
+	VCPUs             int    `json:"vcpus"`
+	MemoryLimitMB     int    `json:"memoryLimitMb"`
+	CPUMillis         *int64 `json:"cpuMillis"`         // CPU time since the VM started
+	CPULimitMillicpus *int64 `json:"cpuLimitMillicpus"` // a CPU limit in force now
+	MemoryMB          *int64 `json:"memoryMb"`          // shared pages split among branches
+	RSSMB             *int64 `json:"rssMb"`             // shared pages counted in full
+	DiskGB            *int64 `json:"diskGb"`
+	DiskUsedMB        *int64 `json:"diskUsedMb"`
+	EgressBytes       *int64 `json:"egressBytes"` // bytes sent since the VM started
+}
+
 // PublishOptions selects a port for Machine.Publish. Host 0 picks a free host
 // port; Protocol "" means TCP.
 type PublishOptions struct {

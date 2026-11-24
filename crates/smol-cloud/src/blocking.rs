@@ -914,6 +914,46 @@ impl Client {
         )
     }
 
+    /// Make `env` the machine's whole environment. A running machine's
+    /// next command sees the new values, with no restart.
+    pub fn set_env(
+        &self,
+        id: &str,
+        env: &std::collections::BTreeMap<String, String>,
+    ) -> Result<()> {
+        self.empty(
+            reqwest::Method::PUT,
+            &format!("/v1/machines/{id}/env"),
+            Body::Json(serde_json::json!({ "env": env })),
+            REQUEST_TIMEOUT,
+        )
+    }
+
+    /// Merge `labels` into the machine's labels; a `None` value removes
+    /// that label.
+    pub fn set_labels(
+        &self,
+        id: &str,
+        labels: &std::collections::BTreeMap<String, Option<String>>,
+    ) -> Result<()> {
+        self.empty(
+            reqwest::Method::PATCH,
+            &format!("/v1/machines/{id}/labels"),
+            Body::Json(serde_json::json!({ "labels": labels })),
+            REQUEST_TIMEOUT,
+        )
+    }
+
+    /// The machine's live resource use.
+    pub fn metrics(&self, id: &str) -> Result<crate::types::MachineMetrics> {
+        self.json(
+            reqwest::Method::GET,
+            &format!("/v1/machines/{id}/metrics"),
+            Body::None,
+            REQUEST_TIMEOUT,
+        )
+    }
+
     // -- branches and checkpoints -----------------------------------------
 
     /// Branch a machine into one live copy-on-write clone.

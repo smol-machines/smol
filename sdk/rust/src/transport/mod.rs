@@ -160,6 +160,27 @@ pub(crate) trait Transport: Send + Sync + std::fmt::Debug {
         ))
     }
 
+    /// Replace the machine's environment with exactly `env`.
+    fn set_env(&self, _env: &std::collections::BTreeMap<String, String>) -> Result<()> {
+        Err(unsupported(
+            "set_env()",
+            "it is cloud-only for now; for a local machine use `smol machine update --name <name> -e KEY=VALUE`",
+        ))
+    }
+
+    /// Merge `labels` into the machine's labels; `None` removes one.
+    fn set_labels(
+        &self,
+        _labels: &std::collections::BTreeMap<String, Option<String>>,
+    ) -> Result<()> {
+        Err(unsupported("set_labels()", "it is cloud-only for now"))
+    }
+
+    /// The machine's live resource use.
+    fn metrics(&self) -> Result<smol_cloud::types::MachineMetrics> {
+        Err(unsupported("metrics()", "it is cloud-only for now"))
+    }
+
     /// Replace the machine's credential bindings with exactly `credentials`.
     fn set_credentials(&self, credentials: &[crate::config::Credential]) -> Result<()>;
 

@@ -75,6 +75,7 @@ export type {
   MachineSummary,
   MachineSizes,
   PublishedPort,
+  MachineMetrics,
   StopOptions,
   ListOptions,
   ExecEvent,

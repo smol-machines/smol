@@ -19,7 +19,7 @@ pub struct MachineCmd {
 pub enum MachineSubcommand {
     // --- lifecycle ---------------------------------------------------------
     /// Create a persistent machine
-    Create(crate::commands::create::CreateCmd),
+    Create(Box<crate::commands::create::CreateCmd>),
 
     /// Start a machine
     Start(crate::commands::start::StartCmd),

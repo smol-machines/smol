@@ -422,6 +422,21 @@ impl Transport for CloudTransport {
         Ok(Checkpoint::Cloud(self.client.checkpoint(&self.id)?.into()))
     }
 
+    fn set_env(&self, env: &std::collections::BTreeMap<String, String>) -> Result<()> {
+        Ok(self.client.set_env(&self.id, env)?)
+    }
+
+    fn set_labels(
+        &self,
+        labels: &std::collections::BTreeMap<String, Option<String>>,
+    ) -> Result<()> {
+        Ok(self.client.set_labels(&self.id, labels)?)
+    }
+
+    fn metrics(&self) -> Result<smol_cloud::types::MachineMetrics> {
+        Ok(self.client.metrics(&self.id)?)
+    }
+
     fn set_credentials(&self, credentials: &[crate::config::Credential]) -> Result<()> {
         if let Some(c) = credentials.iter().find(|c| !c.methods.is_empty()) {
             return Err(Error::new(

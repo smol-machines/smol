@@ -132,6 +132,17 @@ pub struct CreateCmd {
     /// start/exec; only the reference is stored, never the plaintext
     #[arg(long = "secret-file", value_name = "GUEST_VAR=PATH")]
     pub secret_file: Vec<String>,
+
+    /// Bind a credential the workload may use without ever seeing it:
+    /// NAME=ENV_VAR@HOST[,HOST...]. The guest's ENV_VAR holds a placeholder; the
+    /// host's ENV_VAR is substituted only on HTTPS requests to the listed hosts.
+    #[arg(long = "credential", value_name = "NAME=ENV_VAR@HOST")]
+    pub credential: Vec<String>,
+
+    /// Pass a host serial device into the machine as /dev/ttySMOL0, ... in flag
+    /// order: DEVICE[:BAUD], for example /dev/cu.usbserial-0001:115200
+    #[arg(long = "serial", value_name = "DEVICE[:BAUD]")]
+    pub serial: Vec<String>,
 }
 
 impl CreateCmd {
@@ -144,6 +155,11 @@ impl CreateCmd {
         let record = smolvm_create(self.engine_args())?;
         println!("Created machine: {}", record.name);
         println!("  CPUs: {}, Memory: {} MiB", record.cpus, record.mem);
+        if let Some(policy) = &record.credential_policy {
+            for binding in &policy.credentials {
+                println!("  {}", smolvm::credentials::describe_binding(binding));
+            }
+        }
         println!(
             "\nUse 'smol machine start --name {}' to start the machine",
             record.name
@@ -183,6 +199,8 @@ impl CreateCmd {
             user,
             secret_env,
             secret_file,
+            credential,
+            serial,
         } = self;
         let mut args: Vec<String> = Vec::new();
         let mut value = |flag: &str, value: Option<String>| {
@@ -222,6 +240,8 @@ impl CreateCmd {
             ("--env", env),
             ("--secret-env", secret_env),
             ("--secret-file", secret_file),
+            ("--credential", credential),
+            ("--serial", serial),
         ] {
             for v in values {
                 value(flag, Some(v));
@@ -339,6 +359,10 @@ mod tests {
             "T=H",
             "--secret-file",
             "F=/f",
+            "--credential",
+            "anthropic=ANTHROPIC_API_KEY@api.anthropic.com",
+            "--serial",
+            "/dev/ttyUSB0:9600",
             "sleep",
             "1",
         ]);
@@ -364,6 +388,8 @@ mod tests {
             "--env A=1",
             "--secret-env T=H",
             "--secret-file F=/f",
+            "--credential anthropic=ANTHROPIC_API_KEY@api.anthropic.com",
+            "--serial /dev/ttyUSB0:9600",
             "--gpu",
             "--cuda",
             "--net",

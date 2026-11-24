@@ -31,6 +31,7 @@ from typing import Any, AsyncIterator, Optional
 
 from .machine import Job, Machine
 from .types import (
+    MachineMetrics,
     CredentialSpec,
     JobInfo,
     JobOutput,
@@ -328,6 +329,18 @@ class AsyncMachine:
     async def set_network_policy(self, policy: Any) -> None:
         """Replace the machine's outbound network policy; see :meth:`Machine.set_network_policy`."""
         await asyncio.to_thread(self._m.set_network_policy, policy)
+
+    async def set_env(self, env: "dict[str, str]") -> None:
+        """Replace the machine's environment while it runs; see :meth:`Machine.set_env`."""
+        await asyncio.to_thread(self._m.set_env, env)
+
+    async def set_labels(self, labels: "dict[str, Optional[str]]") -> None:
+        """Change the machine's labels; see :meth:`Machine.set_labels`."""
+        await asyncio.to_thread(self._m.set_labels, labels)
+
+    async def metrics(self) -> "MachineMetrics":
+        """Read the machine's live figures; see :meth:`Machine.metrics`."""
+        return await asyncio.to_thread(self._m.metrics)
 
     async def set_credentials(self, credentials: "list[CredentialSpec]") -> None:
         """Replace the machine's credential bindings; see :meth:`Machine.set_credentials`."""

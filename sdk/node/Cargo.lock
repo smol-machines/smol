@@ -1331,9 +1331,9 @@ checksum = "77ce24cb58228fbb8aa041425bb1050850ac19177686ea6e0f41a70416f56fdb"
 
 [[package]]
 name = "form_urlencoded"
-version = "1.2.2"
+version = "1.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cb4cb245038516f5f85277875cdaa4f7d2c9a0fa0468de06ed190163b1581fcf"
+checksum = "afa489199eaffb1211795df1c6236ce1ad0d41a6fa45250add73e3b02420f06e"
 dependencies = [
  "percent-encoding",
 ]
@@ -3844,7 +3844,7 @@ dependencies = [
 
 [[package]]
 name = "smolfile"
-version = "1.36.1"
+version = "1.37.0"
 dependencies = [
  "serde",
  "smolvm-protocol",
@@ -3854,7 +3854,7 @@ dependencies = [
 
 [[package]]
 name = "smolvm"
-version = "1.36.1"
+version = "1.37.0"
 dependencies = [
  "anyhow",
  "async-stream",
@@ -3934,7 +3934,7 @@ dependencies = [
 
 [[package]]
 name = "smolvm-checkpoint"
-version = "1.36.1"
+version = "1.37.0"
 dependencies = [
  "hex",
  "libc",
@@ -3942,6 +3942,7 @@ dependencies = [
  "serde",
  "serde_json",
  "smolvm-pack",
+ "smolvm-tar",
  "tempfile",
  "tracing",
  "zstd",
@@ -3949,8 +3950,9 @@ dependencies = [
 
 [[package]]
 name = "smolvm-credentials"
-version = "1.36.1"
+version = "1.37.0"
 dependencies = [
+ "aho-corasick",
  "anyhow",
  "bytes",
  "flate2",
@@ -3974,7 +3976,7 @@ dependencies = [
 
 [[package]]
 name = "smolvm-cuda"
-version = "1.36.1"
+version = "1.37.0"
 dependencies = [
  "getrandom 0.3.4",
  "libc",
@@ -3983,7 +3985,7 @@ dependencies = [
 
 [[package]]
 name = "smolvm-network"
-version = "1.36.1"
+version = "1.37.0"
 dependencies = [
  "crossbeam-queue",
  "getrandom 0.3.4",
@@ -4000,7 +4002,7 @@ dependencies = [
 
 [[package]]
 name = "smolvm-oci-layer"
-version = "1.36.1"
+version = "1.37.0"
 dependencies = [
  "flate2",
  "libc",
@@ -4011,7 +4013,7 @@ dependencies = [
 
 [[package]]
 name = "smolvm-pack"
-version = "1.36.1"
+version = "1.37.0"
 dependencies = [
  "crc32fast",
  "libc",
@@ -4031,14 +4033,14 @@ dependencies = [
 
 [[package]]
 name = "smolvm-paths"
-version = "1.36.1"
+version = "1.37.0"
 dependencies = [
  "dirs",
 ]
 
 [[package]]
 name = "smolvm-protocol"
-version = "1.36.1"
+version = "1.37.0"
 dependencies = [
  "base64 0.22.1",
  "serde",
@@ -4048,7 +4050,7 @@ dependencies = [
 
 [[package]]
 name = "smolvm-registry"
-version = "1.36.1"
+version = "1.37.0"
 dependencies = [
  "bytes",
  "filetime",
@@ -4737,9 +4739,9 @@ checksum = "6d49784317cd0d1ee7ec5c716dd598ec5b4483ea832a2dced265471cc0f690ae"
 
 [[package]]
 name = "url"
-version = "2.5.8"
+version = "2.5.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ff67a8a4397373c3ef660812acab3268222035010ab8680ec4215f38ba3d0eed"
+checksum = "f00cd2407bb42c0ef17be88d4cf020f5cceffd121665bac9b8b9493a369b3b1a"
 dependencies = [
  "form_urlencoded",
  "idna",

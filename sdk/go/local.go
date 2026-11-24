@@ -473,6 +473,18 @@ func (t *localTransport) revokePortLinks(context.Context) error {
 	return notSupported("RevokePortLinks is cloud-only; a local machine has no port links.")
 }
 
+func (t *localTransport) setEnv(context.Context, map[string]string) error {
+	return notSupported("SetEnv is cloud-only for now; for a local machine use `smol machine update --name <name> -e KEY=VALUE`.")
+}
+
+func (t *localTransport) setLabels(context.Context, map[string]*string) error {
+	return notSupported("SetLabels is cloud-only for now.")
+}
+
+func (t *localTransport) metrics(context.Context) (*MachineMetrics, error) {
+	return nil, notSupported("Metrics is cloud-only for now.")
+}
+
 // readFileStream yields the whole file once: a local read is already a
 // single in-process copy.
 func (t *localTransport) readFileStream(ctx context.Context, path string) iter.Seq2[[]byte, error] {

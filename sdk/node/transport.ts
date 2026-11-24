@@ -30,6 +30,7 @@ import {
   wrapNativeError,
 } from "./errors";
 import type {
+  MachineMetrics,
   CheckpointOptions,
   JobInfo,
   JobOptions,
@@ -160,6 +161,9 @@ export interface Transport {
   readonly machineId: string;
   sync(): Promise<void>;
   setNetworkPolicy(policy: NetworkPolicy): Promise<void>;
+  setEnv(env: Record<string, string>): Promise<void>;
+  setLabels(labels: Record<string, string | null>): Promise<void>;
+  metrics(): Promise<MachineMetrics>;
   setCredentials(credentials: CredentialSpec[]): Promise<void>;
   updateCredentialValues(values: Record<string, string>): Promise<void>;
   /** Published ports, whether or not the machine runs. */
@@ -876,6 +880,20 @@ class LocalTransport implements Transport {
     throw new NotSupportedError(
       "portLinks() is cloud-only; a local machine's ports are on this host (see endpoint()).",
     );
+  }
+
+  async setEnv(_env: Record<string, string>): Promise<void> {
+    throw new NotSupportedError(
+      "setEnv() is cloud-only for now; for a local machine use `smol machine update --name <name> -e KEY=VALUE`.",
+    );
+  }
+
+  async setLabels(_labels: Record<string, string | null>): Promise<void> {
+    throw new NotSupportedError("setLabels() is cloud-only for now.");
+  }
+
+  async metrics(): Promise<MachineMetrics> {
+    throw new NotSupportedError("metrics() is cloud-only for now.");
   }
 
   async revokePortLinks(): Promise<void> {
@@ -2175,6 +2193,40 @@ class CloudTransport implements Transport {
     await cloudFetch<MachineInfo>(this.conn, "PUT", `/v1/machines/${this.id}/network`, {
       json: cloudNetwork(policy),
     });
+  }
+
+  async setEnv(env: Record<string, string>): Promise<void> {
+    // Replaces every variable; commands started from now on get the new set.
+    await cloudFetch<MachineInfo>(this.conn, "PUT", `/v1/machines/${this.id}/env`, { json: { env } });
+  }
+
+  async setLabels(labels: Record<string, string | null>): Promise<void> {
+    await cloudFetch<MachineInfo>(this.conn, "PATCH", `/v1/machines/${this.id}/labels`, { json: { labels } });
+  }
+
+  async metrics(): Promise<MachineMetrics> {
+    const m = await cloudFetch<Record<string, unknown>>(this.conn, "GET", `/v1/machines/${this.id}/metrics`);
+    const out: MachineMetrics = {
+      machineId: String(m.machineId),
+      at: String(m.at),
+      state: String(m.state),
+      vcpus: Number(m.vcpus),
+      memoryLimitMb: Number(m.memoryLimitMb),
+    };
+    // A reading the node could not take comes back null; leave it out.
+    for (const key of [
+      "cpuMillis",
+      "cpuLimitMillicpus",
+      "memoryMb",
+      "rssMb",
+      "diskGb",
+      "diskUsedMb",
+      "egressBytes",
+    ] as const) {
+      const value = m[key];
+      if (typeof value === "number") out[key] = value;
+    }
+    return out;
   }
 
   async stop(opts?: StopOptions): Promise<void> {

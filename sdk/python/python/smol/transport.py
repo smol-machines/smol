@@ -39,6 +39,7 @@ from urllib.parse import quote
 from .errors import InvalidConfigError, NotSupportedError, SmolError, wrap_native_error
 from .types import (
     ConnectOptions,
+    MachineMetrics,
     JobInfo,
     JobOutput,
     MachineSummary,
@@ -163,6 +164,9 @@ class Transport(Protocol):
     def ports(self) -> "list[PublishedPort]": ...
     def set_ports(self, ports: "list[PublishedPort]") -> None: ...
     def set_network_policy(self, policy: "NetworkPolicy") -> None: ...
+    def set_env(self, env: "dict[str, str]") -> None: ...
+    def set_labels(self, labels: "dict[str, Optional[str]]") -> None: ...
+    def metrics(self) -> MachineMetrics: ...
     def set_credentials(self, credentials: "list[CredentialSpec]") -> None: ...
     def update_credential_values(self, values: "dict[str, str]") -> None: ...
     def pack(self, output: str) -> str: ...
@@ -983,6 +987,18 @@ class LocalTransport:
     def revoke_port_links(self) -> None:
         raise NotSupportedError("revoke_port_links() is cloud-only; a local machine has no port links.")
 
+    def set_env(self, env: "dict[str, str]") -> None:
+        raise NotSupportedError(
+            "set_env() is cloud-only for now; for a local machine use "
+            "`smol machine update --name <name> -e KEY=VALUE`."
+        )
+
+    def set_labels(self, labels: "dict[str, Optional[str]]") -> None:
+        raise NotSupportedError("set_labels() is cloud-only for now.")
+
+    def metrics(self) -> MachineMetrics:
+        raise NotSupportedError("metrics() is cloud-only for now.")
+
     def unshare(self) -> None:
         raise NotSupportedError(
             "unshare() is cloud-only; a local machine has no share link to revoke."
@@ -1614,6 +1630,37 @@ class CloudTransport:
             "PUT",
             f"/v1/machines/{self._id}/network",
             json_body=cloud_network(policy),
+        )
+
+    def set_env(self, env: "dict[str, str]") -> None:
+        # Replaces every variable; commands started from now on get the new set.
+        _cloud_fetch(self._base, self._key, "PUT", f"/v1/machines/{self._id}/env", json_body={"env": dict(env)})
+
+    def set_labels(self, labels: "dict[str, Optional[str]]") -> None:
+        _cloud_fetch(
+            self._base, self._key, "PATCH", f"/v1/machines/{self._id}/labels", json_body={"labels": dict(labels)}
+        )
+
+    def metrics(self) -> MachineMetrics:
+        m = _cloud_fetch(self._base, self._key, "GET", f"/v1/machines/{self._id}/metrics")
+
+        def opt(key: str) -> Optional[int]:
+            value = m.get(key)
+            return value if isinstance(value, int) else None
+
+        return MachineMetrics(
+            machine_id=str(m["machineId"]),
+            at=str(m["at"]),
+            state=str(m["state"]),
+            vcpus=int(m["vcpus"]),
+            memory_limit_mb=int(m["memoryLimitMb"]),
+            cpu_millis=opt("cpuMillis"),
+            cpu_limit_millicpus=opt("cpuLimitMillicpus"),
+            memory_mb=opt("memoryMb"),
+            rss_mb=opt("rssMb"),
+            disk_gb=opt("diskGb"),
+            disk_used_mb=opt("diskUsedMb"),
+            egress_bytes=opt("egressBytes"),
         )
 
     def pack(self, output: str) -> str:
