@@ -1,0 +1,28 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.smol-machines/smolmachines-mcp",
+  "description": "Gives any agent its own branchable microVM: run commands, branch, checkpoint and restore.",
+  "version": "1.36.1",
+  "repository": {
+    "url": "https://github.com/smol-machines/smol",
+    "source": "github",
+    "subfolder": "sdk/mcp"
+  },
+  "packages": [
+    {
+      "registryType": "npm",
+      "identifier": "smolmachines-mcp",
+      "version": "1.36.1",
+      "transport": {
+        "type": "stdio"
+      },
+      "environmentVariables": [
+        {
+          "name": "SMOL_CLOUD_TOKEN",
+          "description": "smol cloud API key. When set, machines run on smol cloud instead of locally.",
+          "isSecret": true
+        }
+      ]
+    }
+  ]
+}
