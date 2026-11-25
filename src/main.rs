@@ -80,6 +80,13 @@ enum Commands {
         config: std::path::PathBuf,
     },
 
+    /// Internal: boot a VM with its engine-issued ownership ticket.
+    #[command(name = "_boot-vm-owned", hide = true)]
+    BootVmOwned {
+        config: std::path::PathBuf,
+        token: String,
+    },
+
     /// Internal: the shared CUDA daemon (not for direct use). The engine
     /// spawns `current_exe() _cuda-daemon <socket>` on first CUDA use, and
     /// current_exe is THIS binary — without this arm, CUDA machines silently
@@ -257,6 +264,9 @@ fn main() {
         Commands::Cloud(cmd) => cmd.run(),
         Commands::Config(cmd) => cmd.run(),
         Commands::Rollout(cmd) => cmd.run(),
+        Commands::BootVmOwned { config, token } => {
+            smolvm::internal_boot::run_owned(config, token).map_err(anyhow::Error::from)
+        }
         Commands::BootVm { config } => boot_vm(config).map_err(|e| anyhow::anyhow!("{}", e)),
         #[cfg(unix)]
         Commands::CudaDaemon { socket } => {
