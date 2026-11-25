@@ -6,8 +6,9 @@
  * skipped and reported. Every member must be a relative path with no `..`,
  * and no write follows a symlink: each path component under the destination is
  * checked with lstat, and files are opened with O_NOFOLLOW. Ownership is never
- * applied and modes keep only the permission bits, so setuid/setgid/sticky
- * never reach the host.
+ * applied, and modes keep only permission bits without group or world write
+ * (at most 0755): setuid/setgid/sticky never reach the host, and a machine
+ * cannot leave a file there that other local users can change.
  */
 
 import { constants } from "node:fs";
@@ -116,7 +117,9 @@ async function writeFileMember(root: string, segments: string[], data: Buffer, m
     if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
   }
   const flags = constants.O_WRONLY | constants.O_CREAT | constants.O_TRUNC | (constants.O_NOFOLLOW ?? 0);
-  const permissions = mode & 0o777;
+  // At most 0755: no setuid/setgid/sticky, and no group or world write, which
+  // would let any other local user rewrite what the machine exported.
+  const permissions = mode & 0o755;
   const handle = await open(target, flags, permissions);
   try {
     await handle.writeFile(data);

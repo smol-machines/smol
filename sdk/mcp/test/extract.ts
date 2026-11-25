@@ -143,6 +143,9 @@ async function main(): Promise<void> {
     await extractUntrusted(archive([{ name: "suid", data: "#!/bin/sh\n", mode: 0o4755 }]), d3, MAX);
     const mode = (await stat(path.join(d3, "suid"))).mode & 0o7777;
     check("setuid is stripped, exec kept", mode === 0o755, mode.toString(8));
+    await extractUntrusted(archive([{ name: "shared", data: "x", mode: 0o777 }]), d3, MAX);
+    const shared = (await stat(path.join(d3, "shared"))).mode & 0o7777;
+    check("group and world write are dropped", shared === 0o755, shared.toString(8));
 
     console.log("decompression is bounded");
     const bomb = await rejects(
