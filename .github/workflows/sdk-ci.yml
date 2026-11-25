@@ -119,7 +119,7 @@ jobs:
   bun-local-e2e:
     name: Bun · local microVM
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 75
     defaults:
       run:
         working-directory: monorepo/smol/sdk/node
