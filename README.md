@@ -56,7 +56,7 @@ downloads that smolvm release on first use.
 Prebuilt packages bundle everything the **local** transport needs — the
 `libkrun` libraries, a code-signed boot helper, and the guest rootfs — so
 `Machine.create()` boots a microVM with no separate install (macOS Apple
-Silicon and Linux x86_64/arm64, glibc ≥ 2.34). The SDK is in your process; the
+Silicon and Linux x86_64/arm64, glibc ≥ 2.28). The SDK is in your process; the
 VMM is not — the engine runs as a separate `smol-vmm` helper, confined by
 seccomp and Landlock on Linux, so a guest escape lands there rather than in
 your application. The **cloud** transport is
