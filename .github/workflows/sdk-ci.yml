@@ -125,6 +125,12 @@ jobs:
         working-directory: monorepo/smol/sdk/node
     env:
       CARGO_TARGET_DIR: ${{ github.workspace }}/.cargo-target/smol-bun
+      # Exercise release-mode code without doing single-unit, whole-program
+      # LTO for binaries built only for this integration test.
+      CARGO_PROFILE_RELEASE_LTO: thin
+      CARGO_PROFILE_RELEASE_CODEGEN_UNITS: "16"
+      CARGO_PROFILE_RELEASE_SMALL_LTO: thin
+      CARGO_PROFILE_RELEASE_SMALL_CODEGEN_UNITS: "16"
     steps:
       - name: Checkout smolvm engine
         uses: actions/checkout@v4
@@ -155,20 +161,44 @@ jobs:
           bun test/unit.ts
           bun test/cloud-mock.ts
           bun test/cloud-deferred-ports.ts
-      - name: Build guest agent and rootfs
+      - name: Identify engine build inputs
+        id: engine
         working-directory: ${{ github.workspace }}/monorepo
         run: |
-          cargo build --profile release-small -p smolvm-agent --target x86_64-unknown-linux-musl
-          AGENT_BINARY="$CARGO_TARGET_DIR/x86_64-unknown-linux-musl/release-small/smolvm-agent" \
-            ./scripts/build-agent-rootfs.sh --arch x86_64 --no-build-agent
-          sudo tar -cf "${{ runner.temp }}/agent-rootfs.tar" -C target/agent-rootfs .
-      - name: Build native addon and boot helper
+          echo "image=$ImageOS" >> "$GITHUB_OUTPUT"
+          echo "revision=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          echo "rust=$(rustc -V | sha256sum | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+      - name: Restore guest filesystem and boot helper
+        id: engine-cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/bun-engine
+          key: bun-engine-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.engine.outputs.image }}-${{ steps.engine.outputs.rust }}-${{ steps.engine.outputs.revision }}
+      - name: Build guest filesystem and boot helper
+        if: steps.engine-cache.outputs.cache-hit != 'true'
+        working-directory: ${{ github.workspace }}/monorepo
         env:
           LIBKRUN_BUNDLE: ${{ github.workspace }}/monorepo/lib/linux-x86_64
           SMOLVM_LIB_DIR: ${{ github.workspace }}/monorepo/lib/linux-x86_64
         run: |
-          bun run build:native
-          cargo build --release --bin smolvm --manifest-path ../../../Cargo.toml
+          mkdir -p "$RUNNER_TEMP/bun-engine"
+          cargo build --profile release-small -p smolvm-agent --target x86_64-unknown-linux-musl
+          AGENT_BINARY="$CARGO_TARGET_DIR/x86_64-unknown-linux-musl/release-small/smolvm-agent" \
+            ./scripts/build-agent-rootfs.sh --arch x86_64 --no-build-agent
+          sudo tar -cf - -C target/agent-rootfs . > "$RUNNER_TEMP/bun-engine/agent-rootfs.tar"
+          cargo build --release --bin smolvm
+          cp "$CARGO_TARGET_DIR/release/smolvm" "$RUNNER_TEMP/bun-engine/smolvm"
+      - name: Unpack cached guest for Rust lifecycle tests
+        if: steps.engine-cache.outputs.cache-hit == 'true'
+        working-directory: ${{ github.workspace }}/monorepo
+        run: |
+          mkdir -p target/agent-rootfs
+          sudo tar -xf "$RUNNER_TEMP/bun-engine/agent-rootfs.tar" -C target/agent-rootfs
+      - name: Build native addon
+        env:
+          LIBKRUN_BUNDLE: ${{ github.workspace }}/monorepo/lib/linux-x86_64
+          SMOLVM_LIB_DIR: ${{ github.workspace }}/monorepo/lib/linux-x86_64
+        run: bun run build:native
       - name: Verify Python native stream decoding
         env:
           LIBKRUN_BUNDLE: ${{ github.workspace }}/monorepo/lib/linux-x86_64
@@ -177,8 +207,8 @@ jobs:
       - name: Assemble release assets
         env:
           SMOLVM_LIB_DIR: ${{ github.workspace }}/monorepo/lib/linux-x86_64
-          SMOLVM_HELPER: ${{ github.workspace }}/.cargo-target/smol-bun/release/smolvm
-          SMOLVM_ROOTFS_TAR: ${{ runner.temp }}/agent-rootfs.tar
+          SMOLVM_HELPER: ${{ runner.temp }}/bun-engine/smolvm
+          SMOLVM_ROOTFS_TAR: ${{ runner.temp }}/bun-engine/agent-rootfs.tar
         run: |
           bash scripts/bundle-native.sh
           bun run build:ts
@@ -200,7 +230,7 @@ jobs:
       - name: Run Rust SDK exec control on the same engine
         working-directory: ${{ github.workspace }}/monorepo/smol/sdk/rust
         env:
-          SMOLVM: ${{ github.workspace }}/.cargo-target/smol-bun/release/smolvm
+          SMOLVM: ${{ runner.temp }}/bun-engine/smolvm
           SMOLVM_AGENT_ROOTFS: ${{ github.workspace }}/monorepo/target/agent-rootfs
           SMOLVM_LIB_DIR: ${{ github.workspace }}/monorepo/lib/linux-x86_64
           LD_LIBRARY_PATH: ${{ github.workspace }}/monorepo/lib/linux-x86_64
