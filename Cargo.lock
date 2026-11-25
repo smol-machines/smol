@@ -3799,7 +3799,7 @@ checksum = "67b1b7a3b5fe4f1376887184045fcf45c69e92af734b7aaddc05fb777b6fbd03"
 
 [[package]]
 name = "smol-cli"
-version = "1.37.3"
+version = "1.37.4"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -3833,7 +3833,7 @@ dependencies = [
 
 [[package]]
 name = "smol-cloud"
-version = "1.37.3"
+version = "1.37.4"
 dependencies = [
  "base64 0.22.1",
  "futures-util",
@@ -3857,7 +3857,7 @@ dependencies = [
 
 [[package]]
 name = "smolmachines"
-version = "1.37.3"
+version = "1.37.4"
 dependencies = [
  "flate2",
  "futures-util",
