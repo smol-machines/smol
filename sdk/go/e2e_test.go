@@ -43,7 +43,7 @@ func newE2EMachine(t *testing.T, cfg MachineConfig) *Machine {
 func TestE2ELifecycle(t *testing.T) {
 	requireE2E(t)
 	ctx := context.Background()
-	m := newE2EMachine(t, MachineConfig{Resources: ResourceSpec{CPUs: 2, MemoryMB: 1024, Network: Bool(true)}})
+	m := newE2EMachine(t, MachineConfig{Resources: ResourceSpec{CPUs: 2, MemoryMB: 1024, Network: new(true)}})
 
 	if s, err := m.State(ctx); err != nil || s != "running" {
 		t.Fatalf("State = %q, %v; want running", s, err)
@@ -311,7 +311,7 @@ func TestE2EPorts(t *testing.T) {
 	requireE2E(t)
 	ctx := context.Background()
 	// Live port changes need the virtio-net backend.
-	m := newE2EMachine(t, MachineConfig{Resources: ResourceSpec{CPUs: 1, MemoryMB: 512, Network: Bool(true), NetworkBackend: NetworkBackendVirtioNet}})
+	m := newE2EMachine(t, MachineConfig{Resources: ResourceSpec{CPUs: 1, MemoryMB: 512, Network: new(true), NetworkBackend: NetworkBackendVirtioNet}})
 	server := `nohup sh -c 'while true; do printf "HTTP/1.0 200 OK\r\n\r\nhi-from-guest" | nc -l -p 8080; done' >/dev/null 2>&1 &`
 	if _, err := m.Exec(ctx, []string{"sh", "-c", server}, nil); err != nil {
 		t.Fatalf("start guest server: %v", err)
