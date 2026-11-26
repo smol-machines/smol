@@ -314,8 +314,16 @@ jobs:
         run: python -m pytest -q tests/test_harbor_adapter.py
 
   ray-sandbox-adapter:
-    name: Python · Ray Sandboxes backend contract
+    name: Python · Ray Sandboxes backend contract (${{ matrix.ray }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # Released Ray, and Ray master: the sandbox API moves between releases,
+        # so a break shows up here before the release that carries it.
+        ray: [released, nightly]
+    # A nightly that is broken upstream must not block unrelated changes.
+    continue-on-error: ${{ matrix.ray == 'nightly' }}
     defaults:
       run:
         working-directory: sdk/python
@@ -325,7 +333,13 @@ jobs:
         with:
           python-version: "3.12"
       - name: Install Ray Sandboxes contract test dependencies
-        run: python -m pip install 'ray>=2.58' pytest
+        run: |
+          if [ "${{ matrix.ray }}" = nightly ]; then
+            python -m pip install pytest "https://s3-us-west-2.amazonaws.com/ray-wheels/latest/ray-3.0.0.dev0-cp312-cp312-manylinux2014_x86_64.whl"
+          else
+            python -m pip install 'ray>=2.58' pytest
+          fi
+          python -c "import ray; print('ray', ray.__version__)"
       - name: Run Ray Sandboxes backend tests
         env:
           PYTHONPATH: python
