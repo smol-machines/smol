@@ -4,6 +4,7 @@ use clap::Args;
 use smolvm::agent::{AgentManager, LaunchFeatures, RunConfig, VmResources};
 use smolvm::config::{RecordState, SmolvmConfig, VmRecord};
 use smolvm::data::network::PortMapping;
+use smolvm::data::resources::default_microvm_memory_mib;
 use smolvm::data::storage::HostMount;
 use smolvm::smolfile::{self, Smolfile};
 use std::path::PathBuf;
@@ -122,7 +123,7 @@ impl UpCmd {
             .collect::<Result<Vec<_>, _>>()?;
 
         let cpus = sf.cpus.unwrap_or(4);
-        let mem = sf.memory.unwrap_or(8192);
+        let mem = sf.memory.unwrap_or_else(default_microvm_memory_mib);
         let net = sf.net.unwrap_or(false) || !ports.is_empty();
         let gpu = sf.gpu.unwrap_or(false);
         let gpu_vram_mib = sf.gpu_vram;

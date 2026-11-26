@@ -27,7 +27,7 @@ pub struct CreateCmd {
     #[arg(long, value_name = "N")]
     pub cpus: Option<u8>,
 
-    /// Memory in MiB [default: 8192, or the pack's]
+    /// Memory in MiB [default: half the host's RAM, at most 8192, or the pack's]
     #[arg(long, value_name = "MiB")]
     pub mem: Option<u32>,
 
