@@ -22,8 +22,9 @@ var (
 )
 
 var (
-	nativeOnce sync.Once
-	nativeErr  error
+	nativeOnce    sync.Once
+	nativeErr     error
+	nativeDataDir string
 )
 
 // loadNative resolves the runtime bundle, loads the native core from it and
@@ -31,16 +32,28 @@ var (
 // It runs on first local use only, so cloud-only programs never download or
 // load the engine.
 func loadNative() error {
+	return loadNativeWithDataDir("")
+}
+
+func loadNativeWithDataDir(dataDir string) error {
 	nativeOnce.Do(func() {
-		nativeErr = openNative()
+		nativeDataDir = dataDir
+		nativeErr = openNative(dataDir)
 		if nativeErr != nil {
 			nativeErr = &Error{Code: CodeHypervisorUnavailable, Message: "local engine unavailable: " + nativeErr.Error()}
 		}
 	})
+	if nativeErr == nil && dataDir != "" && dataDir != nativeDataDir {
+		current := nativeDataDir
+		if current == "" {
+			current = "the default data directory"
+		}
+		return invalidConfig("DataDir cannot change after the local engine is initialized (currently " + current + ").")
+	}
 	return nativeErr
 }
 
-func openNative() error {
+func openNative(dataDir string) error {
 	assets, err := resolveRuntimeAssets()
 	if err != nil {
 		return err
@@ -57,7 +70,12 @@ func openNative() error {
 		LibDir         string `json:"lib_dir,omitempty"`
 		AgentRootfs    string `json:"agent_rootfs,omitempty"`
 		AgentRootfsTar string `json:"agent_rootfs_tar,omitempty"`
-	}{assets.bootBinary, assets.libDir, assets.agentRootfs, assets.agentRootfsTar})
+		DataDir        string `json:"data_dir,omitempty"`
+	}{
+		BootBinary: assets.bootBinary, LibDir: assets.libDir,
+		AgentRootfs: assets.agentRootfs, AgentRootfsTar: assets.agentRootfsTar,
+		DataDir: dataDir,
+	})
 	return err
 }
 

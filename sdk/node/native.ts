@@ -218,6 +218,7 @@ export interface NativeHostAvailability {
 }
 
 import { PLATFORM_PACKAGES, wireBundledAssets, type RuntimeAssets } from "./assets";
+import { InvalidConfigError } from "./errors";
 import { requireFrom, sdkDir } from "./runtime-require";
 
 /** Explain a failed addon load in terms of the per-platform package that
@@ -245,6 +246,7 @@ interface NativeBinding {
 }
 
 let cachedCtor: NapiMachineCtor | undefined;
+let cachedDataDir: string | undefined;
 
 /** Lazily load the native NAPI addon, caching it after the first call.
  *
@@ -253,24 +255,32 @@ let cachedCtor: NapiMachineCtor | undefined;
  *  addon is loaded on first LOCAL machine create/connect. A pure cloud consumer
  *  on a platform with no prebuilt addon can therefore `import`/`require` the SDK
  *  and use `ConnectOptions({ target: "cloud" })` with no native build at all. */
-export function getNapiMachine(): NapiMachineCtor {
-  if (!cachedCtor) {
-    // Wire the bundled boot helper + libs into the environment BEFORE the addon
-    // loads, so the engine (which reads SMOLVM_BOOT_BINARY / SMOLVM_LIB_DIR at
-    // spawn time) uses them.
-    const assets = wireBundledAssets();
-    let binding: NativeBinding;
-    try {
-      // Loaded through Node's own loader so a bundler never follows it into
-      // the `.node` addon (see runtime-require.ts).
-      const dir = sdkDir();
-      if (!dir) throw new Error("the smolmachines package was not found on disk");
-      binding = requireFrom(dir)("./binding.js") as NativeBinding;
-    } catch (error) {
-      throw missingPlatformPackageError(error);
+export function getNapiMachine(dataDir?: string): NapiMachineCtor {
+  if (dataDir === "") throw new InvalidConfigError("dataDir must not be empty.");
+  if (cachedCtor) {
+    if (dataDir !== undefined && dataDir !== cachedDataDir) {
+      throw new InvalidConfigError(
+        `dataDir cannot change after the local engine is initialized (currently ${cachedDataDir ?? "the default data directory"}).`,
+      );
     }
-    binding.configureRuntimeAssets(assets);
-    cachedCtor = binding.NapiMachine;
+    return cachedCtor;
   }
+  // Wire the bundled boot helper + libs into the environment BEFORE the addon
+  // loads, so the engine (which reads SMOLVM_BOOT_BINARY / SMOLVM_LIB_DIR at
+  // spawn time) uses them.
+  const assets = wireBundledAssets();
+  let binding: NativeBinding;
+  try {
+    // Loaded through Node's own loader so a bundler never follows it into
+    // the `.node` addon (see runtime-require.ts).
+    const dir = sdkDir();
+    if (!dir) throw new Error("the smolmachines package was not found on disk");
+    binding = requireFrom(dir)("./binding.js") as NativeBinding;
+  } catch (error) {
+    throw missingPlatformPackageError(error);
+  }
+  binding.configureRuntimeAssets({ ...assets, ...(dataDir !== undefined ? { dataDir } : {}) });
+  cachedDataDir = dataDir;
+  cachedCtor = binding.NapiMachine;
   return cachedCtor;
 }

@@ -53,6 +53,7 @@ export interface RuntimeAssets {
   libDir?: string;
   agentRootfs?: string;
   agentRootfsTar?: string;
+  dataDir?: string;
 }
 
 export function wireBundledAssets(): RuntimeAssets {

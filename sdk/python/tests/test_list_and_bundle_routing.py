@@ -26,9 +26,15 @@ class BundleWiring(unittest.TestCase):
                 os.environ.pop(k, None)
             with mock.patch.object(transport_module, "_bundled_paths", return_value=("/pkg/smol-vmm", "/pkg", "/pkg/agent-rootfs.tar")):
                 transport_module._wire_bundled_native(native)
-            self.assertEqual(native.bundle_calls, [{"boot_binary": "/pkg/smol-vmm", "lib_dir": "/pkg", "agent_rootfs_tar": "/pkg/agent-rootfs.tar"}])
+            self.assertEqual(native.bundle_calls, [{"boot_binary": "/pkg/smol-vmm", "lib_dir": "/pkg", "agent_rootfs_tar": "/pkg/agent-rootfs.tar", "data_dir": None}])
             for k in ("SMOLVM_BOOT_BINARY", "SMOLVM_LIB_DIR", "SMOLVM_AGENT_ROOTFS_TAR"):
                 self.assertNotIn(k, os.environ, f"{k} leaked into the environment")
+
+    def test_constructor_data_dir_goes_to_the_engine(self):
+        native = FakeNative()
+        with mock.patch.object(transport_module, "_bundled_paths", return_value=(None, "/pkg", None)):
+            transport_module._wire_bundled_native(native, "/tmp/smol-isolated")
+        self.assertEqual(native.bundle_calls[0]["data_dir"], "/tmp/smol-isolated")
 
     def test_an_explicit_variable_still_wins(self):
         native = FakeNative()

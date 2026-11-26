@@ -1463,12 +1463,18 @@ impl Machine {
 /// started inherited: a `smolvm` CLI spawned from Python then booted machines with this
 /// wheel's helper, which exits when its parent does.
 #[pyfunction]
-#[pyo3(signature = (boot_binary=None, lib_dir=None, agent_rootfs_tar=None))]
+#[pyo3(signature = (boot_binary=None, lib_dir=None, agent_rootfs_tar=None, data_dir=None))]
 fn configure_bundle(
     boot_binary: Option<String>,
     lib_dir: Option<String>,
     agent_rootfs_tar: Option<String>,
+    data_dir: Option<String>,
 ) -> PyResult<()> {
+    // Select the constructor's data root before the engine resolves any paths.
+    // Without the option, use the engine default.
+    if let Some(data_dir) = data_dir {
+        smolvm::process::apply_data_root(std::path::Path::new(&data_dir));
+    }
     let bundle = smolvm::embedded::bundle::Bundle {
         boot_binary: boot_binary.map(Into::into),
         lib_dir: lib_dir.map(Into::into),

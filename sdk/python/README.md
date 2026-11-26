@@ -37,6 +37,8 @@ from smol import Machine, MachineConfig, ResourceSpec
 # The image is pulled once; later machines of the same image start from it in
 # about a second.
 config = MachineConfig(image="python:3.12", resources=ResourceSpec(cpus=2, memory_mb=1024, network=True))
+# Omit data_dir for the default directory; the choice is fixed for this process's local engine.
+isolated = MachineConfig(data_dir="/tmp/my-smol-data")
 with Machine.create(config) as m:
     res = m.exec(["python", "-c", "print(2 ** 10)"])
     res.assert_success()

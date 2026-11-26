@@ -13,6 +13,8 @@ export interface RuntimeAssets {
   agentRootfs?: string
   /** Guest agent rootfs tarball to extract on first use. */
   agentRootfsTar?: string
+  /** Root directory for local engine state; the engine default when omitted. */
+  dataDir?: string
 }
 /** Configuration for creating a machine. */
 export interface MachineConfig {

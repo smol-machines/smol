@@ -266,6 +266,10 @@ type UnpublishOptions struct {
 
 // MachineConfig configures a new machine. Every field is optional locally.
 type MachineConfig struct {
+	// DataDir is the root directory for local engine state, including the machine
+	// database. It uses the engine default when empty. The embedded engine has one
+	// data root per process, so DataDir must not change after the first local operation.
+	DataDir string
 	// Name of the machine; generated when empty.
 	Name string
 	// Image is the base OCI image. Required on the cloud; optional locally,

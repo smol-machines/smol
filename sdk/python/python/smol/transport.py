@@ -266,7 +266,7 @@ def _bundled_paths() -> "tuple[Optional[str], str, Optional[str]]":
     )
 
 
-def _wire_bundled_native(native: Any) -> None:
+def _wire_bundled_native(native: Any, data_dir: Optional[str] = None) -> None:
     """Point the embedded engine at the boot helper + libs bundled in this wheel.
 
     Mirrors the Node SDK's ``assets.ts``. On macOS the hypervisor entitlement
@@ -287,7 +287,9 @@ def _wire_bundled_native(native: Any) -> None:
     lib_dir = os.environ.get("SMOLVM_LIB_DIR") or pkg
     tar = os.environ.get("SMOLVM_AGENT_ROOTFS_TAR") or rootfs_tar
     if hasattr(native, "configure_bundle"):
-        native.configure_bundle(boot_binary=boot, lib_dir=lib_dir, agent_rootfs_tar=tar)
+        native.configure_bundle(
+            boot_binary=boot, lib_dir=lib_dir, agent_rootfs_tar=tar, data_dir=data_dir
+        )
         return
     if boot:
         os.environ.setdefault("SMOLVM_BOOT_BINARY", boot)
@@ -315,15 +317,18 @@ def _wire_default_hardening() -> None:
 
 
 _native_wired = False
+_native_data_dir: Optional[str] = None
 _native_wire_lock = threading.Lock()
 
 
-def _load_native() -> Any:
+def _load_native(data_dir: Optional[str] = None) -> Any:
     """Load the native engine and register bundled assets on first local use.
 
     Bundle paths stay in-process so child processes do not inherit them.
     Explicit hardening overrides still use the environment."""
-    global _native_wired
+    global _native_wired, _native_data_dir
+    if data_dir == "":
+        raise InvalidConfigError("data_dir must not be empty")
     try:
         from . import _native  # type: ignore[attr-defined]
     except ImportError as e:  # native ext not built/installed for this platform
@@ -333,9 +338,15 @@ def _load_native() -> Any:
             "target via Machine.create(..., ConnectOptions(target='cloud'))."
         ) from e
     with _native_wire_lock:
+        if _native_wired and data_dir is not None and data_dir != _native_data_dir:
+            raise InvalidConfigError(
+                "data_dir cannot change after the local engine is initialized "
+                f"(currently {_native_data_dir or 'the default data directory'})"
+            )
         if not _native_wired:
-            _wire_bundled_native(_native)
+            _wire_bundled_native(_native, data_dir)
             _wire_default_hardening()
+            _native_data_dir = data_dir
             _native_wired = True
     return _native
 
@@ -2861,6 +2872,8 @@ def make_transport(config: MachineConfig, conn: Optional[ConnectOptions] = None)
     use_cloud = conn.target == "cloud" or (conn.target != "local" and bool(explicit_key))
 
     if use_cloud:
+        if config.data_dir is not None:
+            raise NotSupportedError("data_dir is local-only")
         if config.egress_interceptor is not None or conn.egress_interceptor is not None:
             raise NotSupportedError("egress_interceptor is local-only")
         # Cloud is settled: NOW the CLI's stored login may supply the
@@ -3003,7 +3016,7 @@ def make_transport(config: MachineConfig, conn: Optional[ConnectOptions] = None)
     binding = config.egress_interceptor or conn.egress_interceptor
     if binding is not None and config.forkable:
         raise InvalidConfigError("egress_interceptor cannot be combined with branchable machines")
-    native = _load_native()
+    native = _load_native(config.data_dir)
     name = config.name or _generate_name()
     transport: Optional[LocalTransport] = None
     try:

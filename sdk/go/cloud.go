@@ -1586,6 +1586,9 @@ func cloudNetwork(p NetworkPolicy) (map[string]any, error) {
 }
 
 func createCloud(ctx context.Context, cfg MachineConfig, c ConnectOptions) (transport, error) {
+	if cfg.DataDir != "" {
+		return nil, notSupported("DataDir is local-only.")
+	}
 	if cfg.EgressInterceptor != nil || c.EgressInterceptor != nil {
 		return nil, notSupported("EgressInterceptor is local-only.")
 	}

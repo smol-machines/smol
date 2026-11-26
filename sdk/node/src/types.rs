@@ -26,6 +26,8 @@ pub struct RuntimeAssets {
     pub agent_rootfs: Option<String>,
     /// Guest agent rootfs tarball to extract on first use.
     pub agent_rootfs_tar: Option<String>,
+    /// Root directory for local engine state; the engine default when omitted.
+    pub data_dir: Option<String>,
 }
 
 /// Configuration for creating a machine.

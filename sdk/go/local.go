@@ -832,6 +832,9 @@ func createLocal(ctx context.Context, cfg MachineConfig, c ConnectOptions) (tran
 	if cfg.AutoStop > 0 || cfg.TTL > 0 {
 		return nil, notSupported("AutoStop and TTL are cloud-only; stop or delete a local machine yourself.")
 	}
+	if err := loadNativeWithDataDir(cfg.DataDir); err != nil {
+		return nil, err
+	}
 	if err := localCall(ctx, "create", toNativeConfig(name, cfg), nil); err != nil {
 		return nil, err
 	}
