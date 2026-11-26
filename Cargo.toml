@@ -3,7 +3,7 @@
 # workspace. `__engine__` is the smolvm engine checkout the release workflow
 # drops in (path deps repoint there); it's its OWN workspace, so it must be
 # excluded or cargo errors with "multiple workspace roots in the same workspace".
-exclude = ["sdk", "__engine__"]
+exclude = ["sdk", "integrations", "__engine__"]
 # Shared libraries the CLI and the Rust SDK both build on.
 members = ["crates/*"]
 
