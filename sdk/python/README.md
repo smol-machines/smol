@@ -23,9 +23,10 @@ backend is chosen via `ConnectOptions` / `SMOL_CLOUD_TOKEN`. Mirrors the
 [Node SDK](../node).
 
 > **Supported platforms** (native *local* transport): macOS **Apple Silicon**, and
-> **Linux x64/arm64 with glibc ≥ 2.34** (RHEL 9, Ubuntu 22.04+, Debian 12, Amazon
-> Linux 2023; the wheel is tagged `manylinux_2_34`). The **cloud** transport works
-> anywhere the wheel installs. Not yet published: macOS Intel, and glibc < 2.34.
+> **Linux x64/arm64 with glibc ≥ 2.28** (RHEL 8+, Debian 10+, Ubuntu 18.10+, Amazon
+> Linux 2023; the wheel is tagged `manylinux_2_28`). The **cloud** transport works
+> anywhere the wheel installs. Not yet published: macOS Intel, and glibc < 2.28
+> (Amazon Linux 2).
 
 ```python
 from smol import Machine, MachineConfig, ResourceSpec

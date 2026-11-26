@@ -161,8 +161,8 @@ jobs:
           cache: npm
           cache-dependency-path: sdk/node/package-lock.json
       - run: npm ci
-      # Linux: build the addon + helper against glibc 2.31 (the engine's floor)
-      # via zig, so they load on glibc 2.31+ — not just the 2.39 build runner. The
+      # Linux: build the addon + helper against glibc 2.28 (the engine's floor)
+      # via zig, so they load on glibc 2.28+ — not just the 2.39 build runner. The
       # raw runner is glibc 2.39, which would silently break local transport on
       # e.g. Ubuntu 22.04. macOS has no glibc floor (Mach-O), so zig is Linux-only.
       - name: Set up zig (Linux glibc-floor cross-link)
@@ -185,7 +185,7 @@ jobs:
           # aarch64-linux only: rustc emits `-Wl,--fix-cortex-a53-843419`, which
           # zig 0.13's driver rejects and which breaks napi's `--zig` link. Shim
           # `zig` ahead on PATH to strip that one flag, keeping napi's own zig
-          # handling (CC/target translation + the glibc-2.31 pin) intact.
+          # handling (CC/target translation + the glibc-2.28 pin) intact.
           if [ "$RUNNER_OS" = "Linux" ] && [ "${{ matrix.target }}" = "aarch64-unknown-linux-gnu" ]; then
             export REAL_ZIG="$(command -v zig)"
             mkdir -p "$RUNNER_TEMP/zigshim"
@@ -194,7 +194,7 @@ jobs:
             export PATH="$RUNNER_TEMP/zigshim:$PATH"
           fi
           if [ "$RUNNER_OS" = "Linux" ]; then
-            npm run build:native -- --target ${{ matrix.target }} --zig --zig-abi-suffix=2.31
+            npm run build:native -- --target ${{ matrix.target }} --zig --zig-abi-suffix=2.28
           else
             npm run build:native -- --target ${{ matrix.target }}
           fi
@@ -208,10 +208,10 @@ jobs:
           LIBKRUN_BUNDLE: ${{ github.workspace }}/__engine__/${{ matrix.lib_subdir }}
           SMOLVM_LIB_DIR: ${{ github.workspace }}/__engine__/${{ matrix.lib_subdir }}
         # Both use --target so output is uniformly target/<triple>/release/smolvm.
-        # Linux: zigbuild pins glibc 2.31; macOS: native build.
+        # Linux: zigbuild pins glibc 2.28; macOS: native build.
         run: |
           if [ "$RUNNER_OS" = "Linux" ]; then
-            cargo zigbuild --release --target ${{ matrix.target }}.2.31 --bin smolvm --manifest-path __engine__/Cargo.toml
+            cargo zigbuild --release --target ${{ matrix.target }}.2.28 --bin smolvm --manifest-path __engine__/Cargo.toml
           else
             cargo build --release --target ${{ matrix.target }} --bin smolvm --manifest-path __engine__/Cargo.toml
           fi
@@ -292,6 +292,8 @@ jobs:
           cp binding.js binding.d.ts dist/
           node scripts/prepare-npm-packages.mjs artifacts --out npm-packages
           for d in npm-packages/*/; do echo "== $d" && ls -l "$d" "$d/native"; done
+          # The Linux packages' binaries must load on the engine's glibc floor.
+          for d in npm-packages/*linux*/; do ../../scripts/check-glibc-floor.sh 2.28 "$d"; done
           npm pack --dry-run 2>&1 | grep -E "dist/binding.js" >/dev/null
           if npm pack --dry-run 2>&1 | grep -E "\.node|native/"; then
             echo "main package must not carry native assets"; exit 1
@@ -493,7 +495,7 @@ jobs:
         run: perl -i -pe 's{\.\./\.\./\.\.}{../../__engine__}g' sdk/python/Cargo.toml
       # The local transport spawns a smol-vmm boot helper (the engine's `smolvm`
       # binary) — on macOS it carries the hypervisor entitlement (the python
-      # process can't). Build it on the runner host (glibc 2.31 via zig on Linux),
+      # process can't). Build it on the runner host (glibc 2.28 via zig on Linux),
       # bundled into the wheel by the staging step below.
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -514,7 +516,7 @@ jobs:
           SMOLVM_LIB_DIR: ${{ github.workspace }}/__engine__/${{ matrix.lib_subdir }}
         run: |
           if [ "$RUNNER_OS" = "Linux" ]; then
-            cargo zigbuild --release --target ${{ matrix.target }}.2.31 --bin smolvm --manifest-path __engine__/Cargo.toml
+            cargo zigbuild --release --target ${{ matrix.target }}.2.28 --bin smolvm --manifest-path __engine__/Cargo.toml
           else
             cargo build --release --target ${{ matrix.target }} --bin smolvm --manifest-path __engine__/Cargo.toml
           fi
@@ -561,38 +563,27 @@ jobs:
           working-directory: sdk/python
           target: ${{ matrix.target }}
           # Build _native in the manylinux_2_28 container, NOT on the glibc-2.39
-          # runner, so _native itself needs no newer glibc than the bundled
-          # engine, whose floor is 2.31; the relabel step below tags the wheel
-          # manylinux_2_31 to match that floor — Ubuntu 20.04+ / Debian 11+ /
-          # RHEL 9 / AL2023. Ignored on macOS.
+          # runner, so _native needs no newer glibc than the bundled engine,
+          # whose floor is also 2.28 — RHEL 8+ / Debian 10+ / Ubuntu 18.10+.
+          # maturin tags the wheel manylinux_2_28 itself. Ignored on macOS.
           manylinux: "2_28"
           # --skip-auditwheel: the wheel deliberately bundles libkrun/libkrunfw,
           # which auditwheel would otherwise re-vendor and break our $ORIGIN rpath.
-          # This leaves the wheel tagged linux_* (PyPI-rejected) — the next step
-          # relabels it to manylinux while leaving our bundled libs untouched.
           args: --release --out dist --skip-auditwheel
-      # PyPI rejects plain linux_* wheels. auditwheel repair relabels to a proper
-      # manylinux tag (auto-detected from _native's glibc symbol versions), and
-      # --exclude tells it to leave our bundled libkrun/libkrunfw in place rather
-      # than vendor+rename them (which would break the rpath). Linux only; the
-      # macOS wheel's macosx_* tag is already PyPI-acceptable.
-      - name: Relabel Linux wheel to manylinux (keep bundled libkrun)
+      # The tag is a promise pip keeps: a manylinux_2_28 wheel installs on a
+      # glibc 2.28 host. auditwheel is skipped above, so check every bundled
+      # binary (boot helper, libkrun, _native) against the tag here; one linked
+      # against a newer glibc installs fine and then cannot boot a VM.
+      - name: Check bundled binaries against the wheel's manylinux tag
         if: runner.os == 'Linux'
         working-directory: sdk/python
         run: |
-          python3 -m pip install --quiet auditwheel patchelf
-          mkdir -p dist_manylinux
           for whl in dist/*.whl; do
-            # The bundled engine needs glibc 2.31, so claim that, not the
-            # older floor auditwheel would detect from _native alone.
-            auditwheel repair --plat "manylinux_2_31_$(uname -m)" \
-              --exclude libkrun.so.1 --exclude libkrunfw.so.5 \
-              --exclude libkrun.so --exclude libkrunfw.so \
-              --exclude smol_virgl_stub.so \
-              -w dist_manylinux "$whl"
+            floor="$(basename "$whl" | grep -oE 'manylinux_2_[0-9]+' | sed 's/manylinux_//; s/_/./' | sort -V | head -1)"
+            [ -n "$floor" ] || { echo "::error::$whl has no manylinux tag"; exit 1; }
+            rm -rf wheel-check && mkdir wheel-check && unzip -q "$whl" -d wheel-check
+            ../../scripts/check-glibc-floor.sh "$floor" wheel-check
           done
-          rm -f dist/*.whl && mv dist_manylinux/*.whl dist/
-          echo "relabeled wheels:" && ls -1 dist/
       - uses: actions/upload-artifact@v4
         with:
           name: py-wheel-${{ matrix.target }}
