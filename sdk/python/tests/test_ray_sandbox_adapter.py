@@ -33,6 +33,7 @@ class FakeMachine:
         self.files: dict[str, bytes] = {}
         self.batches: list[list[str]] = []
         self.paused = False
+        self.stopped = False
         self.deleted = False
         self.exit_code = 0
 
@@ -63,6 +64,8 @@ class FakeMachine:
         return self.files[path]
 
     def state(self):
+        if self.stopped:
+            return "stopped"
         return "paused" if self.paused else "running"
 
     def pause(self):
@@ -234,3 +237,66 @@ def test_target_comes_from_the_environment(monkeypatch):
     monkeypatch.setenv(adapter.TARGET_ENV, "elsewhere")
     with pytest.raises(ValueError):
         adapter.SmolSandboxBackend()
+
+
+def test_exec_accepts_arguments_a_newer_ray_passes():
+    backend = local_backend()
+    sid = backend.create_sandbox(SandboxConfig(image="alpine"))
+    result = backend.exec_command(sid, ["true"], argument_from_a_newer_ray=1)
+    assert result.exit_code == 0
+
+
+@pytest.mark.skipif(
+    "output" not in adapter.ExecResult.__dataclass_fields__,
+    reason="this Ray has no combined exec output",
+)
+def test_combine_output_returns_one_stream_in_output():
+    backend = local_backend()
+    sid = backend.create_sandbox(SandboxConfig(image="alpine"))
+    result = backend.exec_command(sid, ["make", "test"], combine_output=True)
+    argv, _ = backend._machines[sid].commands[-1]
+    # stderr is merged into stdout inside the machine, so the order is kept.
+    assert argv == ["/bin/sh", "-c", 'exec "$@" 2>&1', "sh", "make", "test"]
+    assert result.output == b"out"
+    assert result.stdout == "" and result.stderr == ""
+
+
+def test_checkpoint_manifest_holds_only_fields_this_ray_defines(tmp_path):
+    backend = local_backend()
+    sid = backend.create_sandbox(SandboxConfig(image="alpine", workdir="/w"))
+    path = backend.checkpoint_sandbox(sid, str(tmp_path / "ck"))["checkpoint_path"]
+    saved = json.load(open(os.path.join(path, "manifest.json")))["config"]
+    fields = {f for f in SandboxConfig.__dataclass_fields__ if not f.startswith("_")}
+    assert set(saved) <= fields
+    assert saved["image"] == "alpine" and saved["workdir"] == "/w"
+
+
+def test_termination_reason_only_for_an_unexpected_stop():
+    backend = local_backend()
+    sid = backend.create_sandbox(SandboxConfig(image="alpine"))
+    assert backend.get_termination_reason(sid) is None
+    backend._machines[sid].stopped = True
+    assert backend.get_termination_reason(sid)
+    backend.delete_sandbox(sid)
+    assert backend.get_termination_reason(sid) is None
+    assert backend.get_termination_reason("never-created") is None
+
+
+def test_config_scratch_dir_and_mounts_of_an_owned_sandbox():
+    backend = local_backend()
+    sid = backend.create_sandbox(SandboxConfig(image="alpine"))
+    assert backend.get_config(sid).image == "alpine"
+    assert os.path.isdir(backend.sandbox_dir(sid))
+    assert backend.mount_points(sid) == []
+    with pytest.raises(SandboxNotFoundError):
+        backend.get_config("never-created")
+
+
+def test_commit_is_refused_before_anything_is_paused():
+    from ray.experimental.sandbox.exceptions import SandboxError
+
+    runtime = adapter._runtime_class()()
+    sid = runtime._backend.create_sandbox(SandboxConfig(image="alpine"))
+    with pytest.raises(SandboxError, match="not supported by the smol backend"):
+        runtime.commit(sid, "registry.example/x:y")
+    assert not runtime._backend._machines[sid].paused

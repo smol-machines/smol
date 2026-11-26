@@ -117,23 +117,27 @@ def _manifest(sandbox_id: str, config: SandboxConfig, cwd: str, leave_running: b
         "image": config.image,
         "cwd": cwd,
         "workdir": config.workdir,
-        "config": {
-            "image": config.image,
-            "cpu": config.cpu,
-            "memory": config.memory,
-            "network": config.network,
-            "readonly": config.readonly,
-            "shell": config.shell,
-            "rootless": config.rootless,
-            "env": config.env,
-            "workdir": config.workdir,
-            "capabilities": config.capabilities,
-            "dns": config.dns,
-        },
+        "config": _config_fields(config),
         "state_dir": "state",
         "fs_dir": "fs",
         "leave_running": leave_running,
     }
+
+
+def _config_fields(config: SandboxConfig) -> dict:
+    """The config's public fields that survive JSON, whatever this Ray version
+    defines (fields come and go between releases: ``readonly`` was removed)."""
+    out = {}
+    for name in getattr(config, "__dataclass_fields__", {}):
+        if name.startswith("_"):
+            continue
+        value = getattr(config, name, None)
+        try:
+            json.dumps(value)
+        except (TypeError, ValueError):
+            continue
+        out[name] = value
+    return out
 
 
 def _load_manifest(checkpoint_path: str) -> tuple[dict, str]:
@@ -246,6 +250,36 @@ class SmolSandboxBackend(BaseSandboxBackend):
         except SmolError:
             return SandboxStatus.TERMINATED
 
+    def get_termination_reason(self, sandbox_id: str) -> Optional[str]:
+        """Why a sandbox this backend still owns stopped on its own, or None if
+        it is running, was deleted, or is unknown."""
+        if sandbox_id not in self._machines:
+            return None
+        if self.get_status(sandbox_id) == SandboxStatus.TERMINATED:
+            return "smol machine stopped unexpectedly"
+        return None
+
+    def get_config(self, sandbox_id: str) -> SandboxConfig:
+        meta = self._sandbox_metadata.get(sandbox_id)
+        if meta is None:
+            raise SandboxNotFoundError(f"sandbox '{sandbox_id}' is not owned by this backend")
+        return meta["config"]
+
+    def sandbox_dir(self, sandbox_id: str) -> str:
+        """A host directory for this sandbox's scratch files."""
+        self.get_config(sandbox_id)
+        path = os.path.join("/tmp/ray/sandbox/smol", sandbox_id)
+        os.makedirs(path, exist_ok=True)
+        return path
+
+    def mount_points(self, sandbox_id: str) -> List[str]:
+        """Nothing is bind-mounted into a smol machine by this backend."""
+        self.get_config(sandbox_id)
+        return []
+
+    def export_rootfs_changes(self, sandbox_id: str, path: str, timeout: float = 1800.0) -> None:
+        raise SandboxError(_COMMIT_UNSUPPORTED)
+
     # ---- exec and files -----------------------------------------------------
 
     def exec_command(
@@ -257,6 +291,8 @@ class SmolSandboxBackend(BaseSandboxBackend):
         env: Optional[Dict[str, str]] = None,
         shell: Optional[str] = None,
         user: Optional[str] = None,
+        combine_output: bool = False,
+        **kwargs,
     ) -> ExecResult:
         machine = self._machine(sandbox_id)
         meta = self._sandbox_metadata[sandbox_id]
@@ -264,6 +300,9 @@ class SmolSandboxBackend(BaseSandboxBackend):
             argv = command
         else:
             argv = [shell or meta["config"].shell, "-c", command]
+        if combine_output:
+            # One stream, in the order the command wrote it, as gVisor returns it.
+            argv = ["/bin/sh", "-c", 'exec "$@" 2>&1', "sh", *argv]
         options = ExecOptions(
             env=env or None,
             workdir=cwd or meta.get("workdir"),
@@ -279,6 +318,15 @@ class SmolSandboxBackend(BaseSandboxBackend):
         duration = time.time() - start
         if timeout and result.exit_code == _TIMEOUT_EXIT and duration >= timeout:
             raise SandboxTimeoutError(f"smol exec timed out after {timeout}s")
+        if combine_output:
+            # Ray releases with `combine_output` also have ExecResult.output.
+            return ExecResult(
+                exit_code=result.exit_code,
+                stdout="",
+                stderr="",
+                duration_seconds=duration,
+                output=result.stdout_bytes or result.stdout.encode(),
+            )
         return ExecResult(
             exit_code=result.exit_code,
             stdout=_text(result.stdout_bytes, result.stdout),
@@ -454,6 +502,12 @@ class SmolSandboxBackend(BaseSandboxBackend):
 # ---- wiring into Ray ---------------------------------------------------------
 
 
+_COMMIT_UNSUPPORTED = (
+    "commit() is not supported by the smol backend: a smol machine is a VM, not "
+    "an overlay on a cached image. Use checkpoint()/restore() or ray_sandbox.branch()."
+)
+
+
 def _runtime_class():
     from ray.experimental.sandbox.runtime import SandboxRuntime
 
@@ -464,6 +518,11 @@ def _runtime_class():
             self._image_manager = _NoImageManager()
             self._backend = SmolSandboxBackend(image_manager=self._image_manager)
             self._ttl_timers = {}
+
+        def commit(self, instance_id, image, env=None, timeout_seconds=1800.0, **kwargs):
+            # Refuse before Ray's commit pauses the sandbox or reads an image cache.
+            self._backend.get_config(instance_id)
+            raise SandboxError(_COMMIT_UNSUPPORTED)
 
     return SmolSandboxRuntime
 
