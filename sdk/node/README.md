@@ -6,9 +6,9 @@ a separate `smol-vmm` helper (seccomp- and Landlock-confined on Linux), so a
 guest escape lands there and not in your application.
 
 > **Supported platforms** (native *local* transport): macOS **Apple Silicon**, and
-> **Linux x64/arm64 with glibc ≥ 2.34** (RHEL 9, Ubuntu 22.04+, Debian 12, Amazon
+> **Linux x64/arm64 with glibc ≥ 2.28** (RHEL 8+, Debian 10+, Ubuntu 18.10+, Amazon
 > Linux 2023). The **cloud** transport works anywhere the package installs.
-> Not yet prebuilt: macOS Intel, and Linux with glibc < 2.34.
+> Not yet prebuilt: macOS Intel, and Linux with glibc < 2.28 (Amazon Linux 2).
 >
 > The local engine for your platform (native addon, boot helper, hypervisor
 > libraries and guest rootfs) installs automatically as an optional dependency,
